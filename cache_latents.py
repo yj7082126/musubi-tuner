@@ -24,7 +24,13 @@ logging.basicConfig(level=logging.INFO)
 def show_image(image: Union[list[Union[Image.Image, np.ndarray], Union[Image.Image, np.ndarray]]]) -> int:
     import cv2
 
-    imgs = [image] if not isinstance(image, list) else [image[0], image[-1]]
+    imgs = (
+        [image]
+        if (isinstance(image, np.ndarray) and len(image.shape) == 3) or isinstance(image, Image.Image)
+        else [image[0], image[-1]]
+    )
+    if len(imgs) > 1:
+        print(f"Number of images: {len(image)}")
     for i, img in enumerate(imgs):
         if len(imgs) > 1:
             print(f"{'First' if i == 0 else 'Last'} image: {img.shape}")
@@ -35,6 +41,8 @@ def show_image(image: Union[list[Union[Image.Image, np.ndarray], Union[Image.Ima
         cv2.imshow("image", cv2_img)
         k = cv2.waitKey(0)
         cv2.destroyAllWindows()
+        if k == ord("q") or k == ord("d"):
+            return k
     return k
 
 
@@ -51,13 +59,18 @@ def show_console(
         back = getattr(Back, back.upper())
 
     k = None
-    imgs = [image] if not isinstance(image, list) else image
+    imgs = (
+        [image]
+        if (isinstance(image, np.ndarray) and len(image.shape) == 3) or isinstance(image, Image.Image)
+        else [image[0], image[-1]]
+    )
+    if len(imgs) > 1:
+        print(f"Number of images: {len(image)}")
     for i, img in enumerate(imgs):
         if len(imgs) > 1:
             print(f"{'First' if i == 0 else 'Last'} image: {img.shape}")
         else:
             print(f"Image: {img.shape}")
-        img = image if not isinstance(image, list) else image[0]
         pil_img = img if isinstance(img, Image.Image) else Image.fromarray(img)
         ascii_img = from_pillow_image(pil_img)
         ascii_img.to_terminal(columns=width, back=back)
