@@ -25,6 +25,7 @@ from hunyuan_model.vae import load_vae
 from hunyuan_model.models import load_transformer, get_rotary_pos_embed
 from modules.scheduling_flow_match_discrete import FlowMatchDiscreteScheduler
 from networks import lora
+from utils.model_utils import str_to_dtype
 
 import logging
 
@@ -268,7 +269,7 @@ def encode_input_prompt(prompt, args, device, fp8_llm=False, accelerator=None):
 
 
 def decode_latents(args, latents, device):
-    vae_dtype = torch.float16
+    vae_dtype = torch.float16 if args.vae_dtype is None else str_to_dtype(args.vae_dtype)
     vae, _, s_ratio, t_ratio = load_vae(vae_dtype=vae_dtype, device=device, vae_path=args.vae)
     vae.eval()
     # vae_kwargs = {"s_ratio": s_ratio, "t_ratio": t_ratio}
@@ -319,6 +320,7 @@ def parse_args():
 
     parser.add_argument("--dit", type=str, required=True, help="DiT checkpoint path or directory")
     parser.add_argument("--vae", type=str, required=True, help="VAE checkpoint path or directory")
+    parser.add_argument("--vae_dtype", type=str, default=None, help="data type for VAE, default is float16")
     parser.add_argument("--text_encoder1", type=str, required=True, help="Text Encoder 1 directory")
     parser.add_argument("--text_encoder2", type=str, required=True, help="Text Encoder 2 directory")
 
