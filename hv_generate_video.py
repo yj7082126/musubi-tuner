@@ -478,14 +478,22 @@ def main():
         else:
             latent_video_length = video_length
 
-        shape = (
-            num_videos_per_prompt,
-            num_channels_latents,
-            latent_video_length,
-            height // vae_scale_factor,
-            width // vae_scale_factor,
-        )
-        latents = randn_tensor(shape, generator=generator, device=device, dtype=dit_dtype)
+        # shape = (
+        #     num_videos_per_prompt,
+        #     num_channels_latents,
+        #     latent_video_length,
+        #     height // vae_scale_factor,
+        #     width // vae_scale_factor,
+        # )
+        # latents = randn_tensor(shape, generator=generator, device=device, dtype=dit_dtype)
+
+        # make first N frames to be the same
+        shape_or_frame = (num_videos_per_prompt, num_channels_latents, 1, height // vae_scale_factor, width // vae_scale_factor)
+        latents = []
+        for i in range(latent_video_length):
+            latents.append(randn_tensor(shape_or_frame, generator=generator, device=device, dtype=dit_dtype))
+        latents = torch.cat(latents, dim=2)
+
         # FlowMatchDiscreteScheduler does not have init_noise_sigma
 
         # Denoising loop

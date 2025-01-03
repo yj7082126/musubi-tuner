@@ -6,10 +6,16 @@ This repository provides scripts for training LoRA (Low-Rank Adaptation) models 
 
 __This repository is under development. Only image training has been verified.__
 
+### Recent Updates
+
+- 03, Jan, 2025: The noise initialization method during inference has changed. When the same seed is specified, the common frames will be the same even if the number of generated frames is different. Please note that the inference results will be different from before even with the same seed.
+
+(For example, when 25 frames are specified, the time length of the latent is 7, and when 45 frames are specified, the time length of the latent is 12, but the first 7 frames of both will have the same noise value when the same seed is specified.)
+
 ### Hardware Requirements
 
-- VRAM: 24GB or more (May work with 12GB+ but this is unverified)
-- Main Memory: 64GB or more recommended
+- VRAM: 16GB or more (May work with 12GB+ but this is unverified)
+- Main Memory: 64GB or more recommended, 32GB + swap may work
 
 ### Features
 
