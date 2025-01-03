@@ -323,8 +323,8 @@ def parse_args():
     parser.add_argument("--text_encoder2", type=str, required=True, help="Text Encoder 2 directory")
 
     # LoRA
-    parser.add_argument("--lora_weight", type=str, required=False, default=None, help="LoRA weight path")
-    parser.add_argument("--lora_multiplier", type=float, default=1.0, help="LoRA multiplier")
+    parser.add_argument("--lora_weight", type=str, nargs="*", required=False, default=None, help="LoRA weight path")
+    parser.add_argument("--lora_multiplier", type=float, nargs="*", default=1.0, help="LoRA multiplier")
 
     parser.add_argument("--prompt", type=str, required=True, help="prompt for generation")
     parser.add_argument("--video_size", type=int, nargs=2, default=[256, 256], help="video size")
@@ -416,15 +416,21 @@ def main():
         transformer.eval()
 
         # load LoRA weights
-        if args.lora_weight is not None:
-            logger.info(f"Loading LoRA weights from {args.lora_weight}")
-            weights_sd = load_file(args.lora_weight)
-            network = lora.create_network_from_weights_hunyuan_video(
-                args.lora_multiplier, weights_sd, unet=transformer, for_inference=True
-            )
-            logger.info("Merging LoRA weights to DiT model")
-            network.merge_to(None, transformer, weights_sd, device=device)
-            logger.info("LoRA weights loaded")
+        if args.lora_weight is not None and len(args.lora_weight) > 0:
+            for i, lora_weight in enumerate(args.lora_weight):
+                if args.lora_multiplier is not None and len(args.lora_multiplier) > i:
+                    lora_multiplier = args.lora_multiplier[i]
+                else:
+                    lora_multiplier = 1.0
+
+                logger.info(f"Loading LoRA weights from {lora_weight} with multiplier {lora_multiplier}")
+                weights_sd = load_file(lora_weight)
+                network = lora.create_network_from_weights_hunyuan_video(
+                    lora_multiplier, weights_sd, unet=transformer, for_inference=True
+                )
+                logger.info("Merging LoRA weights to DiT model")
+                network.merge_to(None, transformer, weights_sd, device=device)
+                logger.info("LoRA weights loaded")
 
         if blocks_to_swap > 0:
             logger.info(f"Casting model to {dit_weight_dtype}")
