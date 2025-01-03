@@ -4,7 +4,7 @@
 
 This repository provides scripts for training LoRA (Low-Rank Adaptation) models with HunyuanVideo.
 
-__This repository is under development. Only image training has been verified.__
+__This repository is under development.__
 
 ### Recent Updates
 
@@ -14,7 +14,8 @@ __This repository is under development. Only image training has been verified.__
 
 ### Hardware Requirements
 
-- VRAM: 16GB or more (May work with 12GB+ but this is unverified)
+- VRAM: 12GB or more recommended for image training, 24GB or more recommended for video training
+    - Depends on resolution, etc. For 12GB, use a resolution of 960x544 or lower and use memory-saving options such as `--blocks_to_swap`, `--fp8_llm`, etc.
 - Main Memory: 64GB or more recommended, 32GB + swap may work
 
 ### Features
@@ -111,7 +112,7 @@ accelerate launch --num_cpu_threads_per_process 1 --mixed_precision bf16 hv_trai
 
 For additional options, use `python hv_train_network.py --help` (note that many options are unverified).
 
-Specifying `--fp8_base` runs DiT in fp8 mode. Without this flag, mixed precision data type will be used. fp8 can significantly reduce memory consumption but may impact output quality.
+Specifying `--fp8_base` runs DiT in fp8 mode. Without this flag, mixed precision data type will be used. fp8 can significantly reduce memory consumption but may impact output quality. If `--fp8_base` is not specified, 24GB or more VRAM is recommended. Use `--blocks_to_swap` as needed.
 
 If you're running low on VRAM, use `--blocks_to_swap` to offload some blocks to CPU. Maximum value is 36.
 
