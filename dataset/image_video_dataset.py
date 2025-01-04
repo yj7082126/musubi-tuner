@@ -151,6 +151,12 @@ class ItemInfo:
 
 def save_latent_cache(item_info: ItemInfo, latent: torch.Tensor):
     assert latent.dim() == 4, "latent should be 4D tensor (frame, channel, height, width)"
+
+    # NaN check and show warning, replace NaN with 0
+    if torch.isnan(latent).any():
+        logger.warning(f"latent tensor has NaN: {item_info.item_key}, replace NaN with 0")
+        latent[torch.isnan(latent)] = 0
+
     metadata = {
         "architecture": "hunyuan_video",
         "width": f"{item_info.original_size[0]}",
