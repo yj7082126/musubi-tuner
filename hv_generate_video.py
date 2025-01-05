@@ -43,6 +43,15 @@ def clean_memory_on_device(device):
         torch.mps.empty_cache()
 
 
+def synchronize_device(device: torch.device):
+    if device.type == "cuda":
+        torch.cuda.synchronize()
+    elif device.type == "xpu":
+        torch.xpu.synchronize()
+    elif device.type == "mps":
+        torch.mps.synchronize()
+
+
 def save_videos_grid(videos: torch.Tensor, path: str, rescale=False, n_rows=1, fps=24):
     """save videos by video tensor
        copy from https://github.com/guoyww/AnimateDiff/blob/e92bd5671ba62c0d774a32951453e328018b7c5b/animatediff/utils/util.py#L61
@@ -440,7 +449,10 @@ def main():
                     lora_multiplier, weights_sd, unet=transformer, for_inference=True
                 )
                 logger.info("Merging LoRA weights to DiT model")
-                network.merge_to(None, transformer, weights_sd, device=device)
+                network.merge_to(None, transformer, weights_sd, device=device, non_blocking=True)
+
+                synchronize_device(device)
+
                 logger.info("LoRA weights loaded")
 
         if blocks_to_swap > 0:
