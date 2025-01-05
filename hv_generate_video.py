@@ -638,7 +638,7 @@ def main():
         videos = decode_latents(args, latents, device)
         for i, sample in enumerate(videos):
             sample = sample.unsqueeze(0)
-            video_path = f"{save_path}/{time_flag}_{seeds[i]}.mp4"
+            video_path = f"{save_path}/{time_flag}_{i}_{seeds[i]}.mp4"
             save_videos_grid(sample, video_path, fps=24)
             logger.info(f"Sample save to: {video_path}")
     elif output_type == "images":
@@ -646,7 +646,7 @@ def main():
         videos = decode_latents(args, latents, device)
         for i, sample in enumerate(videos):
             sample = sample.unsqueeze(0)
-            image_name = f"{time_flag}_{seeds[i]}"
+            image_name = f"{time_flag}_{i}_{seeds[i]}"
             save_images_grid(sample, save_path, image_name)
             logger.info(f"Sample images save to: {save_path}/{image_name}")
 
