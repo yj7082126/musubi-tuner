@@ -386,7 +386,7 @@ class NetworkTrainer:
         logger.info(f"cache Text Encoder outputs for sample prompt: {sample_prompts}")
         prompts = load_prompts(sample_prompts)
 
-        def encode_for_text_encoder(text_encoder):
+        def encode_for_text_encoder(text_encoder, is_llm=True):
             sample_prompts_te_outputs = {}  # (prompt) -> (embeds, mask)
             with accelerator.autocast(), torch.no_grad():
                 for prompt_dict in prompts:
@@ -437,7 +437,7 @@ class NetworkTrainer:
     def get_optimizer(self, args, trainable_params: list[torch.nn.Parameter]) -> tuple[str, str, torch.optim.Optimizer]:
         # adamw, adamw8bit, adafactor
 
-        optimizer_type = args.optimizer_type
+        optimizer_type = args.optimizer_type.lower()
 
         # split optimizer_type and optimizer_args
         optimizer_kwargs = {}

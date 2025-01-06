@@ -421,10 +421,13 @@ def main():
     dit_weight_dtype = torch.float8_e4m3fn if args.fp8 else dit_dtype
     logger.info(f"Using device: {device}, DiT precision: {dit_dtype}, weight precision: {dit_weight_dtype}")
 
+    original_base_names = None
     if args.latent_path is not None and len(args.latent_path) > 0:
+        original_base_names = []
         latents_list = []
         seeds = []
         for latent_path in args.latent_path:
+            original_base_names.append(os.path.splitext(os.path.basename(latent_path))[0])
             seed = 0
 
             if os.path.splitext(latent_path)[1] != ".safetensors":
@@ -638,16 +641,18 @@ def main():
         # save video
         videos = decode_latents(args, latents, device)
         for i, sample in enumerate(videos):
+            original_name = "" if original_base_names is None else f"_{original_base_names[i]}"
             sample = sample.unsqueeze(0)
-            video_path = f"{save_path}/{time_flag}_{seeds[i]}.mp4"
+            video_path = f"{save_path}/{time_flag}_{i}_{seeds[i]}{original_name}.mp4"
             save_videos_grid(sample, video_path, fps=24)
             logger.info(f"Sample save to: {video_path}")
     elif output_type == "images":
         # save images
         videos = decode_latents(args, latents, device)
         for i, sample in enumerate(videos):
+            original_name = "" if original_base_names is None else f"_{original_base_names[i]}"
             sample = sample.unsqueeze(0)
-            image_name = f"{time_flag}_{seeds[i]}"
+            image_name = f"{time_flag}_{i}_{seeds[i]}{original_name}"
             save_images_grid(sample, save_path, image_name)
             logger.info(f"Sample images save to: {save_path}/{image_name}")
 
