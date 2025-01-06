@@ -968,7 +968,7 @@ class NetworkTrainer:
             raise ValueError(
                 f"either --sdpa, --flash-attn, --sage-attn or --xformers must be specified / --sdpa, --flash-attn, --sage-attn, --xformersのいずれかを指定してください"
             )
-        transformer = load_transformer(args.dit, attn_mode, loading_device, dit_weight_dtype)
+        transformer = load_transformer(args.dit, attn_mode, args.split_attn, loading_device, dit_weight_dtype)
         transformer.eval()
         transformer.requires_grad_(False)
 
@@ -1593,6 +1593,13 @@ def setup_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="use xformers for CrossAttention, requires xformers / CrossAttentionにxformersを使う、xformersが必要",
     )
+    parser.add_argument(
+        "--split_attn",
+        action="store_true",
+        help="use split attention for attention calculation (split batch size=1, affects memory usage and speed)"
+        " / attentionを分割して計算する（バッチサイズ=1に分割、メモリ使用量と速度に影響）",
+    )
+
     parser.add_argument("--max_train_steps", type=int, default=1600, help="training steps / 学習ステップ数")
     parser.add_argument(
         "--max_train_epochs",
