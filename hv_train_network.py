@@ -18,6 +18,10 @@ import accelerate
 import numpy as np
 from packaging.version import Version
 
+import torchvision
+from einops import rearrange
+import av
+
 import huggingface_hub
 import toml
 
@@ -34,7 +38,7 @@ from diffusers.optimization import (
 from transformers.optimization import SchedulerType, TYPE_TO_SCHEDULER_FUNCTION
 
 from dataset import config_utils
-from hunyuan_model.models import load_transformer, get_rotary_pos_embed_by_shape
+from hunyuan_model.models import load_transformer, get_rotary_pos_embed, get_rotary_pos_embed_by_shape
 import hunyuan_model.text_encoder as text_encoder_module
 from hunyuan_model.vae import load_vae
 import hunyuan_model.vae as vae_module
@@ -743,10 +747,260 @@ class NetworkTrainer:
         accelerator.load_state(dirname)
 
         return True
+        
+    def decode_latents(self, args, vae, latents, device):
+        expand_temporal_dim = False
+        if len(latents.shape) == 4:
+            latents = latents.unsqueeze(2)
+            expand_temporal_dim = True
+        elif len(latents.shape) == 5:
+            pass
+        else:
+            raise ValueError(f"Only support latents with shape (b, c, h, w) or (b, c, f, h, w), but got {latents.shape}.")
 
-    def sample_images(self, accelerator, args, epoch, global_step, device, vae, transformer, sample_parameters):
-        pass
+        if hasattr(vae.config, "shift_factor") and vae.config.shift_factor:
+            latents = latents / vae.config.scaling_factor + vae.config.shift_factor
+        else:
+            latents = latents / vae.config.scaling_factor
 
+        latents = latents.to(device=device, dtype=vae.dtype)
+
+        if args.vae_spatial_tile_sample_min_size is not None:
+            vae.enable_spatial_tiling(True)
+            vae.tile_sample_min_size = args.vae_spatial_tile_sample_min_size
+            vae.tile_latent_min_size = args.vae_spatial_tile_sample_min_size // 8
+        else:
+            vae.enable_spatial_tiling(True)
+
+        with torch.no_grad():
+            image = vae.decode(latents, return_dict=False)[0]
+
+        if expand_temporal_dim or image.shape[2] == 1:
+            image = image.squeeze(2)
+
+        image = (image / 2 + 0.5).clamp(0, 1)
+        image = image.cpu().float()
+
+        return image
+        
+    def save_videos_grid(self, videos: torch.Tensor, path: str, rescale=False, n_rows=1, fps=24):
+        """Save videos by video tensor.
+
+        Args:
+            videos (torch.Tensor): Video tensor predicted by the model.
+            path (str): Path to save video.
+            rescale (bool, optional): Rescale the video tensor from [-1, 1] to [0, 1]. Defaults to False.
+            n_rows (int, optional): Number of rows in the grid. Defaults to 1.
+            fps (int, optional): Video save frames per second. Defaults to 24.
+        """
+        videos = rearrange(videos, "b c t h w -> t b c h w")
+        outputs = []
+        for x in videos:
+            x = torchvision.utils.make_grid(x, nrow=n_rows)
+            x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
+            if rescale:
+                x = (x + 1.0) / 2.0  # Convert from [-1, 1] to [0, 1]
+            x = torch.clamp(x, 0, 1)
+            x = (x * 255).numpy().astype(np.uint8)
+            outputs.append(x)
+
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+
+        height, width, _ = outputs[0].shape
+
+        # Create output container
+        container = av.open(path, mode="w")
+
+        # Create video stream
+        codec = "libx264"
+        pixel_format = "yuv420p"
+        stream = container.add_stream(codec, rate=fps)
+        stream.width = width
+        stream.height = height
+        stream.pix_fmt = pixel_format
+        stream.bit_rate = 4000000  # 4 Mbit/s
+
+        for frame_array in outputs:
+            frame = av.VideoFrame.from_ndarray(frame_array, format="rgb24")
+            packets = stream.encode(frame)
+            for packet in packets:
+                container.mux(packet)
+
+        for packet in stream.encode():
+            container.mux(packet)
+
+        container.close()
+    
+    def save_images_grid(videos: torch.Tensor, parent_dir: str, image_name: str, rescale: bool = False, n_rows: int = 1):
+        videos = rearrange(videos, "b c t h w -> t b c h w")
+        outputs = []
+        for x in videos:
+            x = torchvision.utils.make_grid(x, nrow=n_rows)
+            x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
+            if rescale:
+                x = (x + 1.0) / 2.0  # -1,1 -> 0,1
+            x = torch.clamp(x, 0, 1)
+            x = (x * 255).numpy().astype(np.uint8)
+            outputs.append(x)
+
+        output_dir = os.path.join(parent_dir, image_name)
+        os.makedirs(output_dir, exist_ok=True)
+        for i, x in enumerate(outputs):
+            image_path = os.path.join(output_dir, f"{image_name}_{i:03d}.png")
+            image = Image.fromarray(x)
+            image.save(image_path)
+
+    def sample_images(self, accelerator, args, epoch, global_step, device, vae, VAE_VER, transformer, sample_parameters, dit_dtype):
+        # Only run on the main process
+        if not accelerator.is_main_process:
+            return
+
+        logger = logging.getLogger(__name__)
+        logger.info(f"Generating sample images at step {global_step}")
+        # Use the unwrapped model
+        model_to_sample = accelerator.unwrap_model(transformer)
+        
+        # Store original states before modifying
+        original_training_state = model_to_sample.training
+        original_gradient_checkpointing_state = model_to_sample.gradient_checkpointing
+
+        # Now modify the model for sampling
+        model_to_sample.eval()
+        # Disable gradient checkpointing for sampling
+        model_to_sample.disable_gradient_checkpointing()
+
+        # Move VAE to the appropriate device for sampling
+        vae.to(device)
+        vae.eval()
+
+        # Prepare scheduler
+        scheduler = FlowMatchDiscreteScheduler(shift=args.discrete_flow_shift, reverse=True, solver="euler")
+
+        # Number of inference steps for sampling
+        num_inference_steps = args.infer_steps if hasattr(args, 'infer_steps') else 50
+        scheduler.set_timesteps(num_inference_steps, device=device)
+        timesteps = scheduler.timesteps
+
+        # Wrap the outer loop with tqdm to track progress over prompts
+        for prompt_idx, prompt_dict in enumerate(tqdm(sample_parameters, desc='Sampling prompts')):
+            # Get embeddings
+            prompt_embeds = prompt_dict['llm_embeds'].to(device=device, dtype=dit_dtype)
+            prompt_mask = prompt_dict['llm_mask'].to(device=device)
+            prompt_embeds_2 = prompt_dict['clipL_embeds'].to(device=device, dtype=dit_dtype)
+            
+            # Use lower values during sampling
+            default_height = 256  # Set desired default height
+            default_width = 256   # Set desired default width
+            default_video_length = 5  # Set desired default video length
+
+            # Extract parameters with defaults
+            height = prompt_dict.get('height', default_height)
+            width = prompt_dict.get('width', default_width)
+            video_length = prompt_dict.get('frame_count', default_video_length)
+            
+            # Seed
+            seed = prompt_dict.get('seed', None)
+            if seed is None:
+                seed = random.randint(0, 2**32 - 1)
+            generator = torch.Generator(device=device).manual_seed(seed)
+
+            num_channels_latents = 16  # transformer.config.in_channels
+            vae_scale_factor = 2 ** (4 - 1)  # Assuming 4 VAE blocks
+
+            # Calculate latent video length based on VAE version
+            if "884" in VAE_VER:
+                latent_video_length = (video_length - 1) // 4 + 1
+            elif "888" in VAE_VER:
+                latent_video_length = (video_length - 1) // 8 + 1
+            else:
+                latent_video_length = video_length
+
+            # Initialize latents
+            shape_or_frame = (
+                1,
+                num_channels_latents,
+                1,
+                height // vae_scale_factor,
+                width // vae_scale_factor,
+            )
+            latents = []
+            for _ in range(latent_video_length):
+                latents.append(torch.randn(shape_or_frame, generator=generator, device=device, dtype=dit_dtype))
+            latents = torch.cat(latents, dim=2)
+
+            # Guidance scale
+            embedded_guidance_scale = args.embedded_cfg_scale if hasattr(args, 'embedded_cfg_scale') else 6.0
+            guidance_expand = torch.tensor([embedded_guidance_scale * 1000.0], dtype=torch.float32, device=device).to(dit_dtype)
+
+            # Get rotary positional embeddings
+            freqs_cos, freqs_sin = get_rotary_pos_embed(VAE_VER, transformer, video_length, height, width)
+            freqs_cos = freqs_cos.to(device=device, dtype=dit_dtype)
+            freqs_sin = freqs_sin.to(device=device, dtype=dit_dtype)
+
+            num_warmup_steps = len(timesteps) - num_inference_steps * scheduler.order
+
+            # Wrap the inner loop with tqdm to track progress over timesteps
+            with torch.no_grad():
+                for i, t in enumerate(tqdm(timesteps, desc=f'Sampling timesteps for prompt {prompt_idx+1}/{len(sample_parameters)}')):
+                    latents = scheduler.scale_model_input(latents, t)
+
+                    noise_pred = model_to_sample(
+                        latents,
+                        t.repeat(latents.shape[0]).to(device=device, dtype=dit_dtype),
+                        text_states=prompt_embeds,
+                        text_mask=prompt_mask,
+                        text_states_2=prompt_embeds_2,
+                        freqs_cos=freqs_cos,
+                        freqs_sin=freqs_sin,
+                        guidance=guidance_expand,
+                        return_dict=True,
+                    )["x"]
+                        
+
+                    # Compute the previous noisy sample x_t -> x_t-1
+                    latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+
+            # Move latents to CPU and decode
+            latents = latents.detach().cpu()
+            video = self.decode_latents(args, vae, latents, device)
+
+            # Save video
+            prompt_enum = prompt_dict.get('enum', prompt_idx)
+            prompt_seed = seed
+            os.makedirs(args.output_dir, exist_ok=True)
+            save_path = os.path.join(args.output_dir, f"sample_epoch{epoch}_step{global_step}_{prompt_enum}_{prompt_seed}.mp4")
+            self.save_videos_grid(video, save_path)
+
+            # Clean up to free memory
+            del latents
+            del video
+            del noise_pred
+            del t
+            del freqs_cos
+            del freqs_sin
+            del guidance_expand
+            del prompt_embeds
+            del prompt_mask
+            del prompt_embeds_2
+            del scheduler
+            gc.collect()
+            torch.cuda.empty_cache()
+
+        # Move models back to initial state
+        vae.to('cpu')
+        # Restore model states
+        if original_training_state:
+            model_to_sample.train()
+        else:
+            model_to_sample.eval()
+
+        if original_gradient_checkpointing_state:
+            model_to_sample.enable_gradient_checkpointing()
+        else:
+            model_to_sample.disable_gradient_checkpointing()
+
+        clean_memory_on_device(device)
+    
     def get_noisy_model_input_and_timesteps(
         self,
         args: argparse.Namespace,
@@ -905,6 +1159,14 @@ class NetworkTrainer:
         user_config = config_utils.load_user_config(args.dataset_config)
         blueprint = blueprint_generator.generate(user_config, args)
         train_dataset_group = config_utils.generate_dataset_group_by_blueprint(blueprint.dataset_group, training=True)
+        
+        # Extract resolution from dataset config
+        args.resolution = user_config.get('general', {}).get('resolution', [640, 480])
+
+        # Extract video_length from dataset config
+        args.video_length = max(
+            max(dataset.get('target_frames', [16])) for dataset in user_config.get('datasets', [{}])
+        )
 
         current_epoch = Value("i", 0)
         current_step = Value("i", 0)
@@ -930,14 +1192,13 @@ class NetworkTrainer:
         vae_dtype = torch.float16 if args.vae_dtype is None else model_utils.str_to_dtype(args.vae_dtype)
 
         # get embedding for sampling images
-        sample_parameters = vae = None
+        sample_parameters = vae = VAE_VER = None
         if args.sample_prompts:
             sample_parameters = self.process_sample_prompts(
                 args, accelerator, args.sample_prompts, args.text_encoder1, args.text_encoder2, args.fp8_llm
             )
-
             # Load VAE model for sampling images: VAE is loaded to cpu to save gpu memory
-            vae, _, s_ratio, t_ratio = load_vae(vae_dtype=vae_dtype, device="cpu", vae_path=args.vae)
+            vae, VAE_VER, s_ratio, t_ratio = load_vae(vae_dtype=vae_dtype, device="cpu", vae_path=args.vae)
             vae.requires_grad_(False)
             vae.eval()
 
@@ -1330,7 +1591,8 @@ class NetworkTrainer:
 
         # For --sample_at_first
         optimizer_eval_fn()
-        self.sample_images(accelerator, args, 0, global_step, accelerator.device, vae, transformer, sample_parameters)
+        if sample_parameters is not None:
+            self.sample_images(accelerator, args, 0, global_step, accelerator.device, vae, VAE_VER, transformer, sample_parameters, dit_dtype)
         optimizer_train_fn()
         if len(accelerator.trackers) > 0:
             # log empty object to commit the sample images to wandb
@@ -1455,26 +1717,21 @@ class NetworkTrainer:
                     progress_bar.update(1)
                     global_step += 1
 
-                    optimizer_eval_fn()
-                    self.sample_images(
-                        accelerator, args, None, global_step, accelerator.device, vae, transformer, sample_parameters
-                    )
-
-                    # 指定ステップごとにモデルを保存
-                    if args.save_every_n_steps is not None and global_step % args.save_every_n_steps == 0:
-                        accelerator.wait_for_everyone()
-                        if accelerator.is_main_process:
-                            ckpt_name = train_utils.get_step_ckpt_name(args.output_name, global_step)
-                            save_model(ckpt_name, accelerator.unwrap_model(network), global_step, epoch)
-
-                            if args.save_state:
-                                train_utils.save_and_remove_state_stepwise(args, accelerator, global_step)
-
-                            remove_step_no = train_utils.get_remove_step_no(args, global_step)
-                            if remove_step_no is not None:
-                                remove_ckpt_name = train_utils.get_step_ckpt_name(args.output_name, remove_step_no)
-                                remove_model(remove_ckpt_name)
-                    optimizer_train_fn()
+                    if args.sample_every_n_steps is not None and global_step % args.sample_every_n_steps == 0:
+                        optimizer_eval_fn()  # Switch optimizer to evaluation mode if necessary
+                        self.sample_images(
+                            accelerator,
+                            args,
+                            epoch,
+                            global_step,
+                            accelerator.device,
+                            vae,
+                            VAE_VER,
+                            transformer,
+                            sample_parameters,
+                            dit_dtype
+                        )
+                        optimizer_train_fn()  # Switch optimizer back to training mode if necessary
 
                 current_loss = loss.detach().item()
                 loss_recorder.add(epoch=epoch, step=step, loss=current_loss)
@@ -1516,7 +1773,7 @@ class NetworkTrainer:
                     if args.save_state:
                         train_utils.save_and_remove_state_on_epoch_end(args, accelerator, epoch + 1)
 
-            self.sample_images(accelerator, args, epoch + 1, global_step, accelerator.device, vae, transformer, sample_parameters)
+            self.sample_images(accelerator, args, 0, global_step, accelerator.device, vae, VAE_VER, transformer, sample_parameters, dit_dtype)
             optimizer_train_fn()
 
             # end of epoch
@@ -2096,6 +2353,21 @@ def setup_parser() -> argparse.ArgumentParser:
         "--async_upload",
         action="store_true",
         help="upload to huggingface asynchronously / huggingfaceに非同期でアップロードする",
+    )
+    
+    parser.add_argument(
+        "--resolution",
+        type=int,
+        nargs=2,
+        default=None,
+        help="Resolution of images as width and height (e.g., --resolution 640 480)"
+    )
+
+    parser.add_argument(
+        "--video_length",
+        type=int,
+        default=None,
+        help="Length of the video in frames (e.g., --video_length 45)"
     )
 
     return parser
