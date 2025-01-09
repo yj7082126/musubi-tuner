@@ -49,7 +49,28 @@ try:
 except:
     pass
 
-VIDEO_EXTENSIONS = [".mp4", ".avi", ".mov", ".webm", ".MP4", ".AVI", ".MOV", ".WEBM"]  # some of them are not tested
+VIDEO_EXTENSIONS = [
+    ".mp4",
+    ".webm",
+    ".avi",
+    ".mkv",
+    ".mov",
+    ".flv",
+    ".wmv",
+    ".m4v",
+    ".mpg",
+    ".mpeg",
+    ".MP4",
+    ".WEBM",
+    ".AVI",
+    ".MKV",
+    ".MOV",
+    ".FLV",
+    ".WMV",
+    ".M4V",
+    ".MPG",
+    ".MPEG",
+]  # some of them are not tested
 
 ARCHITECTURE_HUNYUAN_VIDEO = "hv"
 
