@@ -775,7 +775,8 @@ class NetworkTrainer:
         with torch.no_grad():
             image = vae.decode(latents, return_dict=False)[0]
 
-        if expand_temporal_dim or image.shape[2] == 1:
+        # Only squeeze the time dimension if it was artificially added
+        if expand_temporal_dim:
             image = image.squeeze(2)
 
         image = (image / 2 + 0.5).clamp(0, 1)
@@ -873,16 +874,15 @@ class NetworkTrainer:
         vae.to(device)
         vae.eval()
 
-        # Prepare scheduler
-        scheduler = FlowMatchDiscreteScheduler(shift=args.discrete_flow_shift, reverse=True, solver="euler")
-
-        # Number of inference steps for sampling
-        num_inference_steps = args.infer_steps if hasattr(args, 'infer_steps') else 50
-        scheduler.set_timesteps(num_inference_steps, device=device)
-        timesteps = scheduler.timesteps
-
         # Wrap the outer loop with tqdm to track progress over prompts
         for prompt_idx, prompt_dict in enumerate(tqdm(sample_parameters, desc='Sampling prompts')):
+            # Prepare scheduler for each prompt
+            scheduler = FlowMatchDiscreteScheduler(shift=args.discrete_flow_shift, reverse=True, solver="euler")
+            # Number of inference steps for sampling
+            num_inference_steps = args.infer_steps if hasattr(args, 'infer_steps') else 50
+            scheduler.set_timesteps(num_inference_steps, device=device)
+            timesteps = scheduler.timesteps
+
             # Get embeddings
             prompt_embeds = prompt_dict['llm_embeds'].to(device=device, dtype=dit_dtype)
             prompt_mask = prompt_dict['llm_mask'].to(device=device)
@@ -891,7 +891,7 @@ class NetworkTrainer:
             # Use lower values during sampling
             default_height = 256  # Set desired default height
             default_width = 256   # Set desired default width
-            default_video_length = 5  # Set desired default video length
+            default_video_length = 1  # Set desired default video length
 
             # Extract parameters with defaults
             height = prompt_dict.get('height', default_height)
@@ -955,7 +955,6 @@ class NetworkTrainer:
                         guidance=guidance_expand,
                         return_dict=True,
                     )["x"]
-                        
 
                     # Compute the previous noisy sample x_t -> x_t-1
                     latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]
@@ -968,7 +967,7 @@ class NetworkTrainer:
             prompt_enum = prompt_dict.get('enum', prompt_idx)
             prompt_seed = seed
             os.makedirs(args.output_dir, exist_ok=True)
-            save_path = os.path.join(args.output_dir, f"sample_epoch{epoch}_step{global_step}_{prompt_enum}_{prompt_seed}.mp4")
+            save_path = os.path.join(args.output_dir, 'samples', f"sample_epoch{epoch}_step{global_step}_{prompt_enum}_{prompt_seed}.mp4")
             self.save_videos_grid(video, save_path)
 
             # Clean up to free memory
@@ -982,7 +981,7 @@ class NetworkTrainer:
             del prompt_embeds
             del prompt_mask
             del prompt_embeds_2
-            del scheduler
+            del scheduler  # Optional
             gc.collect()
             torch.cuda.empty_cache()
 
