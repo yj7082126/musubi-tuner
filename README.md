@@ -8,6 +8,14 @@ __This repository is under development.__
 
 ### Recent Updates
 
+- 10, Jan, 2025
+    - Fixed a bug where `--split_attn` was applied even when not specified.
+    - xformers is now available for training and inference. `--split_attn` is required when using xformers.
+    - Fixed a bug in `flash` mode and confirmed operation. `--split_attn` can now be specified during inference for `flash` mode.
+    - A simple speed comparison during training showed that for training with 1280x720 resolution images, batch size=3, RTX 4090, and Windows 10, the order of speed was `flash` > `flash` + `--split_attn` == `xformers` + `--split_attn` > `sdpa` > `sdpa` + `--split_attn` (`flash` was the fastest).
+        - `sdpa` was about 12% slower than `flash`, and `xformers` + `--split_attn` was about 4% slower than `flash`.
+    - During inference, `flash` >= `sageattn` > `xformers` > `sdpa` (all with `--split_attn`). However, the speed difference between `sdpa` and `flash` is about 10%. Memory usage was almost the same.
+
 - 08, Jan, 2025
     - __Important Update__: Fixed a bug where latents were scaled twice during caching and training. Please re-run `cache_latents.py` (without specifying `--skip_existing`) to re-cache latents.
 
@@ -151,7 +159,9 @@ If you're running low on VRAM, use `--blocks_to_swap` to offload some blocks to 
 
 (The idea of block swap is based on the implementation by 2kpr. Thanks again to 2kpr.)
 
-Use `--sdpa` for PyTorch's scaled dot product attention, or `--flash_attn` for FlashAttention (untested). `--sage_attn` uses SageAttention, but SageAttention is not yet supported for training and may not work correctly.
+Use `--sdpa` for PyTorch's scaled dot product attention. Use `--flash_attn` for [FlashAttention](https://github.com/Dao-AILab/flash-attention). Use `--xformers` for xformers, but specify `--split_attn` when using xformers. Use `--sage_attn` for SageAttention, but SageAttention is not yet supported for training and will not work correctly.
+
+`--split_attn` processes attention in chunks. Speed may be slightly reduced, but VRAM usage is slightly reduced.
 
 Sample video generation is not yet implemented.
 
@@ -182,9 +192,9 @@ Specifying `--fp8` runs DiT in fp8 mode. fp8 can significantly reduce memory con
 
 If you're running low on VRAM, use `--blocks_to_swap` to offload some blocks to CPU. Maximum value is 38.
 
-For `--attn_mode`, specify either `flash`, `torch`, `sageattn`, or `sdpa` (same as `torch`). These correspond to FlashAttention, scaled dot product attention, and SageAttention respectively. Default is `torch`. SageAttention is effective for VRAM reduction.
+For `--attn_mode`, specify either `flash`, `torch`, `sageattn`, `xformers`, or `sdpa` (same as `torch`). These correspond to FlashAttention, scaled dot product attention, SageAttention, and xformers, respectively. Default is `torch`. SageAttention is effective for VRAM reduction.
 
-Specifing `--split_attn` will process attention in chunks. Inference with SageAttention is expected to be about 10% faster. Cannot be specified when `attn_mode` is `flash`.
+Specifing `--split_attn` will process attention in chunks. Inference with SageAttention is expected to be about 10% faster.
 
 For `--output_type`, specify either `both`, `latent`, `video` or `images`. `both` outputs both latents and video. Recommended to use `both` in case of Out of Memory errors during VAE processing. You can specify saved latents with `--latent_path` and use `--output_type video` (or `images`) to only perform VAE decoding.
 

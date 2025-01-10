@@ -749,20 +749,19 @@ class HYVideoDiffusionTransformer(nn.Module):  # ModelMixin, ConfigMixin):
         max_seqlen_kv = max_seqlen_q
 
         attn_mask = total_len = None
+        if self.split_attn or self.attn_mode == "torch":
+            # calculate text length and total length
+            text_len = text_mask.sum(dim=1)  #  (bs, )
+            total_len = img_seq_len + text_len  # (bs, )
         if self.attn_mode == "torch" and not self.split_attn:
             # initialize attention mask: bool tensor for sdpa, (b, 1, n, n)
             bs = img.shape[0]
             attn_mask = torch.zeros((bs, 1, max_seqlen_q, max_seqlen_q), dtype=torch.bool, device=text_mask.device)
 
-            # calculate text length and total length
-            text_len = text_mask.sum(dim=1)  #  (bs, )
-            total_len = img_seq_len + text_len  # (bs, )
-
-            # set attention mask
+            # set attention mask with total_len
             for i in range(bs):
                 attn_mask[i, :, : total_len[i], : total_len[i]] = True
-        else:
-            total_len = text_mask.sum(dim=1) + img_seq_len  # (bs, )
+            total_len = None  # means we don't use split_attn
 
         freqs_cis = (freqs_cos, freqs_sin) if freqs_cos is not None else None
         # --------------------- Pass through DiT blocks ------------------------
