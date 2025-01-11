@@ -1238,8 +1238,8 @@ class NetworkTrainer:
             logger.info(f"calculate hash for DiT model: {args.dit}")
             sd_model_name = args.dit
             if os.path.exists(sd_model_name):
-                metadata["ss_sd_model_hash"] = model_utils.model_hash(sd_model_name)
-                metadata["ss_new_sd_model_hash"] = model_utils.calculate_sha256(sd_model_name)
+                # metadata["ss_sd_model_hash"] = model_utils.model_hash(sd_model_name)
+                # metadata["ss_new_sd_model_hash"] = model_utils.calculate_sha256(sd_model_name)
                 sd_model_name = os.path.basename(sd_model_name)
             metadata["ss_sd_model_name"] = sd_model_name
 
@@ -1247,8 +1247,8 @@ class NetworkTrainer:
             logger.info(f"calculate hash for VAE model: {args.vae}")
             vae_name = args.vae
             if os.path.exists(vae_name):
-                metadata["ss_vae_hash"] = model_utils.model_hash(vae_name)
-                metadata["ss_new_vae_hash"] = model_utils.calculate_sha256(vae_name)
+                # metadata["ss_vae_hash"] = model_utils.model_hash(vae_name)
+                # metadata["ss_new_vae_hash"] = model_utils.calculate_sha256(vae_name)
                 vae_name = os.path.basename(vae_name)
             metadata["ss_vae_name"] = vae_name
 

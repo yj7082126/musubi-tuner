@@ -8,7 +8,11 @@ __This repository is under development.__
 
 ### Recent Updates
 
-- 10, Jan, 2025
+
+- Jan 11, 2025
+    - Removed the hash values of the models to be trained (DiT, VAE) from the metadata saved in LoRA. The hash values are almost unused and take time to compute. If you encounter any issues, please let us know.
+
+- Jan 10, 2025
     - Fixed a bug where `--split_attn` was applied even when not specified.
     - xformers is now available for training and inference. `--split_attn` is required when using xformers.
     - Fixed a bug in `flash` mode and confirmed operation. `--split_attn` can now be specified during inference for `flash` mode.
@@ -16,20 +20,20 @@ __This repository is under development.__
         - `sdpa` was about 12% slower than `flash`, and `xformers` + `--split_attn` was about 4% slower than `flash`.
     - During inference, `flash` >= `sageattn` > `xformers` > `sdpa` (all with `--split_attn`). However, the speed difference between `sdpa` and `flash` is about 10%. Memory usage was almost the same.
 
-- 08, Jan, 2025
+- Jan 08, 2025
     - __Important Update__: Fixed a bug where latents were scaled twice during caching and training. Please re-run `cache_latents.py` (without specifying `--skip_existing`) to re-cache latents.
 
-- 06, Jan, 2025
+- Jan 06, 2025
     - Added `--split_attn` option to `hv_train_network.py` and `hv_generate_video.py` to process attention in chunks. Inference with SageAttention is expected to be about 10% faster. There is almost no impact during training. If `--split_attn` is not specified, it will be processed in the conventional way. Cannot be specified when `attn_mode` is `flash`.
 
-- 05, Jan, 2025
+- Jan 05, 2025
     - Added `images` to the save format in `hv_generate_video.py`. You can generate images from latents saved with `--latent_path`. You can also specify multiple latents with `--latent_path` for batch processing (increases VRAM usage).
 
-- 04, Jan, 2025
+- Jan 04, 2025
     - Added support for loading Text Encoder weights from .safetensors files. See [Model Download](#model-download) for instructions.
     - Changed the format of latents saved by `hv_generate_video.py` to .safetensors. Metadata such as prompts will be saved in the .safetensors file. Use `--no_metadata` to disable saving metadata.
 
-- 03, Jan, 2025: The noise initialization method during inference has changed. When the same seed is specified, the common frames will be the same even if the number of generated frames is different. Please note that the inference results will be different from before even with the same seed.
+- Jan 03, 2025: The noise initialization method during inference has changed. When the same seed is specified, the common frames will be the same even if the number of generated frames is different. Please note that the inference results will be different from before even with the same seed.
 
 (For example, when 25 frames are specified, the time length of the latent is 7, and when 45 frames are specified, the time length of the latent is 12, but the first 7 frames of both will have the same noise value when the same seed is specified.)
 
