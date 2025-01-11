@@ -868,7 +868,7 @@ class NetworkTrainer:
         # Now modify the model for sampling
         model_to_sample.eval()
         # Disable gradient checkpointing for sampling
-        model_to_sample.disable_gradient_checkpointing()
+        # model_to_sample.disable_gradient_checkpointing()
 
         # Move VAE to the appropriate device for sampling
         vae.to(device)
@@ -944,6 +944,8 @@ class NetworkTrainer:
                 for i, t in enumerate(tqdm(timesteps, desc=f'Sampling timesteps for prompt {prompt_idx+1}/{len(sample_parameters)}')):
                     latents = scheduler.scale_model_input(latents, t)
 
+                    model_to_sample.prepare_block_swap_before_forward()  
+
                     noise_pred = model_to_sample(
                         latents,
                         t.repeat(latents.shape[0]).to(device=device, dtype=dit_dtype),
@@ -993,10 +995,10 @@ class NetworkTrainer:
         else:
             model_to_sample.eval()
 
-        if original_gradient_checkpointing_state:
-            model_to_sample.enable_gradient_checkpointing()
-        else:
-            model_to_sample.disable_gradient_checkpointing()
+        # if original_gradient_checkpointing_state:
+            # model_to_sample.enable_gradient_checkpointing()
+        # else:
+            # model_to_sample.disable_gradient_checkpointing()
 
         clean_memory_on_device(device)
     
