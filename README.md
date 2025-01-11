@@ -11,6 +11,7 @@ __This repository is under development.__
 
 - Jan 11, 2025
     - Removed the hash values of the models to be trained (DiT, VAE) from the metadata saved in LoRA. The hash values are almost unused and take time to compute. If you encounter any issues, please let us know.
+    - I have released the weights of the DiT model converted to fp8 [here](https://huggingface.co/kohya-ss/HunyuanVideo-fp8_e4m3fn-unofficial). This can only be used when `--fp8_base` is specified. Download and specify the full path of `mp_rank_00_model_states_fp8.safetensors` to `--dit`. The initialization process at the start of training will be faster.
 
 - Jan 10, 2025
     - Fixed a bug where `--split_attn` was applied even when not specified.
@@ -98,6 +99,8 @@ For DiT and VAE, use the HunyuanVideo models.
 From https://huggingface.co/tencent/HunyuanVideo/tree/main/hunyuan-video-t2v-720p/transformers, download [mp_rank_00_model_states.pt](https://huggingface.co/tencent/HunyuanVideo/resolve/main/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt) and place it in your chosen directory.
 
 (Note: The fp8 model on the same page is unverified.)
+
+If you are training with `--fp8_base`, you can use `mp_rank_00_model_states_fp8.safetensors` from [here](https://huggingface.co/kohya-ss/HunyuanVideo-fp8_e4m3fn-unofficial) instead of `mp_rank_00_model_states.pt`. (This file is unofficial and simply converts the weights to float8_e4m3fn.)
 
 From https://huggingface.co/tencent/HunyuanVideo/tree/main/hunyuan-video-t2v-720p/vae, download [pytorch_model.pt](https://huggingface.co/tencent/HunyuanVideo/resolve/main/hunyuan-video-t2v-720p/vae/pytorch_model.pt) and place it in your chosen directory.
 

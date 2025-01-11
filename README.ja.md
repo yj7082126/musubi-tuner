@@ -10,6 +10,7 @@ __リポジトリは開発中です。__
 
 - 2025/01/11
     - LoRAのメタデータに保存されていた、学習対象モデル（DiT、VAE）のハッシュ値を削除しました。ハッシュ値はほぼ使用されておらず、計算に時間が掛かるためです。もし問題があればご連絡ください。
+    - fp8に変換したDiTモデルの重みを[こちら](https://huggingface.co/kohya-ss/HunyuanVideo-fp8_e4m3fn-unofficial)で公開しました。`--fp8_base`指定時のみ使用可能です。ダウンロードして、`--dit`に`mp_rank_00_model_states_fp8.safetensors`のフルパスを指定してください。学習開始時の初期化処理が速くなります。
 
 - 2025/01/10
     - `--split_attn`を指定しない場合でも、`--split_attn`が適用された状態になっていた不具合を修正しました。
@@ -95,6 +96,8 @@ pip install ascii-magic matplotlib tensorboard
 https://huggingface.co/tencent/HunyuanVideo/tree/main/hunyuan-video-t2v-720p/transformers から、[mp_rank_00_model_states.pt](https://huggingface.co/tencent/HunyuanVideo/resolve/main/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt) をダウンロードし、任意のディレクトリに配置します。
 
 （同じページにfp8のモデルもありますが、未検証です。）
+
+`--fp8_base`を指定して学習する場合は、`mp_rank_00_model_states.pt`の代わりに、[こちら](https://huggingface.co/kohya-ss/HunyuanVideo-fp8_e4m3fn-unofficial)の`mp_rank_00_model_states_fp8.safetensors`を使用可能です。（このファイルは非公式のもので、重みを単純にfloat8_e4m3fnに変換したものです。）
 
 また、https://huggingface.co/tencent/HunyuanVideo/tree/main/hunyuan-video-t2v-720p/vae から、[pytorch_model.pt](https://huggingface.co/tencent/HunyuanVideo/resolve/main/hunyuan-video-t2v-720p/vae/pytorch_model.pt) をダウンロードし、任意のディレクトリに配置します。
 
