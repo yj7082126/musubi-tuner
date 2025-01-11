@@ -2,13 +2,50 @@
 
 [English](./README.md) | [日本語](./README.ja.md)
 
-This repository provides scripts for training LoRA (Low-Rank Adaptation) models with HunyuanVideo.
+## Table of Contents
 
-__This repository is under development.__
+- [Introduction](#introduction)
+  - [Releases](#releases)
+  - [Recent Updates](#recent-updates)
+- [Overview](#overview)
+    - [Hardware Requirements](#hardware-requirements)
+    - [Features](#features)
+- [Installation](#installation)
+- [Model Download](#model-download)
+    - [Use the Official HunyuanVideo Model](#use-the-official-hunyuanvideo-model)
+    - [Using ComfyUI Models for Text Encoder](#using-comfyui-models-for-text-encoder)
+- [Usage](#usage)
+    - [Dataset Configuration](#dataset-configuration)
+    - [Latent Pre-caching](#latent-pre-caching)
+    - [Text Encoder Output Pre-caching](#text-encoder-output-pre-caching)
+    - [Training](#training)
+    - [Inference](#inference)
+    - [Convert LoRA to another format](#convert-lora-to-another-format)
+- [Miscellaneous](#miscellaneous)
+    - [SageAttention Installation](#sageattention-installation)
+- [Disclaimer](#disclaimer)
+- [Contributing](#contributing)
+- [License](#license)
+
+## Introduction
+
+This repository provides scripts for training LoRA (Low-Rank Adaptation) models with HunyuanVideo. This repository is unofficial and not affiliated with the official HunyanVideo repository.
+
+*This repository is under development.*
+
+### Releases
+
+We are grateful to everyone who has been contributing to the Musubi Tuner ecosystem through documentation and third-party tools. To support these valuable contributions, we recommend working with our [releases](https://github.com/kohya-ss/musubi-tuner/releases) as stable reference points, as this project is under active development and breaking changes may occur.
+
+You can find the latest release and version history in our [releases page](https://github.com/kohya-ss/musubi-tuner/releases).
 
 ### Recent Updates
 
-- 10, Jan, 2025
+- Jan 11, 2025
+    - Removed the hash values of the models to be trained (DiT, VAE) from the metadata saved in LoRA. The hash values are almost unused and take time to compute. If you encounter any issues, please let us know.
+    - I have released the weights of the DiT model converted to fp8 [here](https://huggingface.co/kohya-ss/HunyuanVideo-fp8_e4m3fn-unofficial). This can only be used when `--fp8_base` is specified. Download and specify the full path of `mp_rank_00_model_states_fp8.safetensors` to `--dit`. The initialization process at the start of training will be faster.
+
+- Jan 10, 2025
     - Fixed a bug where `--split_attn` was applied even when not specified.
     - xformers is now available for training and inference. `--split_attn` is required when using xformers.
     - Fixed a bug in `flash` mode and confirmed operation. `--split_attn` can now be specified during inference for `flash` mode.
@@ -16,36 +53,26 @@ __This repository is under development.__
         - `sdpa` was about 12% slower than `flash`, and `xformers` + `--split_attn` was about 4% slower than `flash`.
     - During inference, `flash` >= `sageattn` > `xformers` > `sdpa` (all with `--split_attn`). However, the speed difference between `sdpa` and `flash` is about 10%. Memory usage was almost the same.
 
-- 08, Jan, 2025
+- Jan 08, 2025
     - __Important Update__: Fixed a bug where latents were scaled twice during caching and training. Please re-run `cache_latents.py` (without specifying `--skip_existing`) to re-cache latents.
 
-- 06, Jan, 2025
-    - Added `--split_attn` option to `hv_train_network.py` and `hv_generate_video.py` to process attention in chunks. Inference with SageAttention is expected to be about 10% faster. There is almost no impact during training. If `--split_attn` is not specified, it will be processed in the conventional way. Cannot be specified when `attn_mode` is `flash`.
-
-- 05, Jan, 2025
-    - Added `images` to the save format in `hv_generate_video.py`. You can generate images from latents saved with `--latent_path`. You can also specify multiple latents with `--latent_path` for batch processing (increases VRAM usage).
-
-- 04, Jan, 2025
-    - Added support for loading Text Encoder weights from .safetensors files. See [Model Download](#model-download) for instructions.
-    - Changed the format of latents saved by `hv_generate_video.py` to .safetensors. Metadata such as prompts will be saved in the .safetensors file. Use `--no_metadata` to disable saving metadata.
-
-- 03, Jan, 2025: The noise initialization method during inference has changed. When the same seed is specified, the common frames will be the same even if the number of generated frames is different. Please note that the inference results will be different from before even with the same seed.
-
-(For example, when 25 frames are specified, the time length of the latent is 7, and when 45 frames are specified, the time length of the latent is 12, but the first 7 frames of both will have the same noise value when the same seed is specified.)
+## Overview
 
 ### Hardware Requirements
 
-- VRAM: 12GB or more recommended for image training, 24GB or more recommended for video training
-    - Depends on resolution, etc. For 12GB, use a resolution of 960x544 or lower and use memory-saving options such as `--blocks_to_swap`, `--fp8_llm`, etc.
+- VRAM: 12GB or more recommended for image training, 24GB or more for video training
+    - *Actual requirements depend on resolution and training settings.* For 12GB, use a resolution of 960x544 or lower and use memory-saving options such as `--blocks_to_swap`, `--fp8_llm`, etc.
 - Main Memory: 64GB or more recommended, 32GB + swap may work
 
 ### Features
 
 - Memory-efficient implementation
-- Windows compatible (Linux compatibility not yet verified)
+- Windows compatibility confirmed (Linux compatibility confirmed by community)
 - Multi-GPU support not implemented
 
 ## Installation
+
+Python 3.10 or later is required (verified with 3.10).
 
 Create a virtual environment and install PyTorch and torchvision matching your CUDA version. Verified to work with version 2.5.1.
 
@@ -61,7 +88,10 @@ pip install -r requirements.txt
 
 Optionally, you can use FlashAttention and SageAttention (for inference only; see [SageAttention Installation](#sageattention-installation) for installation instructions).
 
-Additionally, install `ascii-magic` (used for dataset verification), `matplotlib` (used for timestep visualization), and `tensorboard` (used for logging training progress) as needed:
+Optional dependencies for additional features:
+- `ascii-magic`: Used for dataset verification
+- `matplotlib`: Used for timestep visualization
+- `tensorboard`: Used for logging training progress
 
 ```bash
 pip install ascii-magic matplotlib tensorboard
@@ -94,6 +124,8 @@ For DiT and VAE, use the HunyuanVideo models.
 From https://huggingface.co/tencent/HunyuanVideo/tree/main/hunyuan-video-t2v-720p/transformers, download [mp_rank_00_model_states.pt](https://huggingface.co/tencent/HunyuanVideo/resolve/main/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt) and place it in your chosen directory.
 
 (Note: The fp8 model on the same page is unverified.)
+
+If you are training with `--fp8_base`, you can use `mp_rank_00_model_states_fp8.safetensors` from [here](https://huggingface.co/kohya-ss/HunyuanVideo-fp8_e4m3fn-unofficial) instead of `mp_rank_00_model_states.pt`. (This file is unofficial and simply converts the weights to float8_e4m3fn.)
 
 From https://huggingface.co/tencent/HunyuanVideo/tree/main/hunyuan-video-t2v-720p/vae, download [pytorch_model.pt](https://huggingface.co/tencent/HunyuanVideo/resolve/main/hunyuan-video-t2v-720p/vae/pytorch_model.pt) and place it in your chosen directory.
 
