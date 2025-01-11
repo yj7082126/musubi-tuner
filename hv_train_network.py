@@ -867,8 +867,6 @@ class NetworkTrainer:
 
         # Now modify the model for sampling
         model_to_sample.eval()
-        # Disable gradient checkpointing for sampling
-        # model_to_sample.disable_gradient_checkpointing()
 
         # Move VAE to the appropriate device for sampling
         vae.to(device)
@@ -994,11 +992,6 @@ class NetworkTrainer:
             model_to_sample.train()
         else:
             model_to_sample.eval()
-
-        # if original_gradient_checkpointing_state:
-            # model_to_sample.enable_gradient_checkpointing()
-        # else:
-            # model_to_sample.disable_gradient_checkpointing()
 
         clean_memory_on_device(device)
     
