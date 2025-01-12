@@ -41,6 +41,9 @@ Musubi Tunerの解説記事執筆や、関連ツールの開発に取り組ん�
 
 ### 最近の更新
 
+- 2025/01/12
+    - 学習中のサンプル画像生成が可能になりました。NSFW-API氏に感謝いたします。詳細は[こちらのドキュメント](./docs/sampling_during_training.md)を参照してください。
+
 - 2025/01/11
     - LoRAのメタデータに保存されていた、学習対象モデル（DiT、VAE）のハッシュ値を削除しました。ハッシュ値はほぼ使用されておらず、計算に時間が掛かるためです。もし問題があればご連絡ください。
     - fp8に変換したDiTモデルの重みを[こちら](https://huggingface.co/kohya-ss/HunyuanVideo-fp8_e4m3fn-unofficial)で公開しました。`--fp8_base`指定時のみ使用可能です。ダウンロードして、`--dit`に`mp_rank_00_model_states_fp8.safetensors`のフルパスを指定してください。学習開始時の初期化処理が速くなります。
@@ -197,6 +200,8 @@ VRAMが足りない場合は、`--blocks_to_swap`を指定して、一部のブ�
 学習されるLoRAの形式は、`sd-scripts`と同じです。
 
 `--show_timesteps`に`image`（`matplotlib`が必要）または`console`を指定すると、学習時のtimestepsの分布とtimestepsごとのloss weightingが確認できます。
+
+学習中のサンプル画像生成については、[こちらのドキュメント](./docs/sampling_during_training.md)を参照してください。
 
 適切な学習率、学習ステップ数、timestepsの分布、loss weightingなどのパラメータは、現時点ではわかっていません。情報提供をお待ちしています。
 

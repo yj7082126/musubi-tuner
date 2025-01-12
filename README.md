@@ -41,6 +41,9 @@ You can find the latest release and version history in our [releases page](https
 
 ### Recent Updates
 
+- Jan 12, 2025
+    - Sample image generation during training is now possible. Thanks to NSFW-API. Please refer to [this document](./docs/sampling_during_training.md) for details.
+
 - Jan 11, 2025
     - Removed the hash values of the models to be trained (DiT, VAE) from the metadata saved in LoRA. The hash values are almost unused and take time to compute. If you encounter any issues, please let us know.
     - I have released the weights of the DiT model converted to fp8 [here](https://huggingface.co/kohya-ss/HunyuanVideo-fp8_e4m3fn-unofficial). This can only be used when `--fp8_base` is specified. Download and specify the full path of `mp_rank_00_model_states_fp8.safetensors` to `--dit`. The initialization process at the start of training will be faster.
@@ -202,6 +205,8 @@ Sample video generation is not yet implemented.
 The format of LoRA trained is the same as `sd-scripts`.
 
 `--show_timesteps` can be set to `image` (requires `matplotlib`) or `console` to display timestep distribution and loss weighting during training.
+
+For sample image generation during training, refer to [this document](./docs/sampling_during_training.md).
 
 Appropriate learning rates, training steps, timestep distribution, loss weighting, etc. are not yet known. Feedback is welcome.
 
