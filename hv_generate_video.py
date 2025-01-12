@@ -565,7 +565,7 @@ def main():
             guidance_expand = guidance_expand.to(device=device, dtype=dit_dtype)
         else:
             guidance_expand = None
-        freqs_cos, freqs_sin = get_rotary_pos_embed(vae.VAE_VER, transformer, video_length, height, width)
+        freqs_cos, freqs_sin = get_rotary_pos_embed(vae_ver, transformer, video_length, height, width)
         # n_tokens = freqs_cos.shape[0]
 
         # move and cast all inputs to the correct device and dtype

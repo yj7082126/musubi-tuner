@@ -116,6 +116,9 @@ class MMDoubleStreamBlock(nn.Module):
 
     def enable_gradient_checkpointing(self):
         self.gradient_checkpointing = True
+        
+    def disable_gradient_checkpointing(self):
+        self.gradient_checkpointing = False
 
     def _forward(
         self,
@@ -313,6 +316,9 @@ class MMSingleStreamBlock(nn.Module):
 
     def enable_gradient_checkpointing(self):
         self.gradient_checkpointing = True
+        
+    def disable_gradient_checkpointing(self):
+        self.gradient_checkpointing = False
 
     def _forward(
         self,
@@ -625,6 +631,18 @@ class HYVideoDiffusionTransformer(nn.Module):  # ModelMixin, ConfigMixin):
             block.enable_gradient_checkpointing()
 
         print(f"HYVideoDiffusionTransformer: Gradient checkpointing enabled.")
+        
+    def disable_gradient_checkpointing(self):
+        self.gradient_checkpointing = False
+
+        if hasattr(self.txt_in, 'disable_gradient_checkpointing'):
+            self.txt_in.disable_gradient_checkpointing()
+
+        for block in self.double_blocks + self.single_blocks:
+            if hasattr(block, 'disable_gradient_checkpointing'):
+                block.disable_gradient_checkpointing()
+
+        print(f"HYVideoDiffusionTransformer: Gradient checkpointing disabled.")
 
     def enable_img_in_txt_in_offloading(self):
         self._enable_img_in_txt_in_offloading = True
