@@ -39,6 +39,7 @@
     - 学習中のサンプル画像生成が可能になりました。NSFW-API氏に感謝いたします。詳細は[こちらのドキュメント](./docs/sampling_during_training.md)を参照してください。
     - データセットごとに繰り返し回数を指定できるようになりました。指定した数だけデータセットを繰り返し、1 epochとして学習します。`.toml`に`num_repeats`を指定してください。詳細は[こちらのドキュメント](./dataset/dataset_config.md)を参照してください。
     - LoRAの適用対象モジュールから、double blocksの`img_mod`および`txt_mod`、single blocksの`modulation`をデフォルトで除外するようにしました。コミュニティからの報告によると、これにより学習結果が改善されるようです。`--network_args`で`exclude_patterns`および`include_patterns`を指定して、適用対象モジュールを変更できます。詳細は[こちらのドキュメント](./docs/advanced_config.md)を参照してください。
+        - 以前の重みを`--network_weights`で指定して学習を再開する場合、お手数ですが `--network_args "include_patterns=[r'.*(img_mod|txt_mod|modulation).*']"`を指定してください。
     - LoRA+についてもそちらのドキュメントに追加しました。
 
 - 2025/01/11

@@ -39,6 +39,7 @@ This repository provides scripts for training LoRA (Low-Rank Adaptation) models 
     - Sample image generation during training is now possible. Thanks to NSFW-API. Please refer to [this document](./docs/sampling_during_training.md) for details.
     - You can now specify the number of repetitions for each dataset. The dataset is repeated the specified number of times, and the training is performed as one epoch. Specify `num_repeats` in the `.toml`. For details, please refer to [this document](./dataset/dataset_config.md).
     - LoRA now excludes `img_mod` and `txt_mod` of double blocks and `modulation` of single blocks by default. According to reports from the community, this has improved the training results. You can change the target modules by specifying `exclude_patterns` and `include_patterns` with `--network_args`. For details, please refer to [this document](./docs/advanced_config.md). 
+        - If you are resuming training by specifying the previous weights with `--network_weights`, please specify `--network_args "include_patterns=[r'.*(img_mod|txt_mod|modulation).*']"`.
     - LoRA+ is now available. Specify `loraplus_lr_ratio` in `--network_args`. For details, please refer to [this document](./docs/advanced_config.md).
 
 - Jan 11, 2025
