@@ -33,16 +33,11 @@ This repository provides scripts for training LoRA (Low-Rank Adaptation) models 
 
 *This repository is under development.*
 
-### Releases
-
-We are grateful to everyone who has been contributing to the Musubi Tuner ecosystem through documentation and third-party tools. To support these valuable contributions, we recommend working with our [releases](https://github.com/kohya-ss/musubi-tuner/releases) as stable reference points, as this project is under active development and breaking changes may occur.
-
-You can find the latest release and version history in our [releases page](https://github.com/kohya-ss/musubi-tuner/releases).
-
 ### Recent Updates
 
 - Jan 12, 2025
     - Sample image generation during training is now possible. Thanks to NSFW-API. Please refer to [this document](./docs/sampling_during_training.md) for details.
+    - You can now specify the number of repetitions for each dataset. The dataset is repeated the specified number of times, and the training is performed as one epoch. Specify `num_repeats` in the `.toml`. For details, please refer to [this document](./dataset/dataset_config.md).
 
 - Jan 11, 2025
     - Removed the hash values of the models to be trained (DiT, VAE) from the metadata saved in LoRA. The hash values are almost unused and take time to compute. If you encounter any issues, please let us know.
@@ -58,6 +53,12 @@ You can find the latest release and version history in our [releases page](https
 
 - Jan 08, 2025
     - __Important Update__: Fixed a bug where latents were scaled twice during caching and training. Please re-run `cache_latents.py` (without specifying `--skip_existing`) to re-cache latents.
+
+### Releases
+
+We are grateful to everyone who has been contributing to the Musubi Tuner ecosystem through documentation and third-party tools. To support these valuable contributions, we recommend working with our [releases](https://github.com/kohya-ss/musubi-tuner/releases) as stable reference points, as this project is under active development and breaking changes may occur.
+
+You can find the latest release and version history in our [releases page](https://github.com/kohya-ss/musubi-tuner/releases).
 
 ## Overview
 
