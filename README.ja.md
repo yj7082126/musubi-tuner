@@ -74,7 +74,9 @@ Musubi Tunerの解説記事執筆や、関連ツールの開発に取り組ん�
 
 Python 3.10以上を使用してください（3.10で動作確認済み）。
 
-適当な仮想環境を作成し、ご利用のCUDAバージョンに合わせたPyTorchとtorchvisionをインストールしてください。2.5.1で動作確認済みです。
+適当な仮想環境を作成し、ご利用のCUDAバージョンに合わせたPyTorchとtorchvisionをインストールしてください。
+
+PyTorchはバージョン2.5.1以上を使用してください（[補足](#PyTorchのバージョンについて)）。
 
 ```bash
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
@@ -270,6 +272,12 @@ sdbds氏によるWindows対応のSageAttentionのwheelが https://github.com/sdb
     ```
 
 以上でSageAttentionのインストールが完了です。
+
+### PyTorchのバージョンについて
+
+`--attn_mode`に`torch`を指定する場合、2.5.1以降のPyTorchを使用してください（それより前のバージョンでは生成される動画が真っ黒になるようです）。
+
+古いバージョンを使う場合、xformersやSageAttentionを使用してください。
 
 ## 免責事項
 
