@@ -38,6 +38,8 @@
 - 2025/01/12
     - 学習中のサンプル画像生成が可能になりました。NSFW-API氏に感謝いたします。詳細は[こちらのドキュメント](./docs/sampling_during_training.md)を参照してください。
     - データセットごとに繰り返し回数を指定できるようになりました。指定した数だけデータセットを繰り返し、1 epochとして学習します。`.toml`に`num_repeats`を指定してください。詳細は[こちらのドキュメント](./dataset/dataset_config.md)を参照してください。
+    - LoRAの適用対象モジュールから、double blocksの`img_mod`および`txt_mod`、single blocksの`modulation`をデフォルトで除外するようにしました。コミュニティからの報告によると、これにより学習結果が改善されるようです。`--network_args`で`exclude_patterns`および`include_patterns`を指定して、適用対象モジュールを変更できます。詳細は[こちらのドキュメント](./docs/advanced_config.md)を参照してください。
+    - LoRA+についてもそちらのドキュメントに追加しました。
 
 - 2025/01/11
     - LoRAのメタデータに保存されていた、学習対象モデル（DiT、VAE）のハッシュ値を削除しました。ハッシュ値はほぼ使用されておらず、計算に時間が掛かるためです。もし問題があればご連絡ください。
@@ -178,9 +180,9 @@ accelerate launch --num_cpu_threads_per_process 1 --mixed_precision bf16 hv_trai
     --dataset_config path/to/toml --sdpa --mixed_precision bf16 --fp8_base 
     --optimizer_type adamw8bit --learning_rate 1e-3 --gradient_checkpointing 
      --max_data_loader_n_workers 2 --persistent_data_loader_workers 
-    --network_module=networks.lora --network_dim=32 
+    --network_module networks.lora --network_dim 32 
     --timestep_sampling sigmoid --discrete_flow_shift 1.0 
-    --max_train_epochs 16 --save_every_n_epochs=1 --seed 42
+    --max_train_epochs 16 --save_every_n_epochs 1 --seed 42
     --output_dir path/to/output_dir --output_name name-of-lora
 ```
 
@@ -202,7 +204,7 @@ VRAMが足りない場合は、`--blocks_to_swap`を指定して、一部のブ�
 
 `--show_timesteps`に`image`（`matplotlib`が必要）または`console`を指定すると、学習時のtimestepsの分布とtimestepsごとのloss weightingが確認できます。
 
-学習中のサンプル画像生成については、[こちらのドキュメント](./docs/sampling_during_training.md)を参照してください。
+学習中のサンプル画像生成については、[こちらのドキュメント](./docs/sampling_during_training.md)を参照してください。その他の高度な設定については[こちらのドキュメント](./docs/advanced_config.md)を参照してください。
 
 適切な学習率、学習ステップ数、timestepsの分布、loss weightingなどのパラメータは、現時点ではわかっていません。情報提供をお待ちしています。
 
