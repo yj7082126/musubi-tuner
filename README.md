@@ -74,7 +74,9 @@ You can find the latest release and version history in our [releases page](https
 
 Python 3.10 or later is required (verified with 3.10).
 
-Create a virtual environment and install PyTorch and torchvision matching your CUDA version. Verified to work with version 2.5.1.
+Create a virtual environment and install PyTorch and torchvision matching your CUDA version. 
+
+PyTorch 2.5.1 or later is required (see [note](#PyTorch-version)).
 
 ```bash
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
@@ -276,6 +278,11 @@ For reference, the build and installation instructions are as follows. You may n
 
 This completes the SageAttention installation.
 
+### PyTorch version
+
+If you specify `torch` for `--attn_mode`, use PyTorch 2.5.1 or later (earlier versions may result in black videos).
+
+If you use an earlier version, use xformers or SageAttention.
 
 ## Disclaimer
 
