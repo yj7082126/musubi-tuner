@@ -740,6 +740,7 @@ class BaseDataset(torch.utils.data.Dataset):
         resolution: Tuple[int, int] = (960, 544),
         caption_extension: Optional[str] = None,
         batch_size: int = 1,
+        num_repeats: int = 1,
         enable_bucket: bool = False,
         bucket_no_upscale: bool = False,
         cache_directory: Optional[str] = None,
@@ -748,6 +749,7 @@ class BaseDataset(torch.utils.data.Dataset):
         self.resolution = resolution
         self.caption_extension = caption_extension
         self.batch_size = batch_size
+        self.num_repeats = num_repeats
         self.enable_bucket = enable_bucket
         self.bucket_no_upscale = bucket_no_upscale
         self.cache_directory = cache_directory
@@ -763,6 +765,7 @@ class BaseDataset(torch.utils.data.Dataset):
             "resolution": self.resolution,
             "caption_extension": self.caption_extension,
             "batch_size_per_device": self.batch_size,
+            "num_repeats": self.num_repeats,
             "enable_bucket": bool(self.enable_bucket),
             "bucket_no_upscale": bool(self.bucket_no_upscale),
         }
@@ -881,6 +884,7 @@ class ImageDataset(BaseDataset):
         resolution: Tuple[int, int],
         caption_extension: Optional[str],
         batch_size: int,
+        num_repeats: int,
         enable_bucket: bool,
         bucket_no_upscale: bool,
         image_directory: Optional[str] = None,
@@ -889,7 +893,7 @@ class ImageDataset(BaseDataset):
         debug_dataset: bool = False,
     ):
         super(ImageDataset, self).__init__(
-            resolution, caption_extension, batch_size, enable_bucket, bucket_no_upscale, cache_directory, debug_dataset
+            resolution, caption_extension, batch_size, num_repeats, enable_bucket, bucket_no_upscale, cache_directory, debug_dataset
         )
         self.image_directory = image_directory
         self.image_jsonl_file = image_jsonl_file
@@ -924,6 +928,7 @@ class ImageDataset(BaseDataset):
         batches: dict[tuple[int, int], list[ItemInfo]] = {}  # (width, height) -> [ItemInfo]
         futures = []
 
+        # aggregate futures and sort by bucket resolution
         def aggregate_future(consume_all: bool = False):
             while len(futures) >= num_workers or (consume_all and len(futures) > 0):
                 completed_futures = [future for future in futures if future.done()]
@@ -948,6 +953,7 @@ class ImageDataset(BaseDataset):
 
                     futures.remove(future)
 
+        # submit batch if some bucket has enough items
         def submit_batch(flush: bool = False):
             for key in batches:
                 if len(batches[key]) >= self.batch_size or flush:
@@ -961,6 +967,7 @@ class ImageDataset(BaseDataset):
 
         for fetch_op in self.datasource:
 
+            # fetch and resize image in a separate thread
             def fetch_and_resize(op: callable) -> tuple[tuple[int, int], str, Image.Image, str]:
                 image_key, image, caption = op()
                 image: Image.Image
@@ -1019,7 +1026,8 @@ class ImageDataset(BaseDataset):
             item_info.text_encoder_output_cache_path = text_encoder_output_cache_file
 
             bucket = bucketed_item_info.get(bucket_reso, [])
-            bucket.append(item_info)
+            for _ in range(self.num_repeats):
+                bucket.append(item_info)
             bucketed_item_info[bucket_reso] = bucket
 
         # prepare batch manager
@@ -1048,6 +1056,7 @@ class VideoDataset(BaseDataset):
         resolution: Tuple[int, int],
         caption_extension: Optional[str],
         batch_size: int,
+        num_repeats: int,
         enable_bucket: bool,
         bucket_no_upscale: bool,
         frame_extraction: Optional[str] = "head",
@@ -1060,7 +1069,7 @@ class VideoDataset(BaseDataset):
         debug_dataset: bool = False,
     ):
         super(VideoDataset, self).__init__(
-            resolution, caption_extension, batch_size, enable_bucket, bucket_no_upscale, cache_directory, debug_dataset
+            resolution, caption_extension, batch_size, num_repeats, enable_bucket, bucket_no_upscale, cache_directory, debug_dataset
         )
         self.video_directory = video_directory
         self.video_jsonl_file = video_jsonl_file
@@ -1248,7 +1257,8 @@ class VideoDataset(BaseDataset):
             item_info.text_encoder_output_cache_path = text_encoder_output_cache_file
 
             bucket = bucketed_item_info.get(bucket_reso, [])
-            bucket.append(item_info)
+            for _ in range(self.num_repeats):
+                bucket.append(item_info)
             bucketed_item_info[bucket_reso] = bucket
 
         # prepare batch manager

@@ -33,13 +33,14 @@
 
 *リポジトリは開発中です。*
 
-### リリースについて
-
-Musubi Tunerの解説記事執筆や、関連ツールの開発に取り組んでくださる方々に感謝いたします。このプロジェクトは開発中のため、互換性のない変更や機能追加が起きる可能性があります。想定外の互換性問題を避けるため、参照用として[リリース](https://github.com/kohya-ss/musubi-tuner/releases)をお使いください。
-
-最新のリリースとバージョン履歴は[リリースページ](https://github.com/kohya-ss/musubi-tuner/releases)で確認できます。
-
 ### 最近の更新
+
+- 2025/01/12
+    - 学習中のサンプル画像生成が可能になりました。NSFW-API氏に感謝いたします。詳細は[こちらのドキュメント](./docs/sampling_during_training.md)を参照してください。
+    - データセットごとに繰り返し回数を指定できるようになりました。指定した数だけデータセットを繰り返し、1 epochとして学習します。`.toml`に`num_repeats`を指定してください。詳細は[こちらのドキュメント](./dataset/dataset_config.md)を参照してください。
+    - LoRAの適用対象モジュールから、double blocksの`img_mod`および`txt_mod`、single blocksの`modulation`をデフォルトで除外するようにしました。コミュニティからの報告によると、これにより学習結果が改善されるようです。`--network_args`で`exclude_patterns`および`include_patterns`を指定して、適用対象モジュールを変更できます。詳細は[こちらのドキュメント](./docs/advanced_config.md)を参照してください。
+        - 以前の重みを`--network_weights`で指定して学習を再開する場合、お手数ですが `--network_args "include_patterns=[r'.*(img_mod|txt_mod|modulation).*']"`を指定してください。
+    - LoRA+についてもそちらのドキュメントに追加しました。
 
 - 2025/01/11
     - LoRAのメタデータに保存されていた、学習対象モデル（DiT、VAE）のハッシュ値を削除しました。ハッシュ値はほぼ使用されておらず、計算に時間が掛かるためです。もし問題があればご連絡ください。
@@ -55,6 +56,12 @@ Musubi Tunerの解説記事執筆や、関連ツールの開発に取り組ん�
 
 - 2025/01/08
     - __重要な更新__：latentsがキャッシュ時と学習時の二回、scalingされる不具合を修正しました。お手数ですが、cache_latents.pyを（`--skip_existing`を指定せずに）再度実行して、latentsを再キャッシュしてください。
+
+### リリースについて
+
+Musubi Tunerの解説記事執筆や、関連ツールの開発に取り組んでくださる方々に感謝いたします。このプロジェクトは開発中のため、互換性のない変更や機能追加が起きる可能性があります。想定外の互換性問題を避けるため、参照用として[リリース](https://github.com/kohya-ss/musubi-tuner/releases)をお使いください。
+
+最新のリリースとバージョン履歴は[リリースページ](https://github.com/kohya-ss/musubi-tuner/releases)で確認できます。
 
 ## 概要
 
@@ -174,9 +181,9 @@ accelerate launch --num_cpu_threads_per_process 1 --mixed_precision bf16 hv_trai
     --dataset_config path/to/toml --sdpa --mixed_precision bf16 --fp8_base 
     --optimizer_type adamw8bit --learning_rate 1e-3 --gradient_checkpointing 
      --max_data_loader_n_workers 2 --persistent_data_loader_workers 
-    --network_module=networks.lora --network_dim=32 
+    --network_module networks.lora --network_dim 32 
     --timestep_sampling sigmoid --discrete_flow_shift 1.0 
-    --max_train_epochs 16 --save_every_n_epochs=1 --seed 42
+    --max_train_epochs 16 --save_every_n_epochs 1 --seed 42
     --output_dir path/to/output_dir --output_name name-of-lora
 ```
 
@@ -197,6 +204,8 @@ VRAMが足りない場合は、`--blocks_to_swap`を指定して、一部のブ�
 学習されるLoRAの形式は、`sd-scripts`と同じです。
 
 `--show_timesteps`に`image`（`matplotlib`が必要）または`console`を指定すると、学習時のtimestepsの分布とtimestepsごとのloss weightingが確認できます。
+
+学習中のサンプル画像生成については、[こちらのドキュメント](./docs/sampling_during_training.md)を参照してください。その他の高度な設定については[こちらのドキュメント](./docs/advanced_config.md)を参照してください。
 
 適切な学習率、学習ステップ数、timestepsの分布、loss weightingなどのパラメータは、現時点ではわかっていません。情報提供をお待ちしています。
 

@@ -33,13 +33,14 @@ This repository provides scripts for training LoRA (Low-Rank Adaptation) models 
 
 *This repository is under development.*
 
-### Releases
-
-We are grateful to everyone who has been contributing to the Musubi Tuner ecosystem through documentation and third-party tools. To support these valuable contributions, we recommend working with our [releases](https://github.com/kohya-ss/musubi-tuner/releases) as stable reference points, as this project is under active development and breaking changes may occur.
-
-You can find the latest release and version history in our [releases page](https://github.com/kohya-ss/musubi-tuner/releases).
-
 ### Recent Updates
+
+- Jan 12, 2025
+    - Sample image generation during training is now possible. Thanks to NSFW-API. Please refer to [this document](./docs/sampling_during_training.md) for details.
+    - You can now specify the number of repetitions for each dataset. The dataset is repeated the specified number of times, and the training is performed as one epoch. Specify `num_repeats` in the `.toml`. For details, please refer to [this document](./dataset/dataset_config.md).
+    - LoRA now excludes `img_mod` and `txt_mod` of double blocks and `modulation` of single blocks by default. According to reports from the community, this has improved the training results. You can change the target modules by specifying `exclude_patterns` and `include_patterns` with `--network_args`. For details, please refer to [this document](./docs/advanced_config.md). 
+        - If you are resuming training by specifying the previous weights with `--network_weights`, please specify `--network_args "include_patterns=[r'.*(img_mod|txt_mod|modulation).*']"`.
+    - LoRA+ is now available. Specify `loraplus_lr_ratio` in `--network_args`. For details, please refer to [this document](./docs/advanced_config.md).
 
 - Jan 11, 2025
     - Removed the hash values of the models to be trained (DiT, VAE) from the metadata saved in LoRA. The hash values are almost unused and take time to compute. If you encounter any issues, please let us know.
@@ -55,6 +56,12 @@ You can find the latest release and version history in our [releases page](https
 
 - Jan 08, 2025
     - __Important Update__: Fixed a bug where latents were scaled twice during caching and training. Please re-run `cache_latents.py` (without specifying `--skip_existing`) to re-cache latents.
+
+### Releases
+
+We are grateful to everyone who has been contributing to the Musubi Tuner ecosystem through documentation and third-party tools. To support these valuable contributions, we recommend working with our [releases](https://github.com/kohya-ss/musubi-tuner/releases) as stable reference points, as this project is under active development and breaking changes may occur.
+
+You can find the latest release and version history in our [releases page](https://github.com/kohya-ss/musubi-tuner/releases).
 
 ## Overview
 
@@ -179,9 +186,9 @@ accelerate launch --num_cpu_threads_per_process 1 --mixed_precision bf16 hv_trai
     --dataset_config path/to/toml --sdpa --mixed_precision bf16 --fp8_base 
     --optimizer_type adamw8bit --learning_rate 1e-3 --gradient_checkpointing 
      --max_data_loader_n_workers 2 --persistent_data_loader_workers 
-    --network_module=networks.lora --network_dim=32 
+    --network_module networks.lora --network_dim 32 
     --timestep_sampling sigmoid --discrete_flow_shift 1.0 
-    --max_train_epochs 16 --save_every_n_epochs=1 --seed 42
+    --max_train_epochs 16 --save_every_n_epochs 1 --seed 42
     --output_dir path/to/output_dir --output_name name-of-lora
 ```
 
@@ -202,6 +209,8 @@ Sample video generation is not yet implemented.
 The format of LoRA trained is the same as `sd-scripts`.
 
 `--show_timesteps` can be set to `image` (requires `matplotlib`) or `console` to display timestep distribution and loss weighting during training.
+
+For sample image generation during training, refer to [this document](./docs/sampling_during_training.md). For advanced configuration, refer to [this document](./docs/advanced_config.md).
 
 Appropriate learning rates, training steps, timestep distribution, loss weighting, etc. are not yet known. Feedback is welcome.
 
