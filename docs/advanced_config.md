@@ -30,6 +30,12 @@ If you specify it in the configuration file, write as follows. / 設定ファイ
 network_args = ["key1=value1", "key2=value2", ...]
 ```
 
+If you specify `"verbose=True"`, detailed information of LoRA will be displayed. / `"verbose=True"`を指定するとLoRAの詳細な情報が表示されます。
+
+```bash
+--network_args "verbose=True" "key1=value1" "key2=value2" ...
+```
+
 ## LoRA+
 
 <details>
@@ -57,6 +63,8 @@ accelerate launch --num_cpu_threads_per_process 1 --mixed_precision bf16 hv_trai
 
 ## Select the target modules of LoRA / LoRAの対象モジュールを選択する
 
+*This feature is highly experimental and the specification may change. / この機能は特に実験的なもので、仕様は変更される可能性があります。*
+
 <details>
 <summary>English</summary>
 
@@ -64,7 +72,7 @@ By specifying `exclude_patterns` and `include_patterns` with `--network_args`, y
 
 `exclude_patterns` excludes modules that match the specified pattern. `include_patterns` targets only modules that match the specified pattern.
 
-Specify the values as a list. For example, `"exclude_patterns=['.*single_blocks.*']"`.
+Specify the values as a list. For example, `"exclude_patterns=[r'.*single_blocks.*', r'.*double_blocks\.[0-9]\..*']"`.
 
 The pattern is a regular expression for the module name. The module name is in the form of `double_blocks.0.img_mod.linear` or `single_blocks.39.modulation.linear`. The regular expression is not a partial match but a complete match.
 
@@ -80,7 +88,7 @@ The patterns are applied in the order of `exclude_patterns`→`include_patterns`
 
 `exclude_patterns`は、指定したパターンに一致するモジュールを除外します。`include_patterns`は、指定したパターンに一致するモジュールのみを対象とします。
 
-値は、リストで指定します。`"exclude_patterns=['.*single_blocks.*']"`のようになります。
+値は、リストで指定します。`"exclude_patterns=[r'.*single_blocks.*', r'.*double_blocks\.[0-9]\..*']"`のようになります。
 
 パターンは、モジュール名に対する正規表現です。モジュール名は、たとえば`double_blocks.0.img_mod.linear`や`single_blocks.39.modulation.linear`のような形式です。正規表現は部分一致ではなく完全一致です。
 
@@ -94,11 +102,11 @@ The patterns are applied in the order of `exclude_patterns`→`include_patterns`
 Only the modules of double blocks / double blocksのモジュールのみを対象とする場合:
 
 ```bash
---network_args "exclude_patterns=['.*single_blocks.*']"
+--network_args "exclude_patterns=[r'.*single_blocks.*']"
 ```
 
 Only the modules of single blocks from the 10th / single blocksの10番目以降のLinearモジュールのみを対象とする場合:
 
 ```bash
---network_args "exclude_patterns=['.*']" "include_patterns=[r'.*single_blocks\.\d{2}\.linear.*']"
+--network_args "exclude_patterns=[r'.*']" "include_patterns=[r'.*single_blocks\.\d{2}\.linear.*']"
 ```
