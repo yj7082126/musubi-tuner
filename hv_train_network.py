@@ -18,10 +18,6 @@ import accelerate
 import numpy as np
 from packaging.version import Version
 
-import torchvision
-from einops import rearrange
-import av
-
 import huggingface_hub
 import toml
 
