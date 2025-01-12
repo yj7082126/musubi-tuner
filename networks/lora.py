@@ -481,7 +481,6 @@ class LoRANetwork(torch.nn.Module):
 
         include_re_patterns = []
         if include_patterns is not None:
-            print(include_patterns)
             for pattern in include_patterns:
                 try:
                     re_pattern = re.compile(pattern)
