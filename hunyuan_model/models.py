@@ -117,6 +117,9 @@ class MMDoubleStreamBlock(nn.Module):
     def enable_gradient_checkpointing(self):
         self.gradient_checkpointing = True
 
+    def disable_gradient_checkpointing(self):
+        self.gradient_checkpointing = False
+
     def _forward(
         self,
         img: torch.Tensor,
@@ -313,6 +316,9 @@ class MMSingleStreamBlock(nn.Module):
 
     def enable_gradient_checkpointing(self):
         self.gradient_checkpointing = True
+
+    def disable_gradient_checkpointing(self):
+        self.gradient_checkpointing = False
 
     def _forward(
         self,
@@ -626,6 +632,16 @@ class HYVideoDiffusionTransformer(nn.Module):  # ModelMixin, ConfigMixin):
 
         print(f"HYVideoDiffusionTransformer: Gradient checkpointing enabled.")
 
+    def disable_gradient_checkpointing(self):
+        self.gradient_checkpointing = False
+
+        self.txt_in.disable_gradient_checkpointing()
+
+        for block in self.double_blocks + self.single_blocks:
+            block.disable_gradient_checkpointing()
+
+        print(f"HYVideoDiffusionTransformer: Gradient checkpointing disabled.")
+
     def enable_img_in_txt_in_offloading(self):
         self._enable_img_in_txt_in_offloading = True
 
@@ -650,6 +666,20 @@ class HYVideoDiffusionTransformer(nn.Module):  # ModelMixin, ConfigMixin):
         print(
             f"HYVideoDiffusionTransformer: Block swap enabled. Swapping {num_blocks} blocks, double blocks: {double_blocks_to_swap}, single blocks: {single_blocks_to_swap}."
         )
+
+    def switch_block_swap_for_inference(self):
+        if self.blocks_to_swap:
+            self.offloader_double.set_forward_only(True)
+            self.offloader_single.set_forward_only(True)
+            self.prepare_block_swap_before_forward()
+            print(f"HYVideoDiffusionTransformer: Block swap set to forward only.")
+
+    def switch_block_swap_for_training(self):
+        if self.blocks_to_swap:
+            self.offloader_double.set_forward_only(False)
+            self.offloader_single.set_forward_only(False)
+            self.prepare_block_swap_before_forward()
+            print(f"HYVideoDiffusionTransformer: Block swap set to forward and backward.")
 
     def move_to_device_except_swap_blocks(self, device: torch.device):
         # assume model is on cpu. do not move blocks to device to reduce temporary memory usage
