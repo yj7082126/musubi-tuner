@@ -1216,20 +1216,32 @@ class NetworkTrainer:
             weights_sd = load_file(args.dim_from_weights)
             network, _ = network_module.create_network_from_weights_hunyuan_video(1, weights_sd, unet=transformer)
         else:
-            network = network_module.create_network_hunyuan_video(
-                1.0,
-                args.network_dim,
-                args.network_alpha,
-                vae,
-                None,
-                transformer,
-                neuron_dropout=args.network_dropout,
-                **net_kwargs,
-            )
+            if hasattr(network_module, 'create_network_hunyuan_video'):
+                network = network_module.create_network_hunyuan_video(
+                    1.0,
+                    args.network_dim,
+                    args.network_alpha,
+                    vae,
+                    None,
+                    transformer,
+                    neuron_dropout=args.network_dropout,
+                    **net_kwargs,
+                )
+            else:
+                network = network_module.create_network(
+                    1.0,
+                    args.network_dim,
+                    args.network_alpha,
+                    vae,
+                    None,
+                    transformer,
+                    **net_kwargs,
+                )
         if network is None:
             return
 
-        network.prepare_network(args)
+        if hasattr(network_module, 'prepare_network'):
+            network.prepare_network(args)
 
         # apply network to DiT
         network.apply_to(None, transformer, apply_text_encoder=False, apply_unet=True)
