@@ -73,7 +73,7 @@ A line starting with `#` is a comment.
 * `--d` specifies the seed. The default is random.
 * `--s` specifies the number of steps in generation. The default is 20.
 * `--g` specifies the guidance scale. The default is 6.0, which is the default value during inference of HunyuanVideo.
-* `--fs` specifies the discrete flow shift. The default is 7.0, which is the default value during inference of HunyuanVideo.
+* `--fs` specifies the discrete flow shift. The default is 14.5, which corresponds to the number of steps 20. In the HunyuanVideo paper, 7.0 is recommended for 50 steps, and 17.0 is recommended for less than 20 steps (e.g. 10).
 
 <details>
 <summary>日本語</summary>
@@ -86,6 +86,5 @@ A line starting with `#` is a comment.
 * `--d` シードを指定します。省略時はランダムです。
 * `--s` 生成におけるステップ数を指定します。省略時は20です。
 * `--g` guidance scaleを指定します。省略時は6.0で、HunyuanVideoの推論時のデフォルト値です。
-* `--fs` discrete flow shiftを指定します。省略時は7.0で、HunyuanVideoの推論時のデフォルト値です。
-
+* `--fs` discrete flow shiftを指定します。省略時は14.5で、ステップ数20の場合に対応した値です。HunyuanVideoの論文では、ステップ数50の場合は7.0、ステップ数20未満（10など）で17.0が推奨されています。
 </details>

@@ -393,7 +393,7 @@ def sample_image_inference(accelerator, args, transformer, dit_dtype, vae, save_
     height = sample_parameter.get("height", 256)
     frame_count = sample_parameter.get("frame_count", 1)
     guidance_scale = sample_parameter.get("guidance_scale", 6.0)
-    discrete_flow_shift = sample_parameter.get("discrete_flow_shift", 7.0)
+    discrete_flow_shift = sample_parameter.get("discrete_flow_shift", 14.5)
     seed = sample_parameter.get("seed")
     prompt: str = sample_parameter.get("prompt", "")
 
