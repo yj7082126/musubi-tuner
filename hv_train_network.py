@@ -208,6 +208,11 @@ def line_to_prompt_dict(line: str) -> dict:
                 prompt_dict["guidance_scale"] = float(m.group(1))
                 continue
 
+            m = re.match(r"fs ([\d\.]+)", parg, re.IGNORECASE)
+            if m:  # scale
+                prompt_dict["discrete_flow_shift"] = float(m.group(1))
+                continue
+
             # m = re.match(r"l ([\d\.]+)", parg, re.IGNORECASE)
             # if m:  # scale
             #     prompt_dict["scale"] = float(m.group(1))
@@ -387,7 +392,8 @@ def sample_image_inference(accelerator, args, transformer, dit_dtype, vae, save_
     width = sample_parameter.get("width", 256)  # make smaller for faster and memory saving inference
     height = sample_parameter.get("height", 256)
     frame_count = sample_parameter.get("frame_count", 1)
-    guidance_scale = sample_parameter.get("guidance_scale", 7.0)
+    guidance_scale = sample_parameter.get("guidance_scale", 6.0)
+    discrete_flow_shift = sample_parameter.get("discrete_flow_shift", 7.0)
     seed = sample_parameter.get("seed")
     prompt: str = sample_parameter.get("prompt", "")
 
@@ -416,11 +422,12 @@ def sample_image_inference(accelerator, args, transformer, dit_dtype, vae, save_
     logger.info(f"frame count: {frame_count}")
     logger.info(f"sample steps: {sample_steps}")
     logger.info(f"guidance scale: {guidance_scale}")
+    logger.info(f"discrete flow shift: {discrete_flow_shift}")
     if seed is not None:
         logger.info(f"seed: {seed}")
 
     # Prepare scheduler for each prompt
-    scheduler = FlowMatchDiscreteScheduler(shift=args.discrete_flow_shift, reverse=True, solver="euler")
+    scheduler = FlowMatchDiscreteScheduler(shift=discrete_flow_shift, reverse=True, solver="euler")
 
     # Number of inference steps for sampling
     scheduler.set_timesteps(sample_steps, device=device)
