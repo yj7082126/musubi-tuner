@@ -340,7 +340,7 @@ def decode_latents(args, latents, device):
     with torch.no_grad():
         image = vae.decode(latents, return_dict=False)[0]
 
-    if expand_temporal_dim or image.shape[2] == 1:
+    if expand_temporal_dim:
         image = image.squeeze(2)
 
     image = (image / 2 + 0.5).clamp(0, 1)
