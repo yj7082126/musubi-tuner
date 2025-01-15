@@ -972,7 +972,7 @@ class FineTuningTrainer:
                 is_lora=False,
             )
 
-            save_file(transformer.state_dict(), ckpt_file, sai_metadata)
+            save_file(unwrapped_nw.state_dict(), ckpt_file, sai_metadata)
             if args.huggingface_repo_id is not None:
                 huggingface_utils.upload(args, ckpt_file, "/" + ckpt_name, force_sync_upload=force_sync_upload)
 
