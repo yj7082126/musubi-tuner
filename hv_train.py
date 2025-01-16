@@ -1033,10 +1033,7 @@ class FineTuningTrainer:
 
                     pos_emb_shape = latents.shape[1:]
                     if pos_emb_shape not in pos_embed_cache:
-                        if isinstance(transformer, torch.nn.parallel.DistributedDataParallel):
-                            freqs_cos, freqs_sin = get_rotary_pos_embed_by_shape(transformer.module, latents.shape[2:])
-                        else:
-                            freqs_cos, freqs_sin = get_rotary_pos_embed_by_shape(transformer, latents.shape[2:])
+                        freqs_cos, freqs_sin = get_rotary_pos_embed_by_shape(accelerator.unwrap_model(transformer), latents.shape[2:])
                         # freqs_cos = freqs_cos.to(device=accelerator.device, dtype=dit_dtype)
                         # freqs_sin = freqs_sin.to(device=accelerator.device, dtype=dit_dtype)
                         pos_embed_cache[pos_emb_shape] = (freqs_cos, freqs_sin)
