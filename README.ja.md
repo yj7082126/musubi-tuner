@@ -19,6 +19,7 @@
     - [latentの事前キャッシュ](#latentの事前キャッシュ)
     - [Text Encoder出力の事前キャッシュ](#Text-Encoder出力の事前キャッシュ)
     - [学習](#学習)
+    - [LoRAの重みのマージ](#LoRAの重みのマージ)
     - [推論](#推論)
     - [LoRAの形式の変換](#LoRAの形式の変換)
 - [その他](#その他)
@@ -34,6 +35,10 @@
 *リポジトリは開発中です。*
 
 ### 最近の更新
+
+- 2025/01/16
+    - LoRAの重みをマージするスクリプト、`merge_lora.py`が追加されました。PR [#37](https://github.com/kohya-ss/musubi-tuner/pull/37) kaykyr氏に感謝いたします。詳細は[LoRAの重みのマージ](#LoRAの重みのマージ)を参照してください。
+    - サンプルの学習設定を、学習率を2e-4に、`--timestep_sampling`を`shift`に、`--discrete_flow_shift`を7.0に変更しました。より高速な学習が期待されます。詳細は[学習](#学習)を参照してください。
 
 - 2025/01/14
     - `hv_generate_video.py`に、LoRAマージ後のDiTモデルを保存する`--save_merged_model`オプションを暫定的に追加しました。詳細は[推論](#推論)を参照してください。
@@ -186,13 +191,17 @@ VRAMが足りない場合（16GB程度未満の場合）は、`--fp8_llm`を指�
 accelerate launch --num_cpu_threads_per_process 1 --mixed_precision bf16 hv_train_network.py 
     --dit path/to/ckpts/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt 
     --dataset_config path/to/toml --sdpa --mixed_precision bf16 --fp8_base 
-    --optimizer_type adamw8bit --learning_rate 1e-3 --gradient_checkpointing 
-     --max_data_loader_n_workers 2 --persistent_data_loader_workers 
+    --optimizer_type adamw8bit --learning_rate 2e-4 --gradient_checkpointing 
+    --max_data_loader_n_workers 2 --persistent_data_loader_workers 
     --network_module networks.lora --network_dim 32 
-    --timestep_sampling sigmoid --discrete_flow_shift 1.0 
+    --timestep_sampling shift --discrete_flow_shift 7.0 
     --max_train_epochs 16 --save_every_n_epochs 1 --seed 42
     --output_dir path/to/output_dir --output_name name-of-lora
 ```
+
+__更新__：サンプルの学習率を1e-3から2e-4に、`--timestep_sampling`を`sigmoid`から`shift`に、`--discrete_flow_shift`を1.0から7.0に変更しました。より高速な学習が期待されます。ディテールが甘くなる場合は、discrete flow shiftを3.0程度に下げてみてください。
+
+ただ、適切な学習率、学習ステップ数、timestepsの分布、loss weightingなどのパラメータは、以前として不明な点が数多くあります。情報提供をお待ちしています。
 
 その他のオプションは`python hv_train_network.py --help`で確認できます（ただし多くのオプションは動作未確認です）。
 
@@ -206,17 +215,14 @@ VRAMが足りない場合は、`--blocks_to_swap`を指定して、一部のブ�
 
 `--split_attn`を指定すると、attentionを分割して処理します。速度が多少低下しますが、VRAM使用量はわずかに減ります。
 
-サンプル動画生成は現時点では実装されていません。
-
 学習されるLoRAの形式は、`sd-scripts`と同じです。
 
 `--show_timesteps`に`image`（`matplotlib`が必要）または`console`を指定すると、学習時のtimestepsの分布とtimestepsごとのloss weightingが確認できます。
 
 学習中のサンプル画像生成については、[こちらのドキュメント](./docs/sampling_during_training.md)を参照してください。その他の高度な設定については[こちらのドキュメント](./docs/advanced_config.md)を参照してください。
 
-適切な学習率、学習ステップ数、timestepsの分布、loss weightingなどのパラメータは、現時点ではわかっていません。情報提供をお待ちしています。
+### LoRAの重みのマージ
 
-### LoRAウェイトのマージ
 ```bash
 python merge_lora.py \
     --dit path/to/ckpts/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt \
@@ -225,6 +231,10 @@ python merge_lora.py \
     --device cpu \
     --lora_multiplier 1.0
 ```
+
+`--device`には計算を行うデバイス（`cpu`または`cuda`等）を指定してください。`cuda`を指定すると計算が高速化されます。
+
+`--lora_weight`にはマージするLoRAの重みを、`--lora_multiplier`にはLoRAの重みの係数を、それぞれ指定してください。複数個が指定可能で、両者の数は一致させてください。
 
 ### 推論
 
