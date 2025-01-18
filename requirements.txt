@@ -12,7 +12,7 @@ pillow==10.2.0
 safetensors==0.4.5
 toml==0.10.2
 tqdm
-torch
+torch==2.5.1+cu124
 torchvision
 transformers==4.46.3
 voluptuous==0.15.2
