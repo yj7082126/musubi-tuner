@@ -36,6 +36,9 @@ This repository provides scripts for training LoRA (Low-Rank Adaptation) models 
 
 ### Recent Updates
 
+- Jan 18, 2025
+    - Video2video inference is now possible with `hv_generate_video.py`. For details, please refer to [Inference](#inference).
+
 - Jan 16, 2025
     - Added a script to merge LoRA weights, `merge_lora.py`. Thanks to kaykyr for PR [#37](https://github.com/kohya-ss/musubi-tuner/pull/37). For details, please refer to [Merging LoRA Weights](#merging-lora-weights).
     - Changed the sample training settings to a learning rate of 2e-4, `--timestep_sampling` to `shift`, and `--discrete_flow_shift` to 7.0. Faster training is expected. For details, please refer to [Training](#training).
@@ -274,7 +277,11 @@ For `--output_type`, specify either `both`, `latent`, `video` or `images`. `both
 
 `--flow_shift` can be specified to shift the timestep (discrete flow shift). The default value when omitted is 7.0, which is the recommended value for 50 inference steps. In the HunyuanVideo paper, 7.0 is recommended for 50 steps, and 17.0 is recommended for less than 20 steps (e.g. 10).
 
-- You can save the DiT model after LoRA merge with the `--save_merged_model` option. Specify `--save_merged_model path/to/merged_model.safetensors`. Note that inference will not be performed when this option is specified.
+By specifying `--video_path`, video2video inference is possible. Specify a video file or a directory containing multiple image files (the image files are sorted by file name and used as frames). An error will occur if the video is shorter than `--video_length`. You can specify the strength with `--strength`. It can be specified from 0 to 1.0, and the larger the value, the greater the change from the original video.
+
+Note that video2video inference is experimental.
+
+You can save the DiT model after LoRA merge with the `--save_merged_model` option. Specify `--save_merged_model path/to/merged_model.safetensors`. Note that inference will not be performed when this option is specified.
 
 ### Convert LoRA to another format
 

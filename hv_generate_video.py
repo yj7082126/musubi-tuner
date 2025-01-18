@@ -536,9 +536,7 @@ def main():
             if len(video) < video_length:
                 raise ValueError(f"Video length is less than {video_length}")
             video = np.stack(video, axis=0)  # F, H, W, C
-            print(video.shape)
             video = torch.from_numpy(video).permute(3, 0, 1, 2).unsqueeze(0).float()  # 1, C, F, H, W
-            print(video.shape)
             video = video / 255.0
 
             logger.info(f"Encoding video to latents")
