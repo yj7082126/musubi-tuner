@@ -294,10 +294,13 @@ def load_video(
     start_frame: Optional[int] = None,
     end_frame: Optional[int] = None,
     bucket_selector: Optional[BucketSelector] = None,
+    bucket_reso: Optional[tuple[int, int]] = None,
 ) -> list[np.ndarray]:
+    """
+    bucket_reso: if given, resize the video to the bucket resolution, (width, height)
+    """
     container = av.open(video_path)
     video = []
-    bucket_reso = None
     for i, frame in enumerate(container.decode(video=0)):
         if start_frame is not None and i < start_frame:
             continue
