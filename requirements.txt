@@ -1,3 +1,6 @@
+# Custom index URL for specific packages
+--extra-index-url https://download.pytorch.org/whl/cu124
+
 accelerate==1.2.1
 av==14.0.1
 bitsandbytes==0.45.0
@@ -8,11 +11,13 @@ opencv-python==4.10.0.84
 pillow==10.2.0
 safetensors==0.4.5
 toml==0.10.2
-tqdm==4.67.1
+tqdm
+torch
+torchvision
 transformers==4.46.3
 voluptuous==0.15.2
 
 # optional dependencies
-# ascii-magic==2.3.0
-# matplotlib==3.10.0
-# tensorboard
+ascii-magic==2.3.0
+matplotlib==3.10.0
+tensorboard
