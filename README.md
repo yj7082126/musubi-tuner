@@ -14,7 +14,7 @@
     - [Features](#features)
   - [Installation](#installation)
     - [pip based installation](#pip-based-installation)
-    - [uv based installation (recommended)](#uv-based-installation-recommended)
+    - [uv based installation](#uv-based-installation)
     - [Linux/MacOS](#linuxmacos)
     - [Windows](#windows)
   - [Model Download](#model-download)
@@ -132,7 +132,7 @@ Optional dependencies for additional features:
 pip install ascii-magic matplotlib tensorboard
 ```
 
-### uv based installation (recommended)
+### uv based installation
 
 1. Install uv (if not already present on your OS).
 
@@ -237,8 +237,6 @@ Adjust `--batch_size` according to your available VRAM.
 For systems with limited VRAM (less than ~16GB), use `--fp8_llm` to run the LLM in fp8 mode.
 
 ### Training
-
-Make sure your venv is active. For uv windows install: `.\.venv\Scripts\activate` or for linux uv install `source ./.venv/bin/activate`
 
 Start training using the following command (input as a single line):
 
