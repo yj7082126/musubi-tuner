@@ -36,6 +36,11 @@ This repository provides scripts for training LoRA (Low-Rank Adaptation) models 
 
 ### Recent Updates
 
+- Jan 19, 2025
+    - When pre-caching latents and Text Encoder outputs, files not included in the dataset are automatically deleted. This prevents unexpected files from being left behind and used in training.
+        - You can still keep cache files as before by specifying `--keep_cache`.
+    - Fixed an issue where specifying `--skip_existing` during pre-caching of Text Encoder outputs did not work correctly.
+
 - Jan 18, 2025
     - Video2video inference is now possible with `hv_generate_video.py`. For details, please refer to [Inference](#inference).
 
@@ -49,28 +54,6 @@ This repository provides scripts for training LoRA (Low-Rank Adaptation) models 
 - Jan 13, 2025
     - Changed the settings for sample image/video generation to address the issue of blurry sample images/videos during training. For details, please refer to [this document](./docs/sampling_during_training.md).
         - You need to set the discrete flow shift and guidance scale correctly during inference, but the training settings were used as they were, causing this issue. We have set default values, which should improve the situation. You can specify the discrete flow shift with `--fs` and the guidance scale with `--g`.
-
-- Jan 12, 2025
-    - Sample image generation during training is now possible. Thanks to NSFW-API. Please refer to [this document](./docs/sampling_during_training.md) for details.
-    - You can now specify the number of repetitions for each dataset. The dataset is repeated the specified number of times, and the training is performed as one epoch. Specify `num_repeats` in the `.toml`. For details, please refer to [this document](./dataset/dataset_config.md).
-    - LoRA now excludes `img_mod` and `txt_mod` of double blocks and `modulation` of single blocks by default. According to reports from the community, this has improved the training results. You can change the target modules by specifying `exclude_patterns` and `include_patterns` with `--network_args`. For details, please refer to [this document](./docs/advanced_config.md). 
-        - If you are resuming training by specifying the previous weights with `--network_weights`, please specify `--network_args "include_patterns=[r'.*(img_mod|txt_mod|modulation).*']"`.
-    - LoRA+ is now available. Specify `loraplus_lr_ratio` in `--network_args`. For details, please refer to [this document](./docs/advanced_config.md).
-
-- Jan 11, 2025
-    - Removed the hash values of the models to be trained (DiT, VAE) from the metadata saved in LoRA. The hash values are almost unused and take time to compute. If you encounter any issues, please let us know.
-    - I have released the weights of the DiT model converted to fp8 [here](https://huggingface.co/kohya-ss/HunyuanVideo-fp8_e4m3fn-unofficial). This can only be used when `--fp8_base` is specified. Download and specify the full path of `mp_rank_00_model_states_fp8.safetensors` to `--dit`. The initialization process at the start of training will be faster.
-
-- Jan 10, 2025
-    - Fixed a bug where `--split_attn` was applied even when not specified.
-    - xformers is now available for training and inference. `--split_attn` is required when using xformers.
-    - Fixed a bug in `flash` mode and confirmed operation. `--split_attn` can now be specified during inference for `flash` mode.
-    - A simple speed comparison during training showed that for training with 1280x720 resolution images, batch size=3, RTX 4090, and Windows 10, the order of speed was `flash` > `flash` + `--split_attn` == `xformers` + `--split_attn` > `sdpa` > `sdpa` + `--split_attn` (`flash` was the fastest).
-        - `sdpa` was about 12% slower than `flash`, and `xformers` + `--split_attn` was about 4% slower than `flash`.
-    - During inference, `flash` >= `sageattn` > `xformers` > `sdpa` (all with `--split_attn`). However, the speed difference between `sdpa` and `flash` is about 10%. Memory usage was almost the same.
-
-- Jan 08, 2025
-    - __Important Update__: Fixed a bug where latents were scaled twice during caching and training. Please re-run `cache_latents.py` (without specifying `--skip_existing`) to re-cache latents.
 
 ### Releases
 
@@ -177,6 +160,8 @@ If you're running low on VRAM, reduce `--vae_spatial_tile_sample_min_size` to ar
 
 Use `--debug_mode image` to display dataset images and captions in a new window, or `--debug_mode console` to display them in the console (requires `ascii-magic`).
 
+By default, cache files not included in the dataset are automatically deleted. You can still keep cache files as before by specifying `--keep_cache`.
+
 ### Text Encoder Output Pre-caching
 
 Text Encoder output pre-caching is required. Create the cache using the following command:
@@ -190,6 +175,8 @@ For additional options, use `python cache_text_encoder_outputs.py --help`.
 Adjust `--batch_size` according to your available VRAM.
 
 For systems with limited VRAM (less than ~16GB), use `--fp8_llm` to run the LLM in fp8 mode.
+
+By default, cache files not included in the dataset are automatically deleted. You can still keep cache files as before by specifying `--keep_cache`.
 
 ### Training
 
