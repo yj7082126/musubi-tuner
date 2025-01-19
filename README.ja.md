@@ -36,6 +36,11 @@
 
 ### 最近の更新
 
+- 2025/01/19
+    - latentとText Encoder出力の事前キャッシュ時に、データセットに含まれないキャッシュファイルを自動で消去するようにしました。これにより予期しないファイルが残り、学習に使用されてしまう問題が解消されます。
+        - `--keep_cache`で今までと同様にキャッシュファイルを残すことができます。
+    - Text Encoder出力の事前キャッシュ時に、`--skip_existing`を指定すると正しく動作しない問題を修正しました。
+
 - 2025/01/18
     - `hv_generate_video.py`でvideo2videoの推論が可能になりました。詳細は[推論](#推論)を参照してください。
 
@@ -49,28 +54,6 @@
 - 2025/01/13
     - 学習中のサンプル画像（動画）がぼやける現象に対応するため、サンプル生成時の設定を変更しました。詳細は[こちら](./docs/sampling_during_training.md)をご参照ください。
         - 推論時にdiscrete flow shiftとguidance scaleを正しく設定する必要がありますが、学習時の設定がそのまま使われていたため、この事象が発生していました。デフォルト値を設定したため、改善されると思われます。また`--fs`でdiscrete flow shiftを、`--g`でguidance scaleを指定できます。
-
-- 2025/01/12
-    - 学習中のサンプル画像生成が可能になりました。NSFW-API氏に感謝いたします。詳細は[こちらのドキュメント](./docs/sampling_during_training.md)を参照してください。
-    - データセットごとに繰り返し回数を指定できるようになりました。指定した数だけデータセットを繰り返し、1 epochとして学習します。`.toml`に`num_repeats`を指定してください。詳細は[こちらのドキュメント](./dataset/dataset_config.md)を参照してください。
-    - LoRAの適用対象モジュールから、double blocksの`img_mod`および`txt_mod`、single blocksの`modulation`をデフォルトで除外するようにしました。コミュニティからの報告によると、これにより学習結果が改善されるようです。`--network_args`で`exclude_patterns`および`include_patterns`を指定して、適用対象モジュールを変更できます。詳細は[こちらのドキュメント](./docs/advanced_config.md)を参照してください。
-        - 以前の重みを`--network_weights`で指定して学習を再開する場合、お手数ですが `--network_args "include_patterns=[r'.*(img_mod|txt_mod|modulation).*']"`を指定してください。
-    - LoRA+についてもそちらのドキュメントに追加しました。
-
-- 2025/01/11
-    - LoRAのメタデータに保存されていた、学習対象モデル（DiT、VAE）のハッシュ値を削除しました。ハッシュ値はほぼ使用されておらず、計算に時間が掛かるためです。もし問題があればご連絡ください。
-    - fp8に変換したDiTモデルの重みを[こちら](https://huggingface.co/kohya-ss/HunyuanVideo-fp8_e4m3fn-unofficial)で公開しました。`--fp8_base`指定時のみ使用可能です。ダウンロードして、`--dit`に`mp_rank_00_model_states_fp8.safetensors`のフルパスを指定してください。学習開始時の初期化処理が速くなります。
-
-- 2025/01/10
-    - `--split_attn`を指定しない場合でも、`--split_attn`が適用された状態になっていた不具合を修正しました。
-    - 学習および推論でxformersが利用可能になりました。xformers利用時は`--split_attn`の指定が必要です。
-    - `flash`モードでの不具合を修正し、動作を確認しました。また推論時に、`--split_attn`を指定可能にしました。
-    - 学習時の簡易な速度比較を行うと、1280x720解像度の画像による学習、batch size=3、RTX 4090、Windows 10の環境では、`flash`  > `flash` + `--split_attn` == `xformers` + `--split_attn` > `sdpa` > `sdpa` + `--split_attn` となりました（`flash`が最も高速）。
-        - `sdpa`は`flash`より12%程度遅く、`xformers` + `--split_attn`は`flash`より4%程度遅いようです。
-    - 推論時は `flash` >= `sageattn` > `xformers` > `sdpa` となりました（いずれも`--split_attn`を指定）。ただし、`sdpa`と`flash`の速度差は10%程度です。またメモリ使用量はほぼ同じでした。
-
-- 2025/01/08
-    - __重要な更新__：latentsがキャッシュ時と学習時の二回、scalingされる不具合を修正しました。お手数ですが、cache_latents.pyを（`--skip_existing`を指定せずに）再度実行して、latentsを再キャッシュしてください。
 
 ### リリースについて
 
@@ -172,6 +155,8 @@ VRAMが足りない場合は、`--vae_spatial_tile_sample_min_size`を128程度�
 
 `--debug_mode image` を指定するとデータセットの画像とキャプションが新規ウィンドウに表示されます。`--debug_mode console`でコンソールに表示されます（`ascii-magic`が必要）。
 
+デフォルトではデータセットに含まれないキャッシュファイルは自動的に削除されます。`--keep_cache`を指定すると、キャッシュファイルを残すことができます。
+
 ### Text Encoder出力の事前キャッシュ
 
 Text Encoder出力の事前キャッシュは必須です。以下のコマンドを使用して、事前キャッシュを作成してください。
@@ -185,6 +170,8 @@ python cache_text_encoder_outputs.py --dataset_config path/to/toml  --text_encod
 `--batch_size`はVRAMに合わせて調整してください。
 
 VRAMが足りない場合（16GB程度未満の場合）は、`--fp8_llm`を指定して、fp8でLLMを実行してください。
+
+デフォルトではデータセットに含まれないキャッシュファイルは自動的に削除されます。`--keep_cache`を指定すると、キャッシュファイルを残すことができます。
 
 ### 学習
 
