@@ -1088,6 +1088,12 @@ class NetworkTrainer:
                 print(line)
 
     def train(self, args):
+        # check required arguments
+        if args.dataset_config is None:
+            raise ValueError("dataset_config is required / dataset_configが必要です")
+        if args.dit is None:   
+            raise ValueError("path to DiT model is required / DiTモデルのパスが必要です")
+        
         # show timesteps for debugging
         if args.show_timesteps:
             self.show_timesteps(args)
@@ -1785,7 +1791,6 @@ def setup_parser() -> argparse.ArgumentParser:
         "--dataset_config",
         type=pathlib.Path,
         default=None,
-        required=True,
         help="config file for dataset / データセットの設定ファイル",
     )
 
@@ -2013,7 +2018,7 @@ def setup_parser() -> argparse.ArgumentParser:
     )
 
     # model settings
-    parser.add_argument("--dit", type=str, required=True, help="DiT checkpoint path / DiTのチェックポイントのパス")
+    parser.add_argument("--dit", type=str, help="DiT checkpoint path / DiTのチェックポイントのパス")
     parser.add_argument("--dit_dtype", type=str, default=None, help="data type for DiT, default is bfloat16")
     parser.add_argument("--vae", type=str, help="VAE checkpoint path / VAEのチェックポイントのパス")
     parser.add_argument("--vae_dtype", type=str, default=None, help="data type for VAE, default is float16")
@@ -2190,7 +2195,6 @@ def setup_parser() -> argparse.ArgumentParser:
         "--output_name",
         type=str,
         default=None,
-        required=True,
         help="base name of trained model file / 学習後のモデルの拡張子を除くファイル名",
     )
     parser.add_argument("--resume", type=str, default=None, help="saved state to resume training / 学習再開するモデルのstate")
