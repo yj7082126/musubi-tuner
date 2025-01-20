@@ -984,7 +984,7 @@ class FineTuningTrainer:
                 is_lora=False,
             )
 
-            save_file(transformer.state_dict(), ckpt_name, sai_metadata)
+            save_file(unwrapped_nw.state_dict(), ckpt_file, sai_metadata)
             if args.huggingface_repo_id is not None:
                 huggingface_utils.upload(args, ckpt_file, "/" + ckpt_name, force_sync_upload=force_sync_upload)
 
@@ -1045,7 +1045,7 @@ class FineTuningTrainer:
 
                     pos_emb_shape = latents.shape[1:]
                     if pos_emb_shape not in pos_embed_cache:
-                        freqs_cos, freqs_sin = get_rotary_pos_embed_by_shape(transformer, latents.shape[2:])
+                        freqs_cos, freqs_sin = get_rotary_pos_embed_by_shape(accelerator.unwrap_model(transformer), latents.shape[2:])
                         # freqs_cos = freqs_cos.to(device=accelerator.device, dtype=dit_dtype)
                         # freqs_sin = freqs_sin.to(device=accelerator.device, dtype=dit_dtype)
                         pos_embed_cache[pos_emb_shape] = (freqs_cos, freqs_sin)

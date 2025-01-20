@@ -4,29 +4,38 @@
 
 ## Table of Contents
 
-- [Introduction](#introduction)
-  - [Recent Updates](#recent-updates)
-  - [Releases](#releases)
-- [Overview](#overview)
+- [Musubi Tuner](#musubi-tuner)
+  - [Table of Contents](#table-of-contents)
+  - [Introduction](#introduction)
+    - [Recent Updates](#recent-updates)
+    - [Releases](#releases)
+  - [Overview](#overview)
     - [Hardware Requirements](#hardware-requirements)
     - [Features](#features)
-- [Installation](#installation)
-- [Model Download](#model-download)
+  - [Installation](#installation)
+    - [pip based installation](#pip-based-installation)
+    - [uv based installation](#uv-based-installation)
+    - [Linux/MacOS](#linuxmacos)
+    - [Windows](#windows)
+  - [Model Download](#model-download)
     - [Use the Official HunyuanVideo Model](#use-the-official-hunyuanvideo-model)
     - [Using ComfyUI Models for Text Encoder](#using-comfyui-models-for-text-encoder)
-- [Usage](#usage)
+  - [Usage](#usage)
     - [Dataset Configuration](#dataset-configuration)
     - [Latent Pre-caching](#latent-pre-caching)
+      - [pip based install](#pip-based-install)
+      - [uv based install](#uv-based-install)
     - [Text Encoder Output Pre-caching](#text-encoder-output-pre-caching)
     - [Training](#training)
     - [Merging LoRA Weights](#merging-lora-weights)
     - [Inference](#inference)
     - [Convert LoRA to another format](#convert-lora-to-another-format)
-- [Miscellaneous](#miscellaneous)
+  - [Miscellaneous](#miscellaneous)
     - [SageAttention Installation](#sageattention-installation)
-- [Disclaimer](#disclaimer)
-- [Contributing](#contributing)
-- [License](#license)
+    - [PyTorch version](#pytorch-version)
+  - [Disclaimer](#disclaimer)
+  - [Contributing](#contributing)
+  - [License](#license)
 
 ## Introduction
 
@@ -35,6 +44,15 @@ This repository provides scripts for training LoRA (Low-Rank Adaptation) models 
 *This repository is under development.*
 
 ### Recent Updates
+
+- Jan 20, 2025
+    - Added experimental installation instructions using uv. Thanks to bmaltais for PR [#51](https://github.com/kohya-ss/musubi-tuner/pull/51) for this addition. However, the settings are incomplete, so feedback is welcome.
+    - Added a documentation for [TensorBoard logging](./docs/advanced_config.md#save-and-view-logs-in-tensorboard-format--tensorboard形式のログの保存と参照). 
+
+- Jan 19, 2025
+    - When pre-caching latents and Text Encoder outputs, files not included in the dataset are automatically deleted. This prevents unexpected files from being left behind and used in training.
+        - You can still keep cache files as before by specifying `--keep_cache`.
+    - Fixed an issue where specifying `--skip_existing` during pre-caching of Text Encoder outputs did not work correctly.
 
 - Jan 18, 2025
     - Video2video inference is now possible with `hv_generate_video.py`. For details, please refer to [Inference](#inference).
@@ -49,28 +67,6 @@ This repository provides scripts for training LoRA (Low-Rank Adaptation) models 
 - Jan 13, 2025
     - Changed the settings for sample image/video generation to address the issue of blurry sample images/videos during training. For details, please refer to [this document](./docs/sampling_during_training.md).
         - You need to set the discrete flow shift and guidance scale correctly during inference, but the training settings were used as they were, causing this issue. We have set default values, which should improve the situation. You can specify the discrete flow shift with `--fs` and the guidance scale with `--g`.
-
-- Jan 12, 2025
-    - Sample image generation during training is now possible. Thanks to NSFW-API. Please refer to [this document](./docs/sampling_during_training.md) for details.
-    - You can now specify the number of repetitions for each dataset. The dataset is repeated the specified number of times, and the training is performed as one epoch. Specify `num_repeats` in the `.toml`. For details, please refer to [this document](./dataset/dataset_config.md).
-    - LoRA now excludes `img_mod` and `txt_mod` of double blocks and `modulation` of single blocks by default. According to reports from the community, this has improved the training results. You can change the target modules by specifying `exclude_patterns` and `include_patterns` with `--network_args`. For details, please refer to [this document](./docs/advanced_config.md). 
-        - If you are resuming training by specifying the previous weights with `--network_weights`, please specify `--network_args "include_patterns=[r'.*(img_mod|txt_mod|modulation).*']"`.
-    - LoRA+ is now available. Specify `loraplus_lr_ratio` in `--network_args`. For details, please refer to [this document](./docs/advanced_config.md).
-
-- Jan 11, 2025
-    - Removed the hash values of the models to be trained (DiT, VAE) from the metadata saved in LoRA. The hash values are almost unused and take time to compute. If you encounter any issues, please let us know.
-    - I have released the weights of the DiT model converted to fp8 [here](https://huggingface.co/kohya-ss/HunyuanVideo-fp8_e4m3fn-unofficial). This can only be used when `--fp8_base` is specified. Download and specify the full path of `mp_rank_00_model_states_fp8.safetensors` to `--dit`. The initialization process at the start of training will be faster.
-
-- Jan 10, 2025
-    - Fixed a bug where `--split_attn` was applied even when not specified.
-    - xformers is now available for training and inference. `--split_attn` is required when using xformers.
-    - Fixed a bug in `flash` mode and confirmed operation. `--split_attn` can now be specified during inference for `flash` mode.
-    - A simple speed comparison during training showed that for training with 1280x720 resolution images, batch size=3, RTX 4090, and Windows 10, the order of speed was `flash` > `flash` + `--split_attn` == `xformers` + `--split_attn` > `sdpa` > `sdpa` + `--split_attn` (`flash` was the fastest).
-        - `sdpa` was about 12% slower than `flash`, and `xformers` + `--split_attn` was about 4% slower than `flash`.
-    - During inference, `flash` >= `sageattn` > `xformers` > `sdpa` (all with `--split_attn`). However, the speed difference between `sdpa` and `flash` is about 10%. Memory usage was almost the same.
-
-- Jan 08, 2025
-    - __Important Update__: Fixed a bug where latents were scaled twice during caching and training. Please re-run `cache_latents.py` (without specifying `--skip_existing`) to re-cache latents.
 
 ### Releases
 
@@ -93,6 +89,8 @@ You can find the latest release and version history in our [releases page](https
 - Multi-GPU support not implemented
 
 ## Installation
+
+### pip based installation
 
 Python 3.10 or later is required (verified with 3.10).
 
@@ -120,6 +118,28 @@ Optional dependencies for additional features:
 ```bash
 pip install ascii-magic matplotlib tensorboard
 ```
+
+### uv based installation (experimenal)
+
+You can also install using uv, but installation with uv is experimental. Feedback is welcome.
+
+1. Install uv (if not already present on your OS).
+
+#### Linux/MacOS
+
+```sh
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Follow the instructions to add the uv path manually until you restart your session...
+
+#### Windows
+
+```powershell
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+Follow the instructions to add the uv path manually until you reboot your system... or just reboot your system at this point.
 
 ## Model Download
 
@@ -167,8 +187,18 @@ Please refer to [dataset configuration guide](./dataset/dataset_config.md).
 
 Latent pre-caching is required. Create the cache using the following command:
 
+#### pip based install
+
 ```bash
 python cache_latents.py --dataset_config path/to/toml --vae path/to/ckpts/hunyuan-video-t2v-720p/vae/pytorch_model.pt --vae_chunk_size 32 --vae_tiling
+```
+
+#### uv based install
+
+If you have installed with `uv`, you can use `uv run` to run the script. Other scripts can be run in the same way. (Note that the installation with `uv` is experimental. Feedback is welcome. If you encounter any issues, please use the pip-based installation.)
+
+```bash
+uv run cache_latents.py --dataset_config path/to/toml --vae path/to/ckpts/hunyuan-video-t2v-720p/vae/pytorch_model.pt --vae_chunk_size 32 --vae_tiling
 ```
 
 For additional options, use `python cache_latents.py --help`.
@@ -176,6 +206,8 @@ For additional options, use `python cache_latents.py --help`.
 If you're running low on VRAM, reduce `--vae_spatial_tile_sample_min_size` to around 128 and lower the `--batch_size`.
 
 Use `--debug_mode image` to display dataset images and captions in a new window, or `--debug_mode console` to display them in the console (requires `ascii-magic`).
+
+By default, cache files not included in the dataset are automatically deleted. You can still keep cache files as before by specifying `--keep_cache`.
 
 ### Text Encoder Output Pre-caching
 
@@ -185,11 +217,19 @@ Text Encoder output pre-caching is required. Create the cache using the followin
 python cache_text_encoder_outputs.py --dataset_config path/to/toml  --text_encoder1 path/to/ckpts/text_encoder --text_encoder2 path/to/ckpts/text_encoder_2 --batch_size 16
 ```
 
+or for uv:
+
+```bash
+uv run cache_text_encoder_outputs.py --dataset_config path/to/toml  --text_encoder1 path/to/ckpts/text_encoder --text_encoder2 path/to/ckpts/text_encoder_2 --batch_size 16
+```
+
 For additional options, use `python cache_text_encoder_outputs.py --help`.
 
 Adjust `--batch_size` according to your available VRAM.
 
 For systems with limited VRAM (less than ~16GB), use `--fp8_llm` to run the LLM in fp8 mode.
+
+By default, cache files not included in the dataset are automatically deleted. You can still keep cache files as before by specifying `--keep_cache`.
 
 ### Training
 
@@ -197,6 +237,20 @@ Start training using the following command (input as a single line):
 
 ```bash
 accelerate launch --num_cpu_threads_per_process 1 --mixed_precision bf16 hv_train_network.py 
+    --dit path/to/ckpts/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt 
+    --dataset_config path/to/toml --sdpa --mixed_precision bf16 --fp8_base 
+    --optimizer_type adamw8bit --learning_rate 2e-4 --gradient_checkpointing 
+    --max_data_loader_n_workers 2 --persistent_data_loader_workers 
+    --network_module networks.lora --network_dim 32 
+    --timestep_sampling shift --discrete_flow_shift 7.0 
+    --max_train_epochs 16 --save_every_n_epochs 1 --seed 42
+    --output_dir path/to/output_dir --output_name name-of-lora
+```
+
+or for uv:
+
+```bash
+uv run accelerate launch --num_cpu_threads_per_process 1 --mixed_precision bf16 hv_train_network.py 
     --dit path/to/ckpts/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt 
     --dataset_config path/to/toml --sdpa --mixed_precision bf16 --fp8_base 
     --optimizer_type adamw8bit --learning_rate 2e-4 --gradient_checkpointing 
@@ -227,12 +281,25 @@ The format of LoRA trained is the same as `sd-scripts`.
 
 `--show_timesteps` can be set to `image` (requires `matplotlib`) or `console` to display timestep distribution and loss weighting during training.
 
+You can record logs during training. Refer to [Save and view logs in TensorBoard format](./docs/advanced_config.md#save-and-view-logs-in-tensorboard-format--tensorboard形式のログの保存と参照).
+
 For sample image generation during training, refer to [this document](./docs/sampling_during_training.md). For advanced configuration, refer to [this document](./docs/advanced_config.md).
 
 ### Merging LoRA Weights
 
 ```bash
 python merge_lora.py \
+    --dit path/to/ckpts/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt \
+    --lora_weight path/to/lora.safetensors \
+    --save_merged_model path/to/merged_model.safetensors \
+    --device cpu \
+    --lora_multiplier 1.0
+```
+
+or for uv:
+
+```bash
+uv run merge_lora.py \
     --dit path/to/ckpts/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt \
     --lora_weight path/to/lora.safetensors \
     --save_merged_model path/to/merged_model.safetensors \
@@ -250,6 +317,19 @@ Generate videos using the following command:
 
 ```bash
 python hv_generate_video.py --fp8 --video_size 544 960 --video_length 5 --infer_steps 30 
+    --prompt "A cat walks on the grass, realistic style."  --save_path path/to/save/dir --output_type both 
+    --dit path/to/ckpts/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt --attn_mode sdpa --split_attn
+    --vae path/to/ckpts/hunyuan-video-t2v-720p/vae/pytorch_model.pt 
+    --vae_chunk_size 32 --vae_spatial_tile_sample_min_size 128 
+    --text_encoder1 path/to/ckpts/text_encoder 
+    --text_encoder2 path/to/ckpts/text_encoder_2 
+    --seed 1234 --lora_multiplier 1.0 --lora_weight path/to/lora.safetensors
+```
+
+or for uv:
+
+```bash
+uv run hv_generate_video.py --fp8 --video_size 544 960 --video_length 5 --infer_steps 30 
     --prompt "A cat walks on the grass, realistic style."  --save_path path/to/save/dir --output_type both 
     --dit path/to/ckpts/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt --attn_mode sdpa --split_attn
     --vae path/to/ckpts/hunyuan-video-t2v-720p/vae/pytorch_model.pt 
@@ -289,6 +369,12 @@ You can convert LoRA to a format compatible with ComfyUI (presumed to be Diffusi
 
 ```bash
 python convert_lora.py --input path/to/musubi_lora.safetensors --output path/to/another_format.safetensors --target other
+```
+
+or for uv:
+
+```bash
+uv run convert_lora.py --input path/to/musubi_lora.safetensors --output path/to/another_format.safetensors --target other
 ```
 
 Specify the input and output file paths with `--input` and `--output`, respectively.
