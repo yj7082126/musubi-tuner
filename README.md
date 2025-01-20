@@ -4,29 +4,38 @@
 
 ## Table of Contents
 
-- [Introduction](#introduction)
-  - [Recent Updates](#recent-updates)
-  - [Releases](#releases)
-- [Overview](#overview)
+- [Musubi Tuner](#musubi-tuner)
+  - [Table of Contents](#table-of-contents)
+  - [Introduction](#introduction)
+    - [Recent Updates](#recent-updates)
+    - [Releases](#releases)
+  - [Overview](#overview)
     - [Hardware Requirements](#hardware-requirements)
     - [Features](#features)
-- [Installation](#installation)
-- [Model Download](#model-download)
+  - [Installation](#installation)
+    - [pip based installation](#pip-based-installation)
+    - [uv based installation](#uv-based-installation)
+    - [Linux/MacOS](#linuxmacos)
+    - [Windows](#windows)
+  - [Model Download](#model-download)
     - [Use the Official HunyuanVideo Model](#use-the-official-hunyuanvideo-model)
     - [Using ComfyUI Models for Text Encoder](#using-comfyui-models-for-text-encoder)
-- [Usage](#usage)
+  - [Usage](#usage)
     - [Dataset Configuration](#dataset-configuration)
     - [Latent Pre-caching](#latent-pre-caching)
+      - [pip based install](#pip-based-install)
+      - [uv based install](#uv-based-install)
     - [Text Encoder Output Pre-caching](#text-encoder-output-pre-caching)
     - [Training](#training)
     - [Merging LoRA Weights](#merging-lora-weights)
     - [Inference](#inference)
     - [Convert LoRA to another format](#convert-lora-to-another-format)
-- [Miscellaneous](#miscellaneous)
+  - [Miscellaneous](#miscellaneous)
     - [SageAttention Installation](#sageattention-installation)
-- [Disclaimer](#disclaimer)
-- [Contributing](#contributing)
-- [License](#license)
+    - [PyTorch version](#pytorch-version)
+  - [Disclaimer](#disclaimer)
+  - [Contributing](#contributing)
+  - [License](#license)
 
 ## Introduction
 
@@ -77,6 +86,8 @@ You can find the latest release and version history in our [releases page](https
 
 ## Installation
 
+### pip based installation
+
 Python 3.10 or later is required (verified with 3.10).
 
 Create a virtual environment and install PyTorch and torchvision matching your CUDA version. 
@@ -103,6 +114,26 @@ Optional dependencies for additional features:
 ```bash
 pip install ascii-magic matplotlib tensorboard
 ```
+
+### uv based installation
+
+1. Install uv (if not already present on your OS).
+
+### Linux/MacOS
+
+```sh
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Follow the instructions to add the uv path manually until you restart your session...
+
+### Windows
+
+```powershell
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+Follow the instructions to add the uv path manually until you reboot your system... or just reboot your system at this point.
 
 ## Model Download
 
@@ -150,8 +181,16 @@ Please refer to [dataset configuration guide](./dataset/dataset_config.md).
 
 Latent pre-caching is required. Create the cache using the following command:
 
+#### pip based install
+
 ```bash
 python cache_latents.py --dataset_config path/to/toml --vae path/to/ckpts/hunyuan-video-t2v-720p/vae/pytorch_model.pt --vae_chunk_size 32 --vae_tiling
+```
+
+#### uv based install
+
+```bash
+uv run cache_latents.py --dataset_config path/to/toml --vae path/to/ckpts/hunyuan-video-t2v-720p/vae/pytorch_model.pt --vae_chunk_size 32 --vae_tiling
 ```
 
 For additional options, use `python cache_latents.py --help`.
@@ -170,6 +209,12 @@ Text Encoder output pre-caching is required. Create the cache using the followin
 python cache_text_encoder_outputs.py --dataset_config path/to/toml  --text_encoder1 path/to/ckpts/text_encoder --text_encoder2 path/to/ckpts/text_encoder_2 --batch_size 16
 ```
 
+or
+
+```bash
+uv run cache_text_encoder_outputs.py --dataset_config path/to/toml  --text_encoder1 path/to/ckpts/text_encoder --text_encoder2 path/to/ckpts/text_encoder_2 --batch_size 16
+```
+
 For additional options, use `python cache_text_encoder_outputs.py --help`.
 
 Adjust `--batch_size` according to your available VRAM.
@@ -184,6 +229,20 @@ Start training using the following command (input as a single line):
 
 ```bash
 accelerate launch --num_cpu_threads_per_process 1 --mixed_precision bf16 hv_train_network.py 
+    --dit path/to/ckpts/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt 
+    --dataset_config path/to/toml --sdpa --mixed_precision bf16 --fp8_base 
+    --optimizer_type adamw8bit --learning_rate 2e-4 --gradient_checkpointing 
+    --max_data_loader_n_workers 2 --persistent_data_loader_workers 
+    --network_module networks.lora --network_dim 32 
+    --timestep_sampling shift --discrete_flow_shift 7.0 
+    --max_train_epochs 16 --save_every_n_epochs 1 --seed 42
+    --output_dir path/to/output_dir --output_name name-of-lora
+```
+
+or
+
+```bash
+uv run accelerate launch --num_cpu_threads_per_process 1 --mixed_precision bf16 hv_train_network.py 
     --dit path/to/ckpts/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt 
     --dataset_config path/to/toml --sdpa --mixed_precision bf16 --fp8_base 
     --optimizer_type adamw8bit --learning_rate 2e-4 --gradient_checkpointing 
@@ -227,6 +286,17 @@ python merge_lora.py \
     --lora_multiplier 1.0
 ```
 
+or
+
+```bash
+uv run merge_lora.py \
+    --dit path/to/ckpts/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt \
+    --lora_weight path/to/lora.safetensors \
+    --save_merged_model path/to/merged_model.safetensors \
+    --device cpu \
+    --lora_multiplier 1.0
+```
+
 Specify the device to perform the calculation (`cpu` or `cuda`, etc.) with `--device`. Calculation will be faster if `cuda` is specified.
 
 Specify the LoRA weights to merge with `--lora_weight` and the multiplier for the LoRA weights with `--lora_multiplier`. Multiple values can be specified, and the number of values must match.
@@ -237,6 +307,19 @@ Generate videos using the following command:
 
 ```bash
 python hv_generate_video.py --fp8 --video_size 544 960 --video_length 5 --infer_steps 30 
+    --prompt "A cat walks on the grass, realistic style."  --save_path path/to/save/dir --output_type both 
+    --dit path/to/ckpts/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt --attn_mode sdpa --split_attn
+    --vae path/to/ckpts/hunyuan-video-t2v-720p/vae/pytorch_model.pt 
+    --vae_chunk_size 32 --vae_spatial_tile_sample_min_size 128 
+    --text_encoder1 path/to/ckpts/text_encoder 
+    --text_encoder2 path/to/ckpts/text_encoder_2 
+    --seed 1234 --lora_multiplier 1.0 --lora_weight path/to/lora.safetensors
+```
+
+or
+
+```bash
+uv run hv_generate_video.py --fp8 --video_size 544 960 --video_length 5 --infer_steps 30 
     --prompt "A cat walks on the grass, realistic style."  --save_path path/to/save/dir --output_type both 
     --dit path/to/ckpts/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt --attn_mode sdpa --split_attn
     --vae path/to/ckpts/hunyuan-video-t2v-720p/vae/pytorch_model.pt 
@@ -276,6 +359,12 @@ You can convert LoRA to a format compatible with ComfyUI (presumed to be Diffusi
 
 ```bash
 python convert_lora.py --input path/to/musubi_lora.safetensors --output path/to/another_format.safetensors --target other
+```
+
+or
+
+```bash
+uv run convert_lora.py --input path/to/musubi_lora.safetensors --output path/to/another_format.safetensors --target other
 ```
 
 Specify the input and output file paths with `--input` and `--output`, respectively.
