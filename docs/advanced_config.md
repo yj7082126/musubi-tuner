@@ -4,10 +4,7 @@
 
 ## How to specify `network_args` / `network_args`の指定方法
 
-<details>
-<summary>English</summary>
 The `--network_args` option is an option for specifying detailed arguments to LoRA. Specify the arguments in the form of `key=value` in `--network_args`.
-</details>
 
 <details>
 <summary>日本語</summary>
@@ -38,13 +35,9 @@ If you specify `"verbose=True"`, detailed information of LoRA will be displayed.
 
 ## LoRA+
 
-<details>
-<summary>English</summary>
-
 LoRA+ is a method to improve the training speed by increasing the learning rate of the UP side (LoRA-B) of LoRA. Specify the multiplier for the learning rate. The original paper recommends 16, but adjust as needed. It seems to be good to start from around 4. For details, please refer to the [related PR of sd-scripts](https://github.com/kohya-ss/sd-scripts/pull/1233).
 
 Specify `loraplus_lr_ratio` with `--network_args`.
-</details>
 
 <details>
 <summary>日本語</summary>
@@ -65,9 +58,6 @@ accelerate launch --num_cpu_threads_per_process 1 --mixed_precision bf16 hv_trai
 
 *This feature is highly experimental and the specification may change. / この機能は特に実験的なもので、仕様は変更される可能性があります。*
 
-<details>
-<summary>English</summary>
-
 By specifying `exclude_patterns` and `include_patterns` with `--network_args`, you can select the target modules of LoRA.
 
 `exclude_patterns` excludes modules that match the specified pattern. `include_patterns` targets only modules that match the specified pattern.
@@ -79,7 +69,6 @@ The pattern is a regular expression for the module name. The module name is in t
 The patterns are applied in the order of `exclude_patterns`→`include_patterns`. By default, the Linear layers of `img_mod`, `txt_mod`, and `modulation` of double blocks and single blocks are excluded.
 
 (`.*(img_mod|txt_mod|modulation).*` is specified.)
-</details>
 
 <details>
 <summary>日本語</summary>
@@ -110,3 +99,53 @@ Only the modules of single blocks from the 10th / single blocksの10番目以降
 ```bash
 --network_args "exclude_patterns=[r'.*']" "include_patterns=[r'.*single_blocks\.\d{2}\.linear.*']"
 ```
+
+## Save and view logs in TensorBoard format / TensorBoard形式のログの保存と参照
+
+Specify the folder to save the logs with the `--logging_dir` option. Logs in TensorBoard format will be saved.
+
+For example, if you specify `--logging_dir=logs`, a `logs` folder will be created in the working folder, and logs will be saved in the date folder inside it.
+
+Also, if you specify the `--log_prefix` option, the specified string will be added before the date. For example, use `--logging_dir=logs --log_prefix=lora_setting1_` for identification.
+
+To view logs in TensorBoard, open another command prompt and activate the virtual environment. Then enter the following in the working folder.
+
+```powershell
+tensorboard --logdir=logs
+```
+
+(tensorboard installation is required.)
+
+Then open a browser and access http://localhost:6006/ to display it.
+
+<details>
+<summary>日本語</summary>
+`--logging_dir`オプションにログ保存先フォルダを指定してください。TensorBoard形式のログが保存されます。
+
+たとえば`--logging_dir=logs`と指定すると、作業フォルダにlogsフォルダが作成され、その中の日時フォルダにログが保存されます。
+
+また`--log_prefix`オプションを指定すると、日時の前に指定した文字列が追加されます。`--logging_dir=logs --log_prefix=lora_setting1_`などとして識別用にお使いください。
+
+TensorBoardでログを確認するには、別のコマンドプロンプトを開き、仮想環境を有効にしてから、作業フォルダで以下のように入力します。
+
+```powershell
+tensorboard --logdir=logs
+```
+
+（tensorboardのインストールが必要です。）
+
+その後ブラウザを開き、http://localhost:6006/ へアクセスすると表示されます。
+</details>
+
+## Save and view logs in wandb / wandbでログの保存と参照
+
+`--log_with wandb` option is available to save logs in wandb format. `tensorboard` or `all` is also available. The default is `tensorboard`.
+
+Specify the project name with `--log_tracker_name` when using wandb.
+
+<details>
+<summary>日本語</summary>
+`--log_with wandb`オプションを指定するとwandb形式でログを保存することができます。`tensorboard`や`all`も指定可能です。デフォルトは`tensorboard`です。
+
+wandbを使用する場合は、`--log_tracker_name`でプロジェクト名を指定してください。
+</details>

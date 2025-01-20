@@ -47,6 +47,7 @@ This repository provides scripts for training LoRA (Low-Rank Adaptation) models 
 
 - Jan 20, 2025
     - Added experimental installation instructions using uv. Thanks to bmaltais for PR [#51](https://github.com/kohya-ss/musubi-tuner/pull/51) for this addition. However, the settings are incomplete, so feedback is welcome.
+    - Added a documentation for [TensorBoard logging](./docs/advanced_config.md#save-and-view-logs-in-tensorboard-format--tensorboard形式のログの保存と参照). 
 
 - Jan 19, 2025
     - When pre-caching latents and Text Encoder outputs, files not included in the dataset are automatically deleted. This prevents unexpected files from being left behind and used in training.
@@ -279,6 +280,8 @@ Use `--sdpa` for PyTorch's scaled dot product attention. Use `--flash_attn` for 
 The format of LoRA trained is the same as `sd-scripts`.
 
 `--show_timesteps` can be set to `image` (requires `matplotlib`) or `console` to display timestep distribution and loss weighting during training.
+
+You can record logs during training. Refer to [Save and view logs in TensorBoard format](./docs/advanced_config.md#save-and-view-logs-in-tensorboard-format--tensorboard形式のログの保存と参照).
 
 For sample image generation during training, refer to [this document](./docs/sampling_during_training.md). For advanced configuration, refer to [this document](./docs/advanced_config.md).
 
