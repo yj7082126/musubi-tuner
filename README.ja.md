@@ -36,6 +36,9 @@
 
 ### 最近の更新
 
+- 2025/01/20
+    - uv によるインストール手順を試験的に追加しました。PR [#51](https://github.com/kohya-ss/musubi-tuner/pull/51) bmaltais 氏に感謝いたします。ただ、設定等は詰められていないため、フィードバックを歓迎します。
+
 - 2025/01/19
     - latentとText Encoder出力の事前キャッシュ時に、データセットに含まれないキャッシュファイルを自動で消去するようにしました。これにより予期しないファイルが残り、学習に使用されてしまう問題が解消されます。
         - `--keep_cache`で今までと同様にキャッシュファイルを残すことができます。
@@ -77,6 +80,8 @@ Musubi Tunerの解説記事執筆や、関連ツールの開発に取り組ん�
 
 ## インストール
 
+### pipによるインストール
+
 Python 3.10以上を使用してください（3.10で動作確認済み）。
 
 適当な仮想環境を作成し、ご利用のCUDAバージョンに合わせたPyTorchとtorchvisionをインストールしてください。
@@ -100,6 +105,25 @@ pip install -r requirements.txt
 ```bash
 pip install ascii-magic matplotlib tensorboard
 ```
+### uvによるインストール
+
+uvを使用してインストールすることもできますが、uvによるインストールは試験的なものです。フィードバックを歓迎します。
+
+#### Linux/MacOS
+
+```sh
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+表示される指示に従い、pathを設定してください。
+
+#### Windows
+
+```powershell
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+表示される指示に従い、PATHを設定するか、この時点でシステムを再起動してください。
 
 ## モデルのダウンロード
 
@@ -143,11 +167,13 @@ Text EncoderにはComfyUI提供のモデルを使用させていただきます�
 
 ### latentの事前キャッシュ
 
-latentの事前キャッシュは必須です。以下のコマンドを使用して、事前キャッシュを作成してください。
+latentの事前キャッシュは必須です。以下のコマンドを使用して、事前キャッシュを作成してください。（pipによるインストールの場合）
 
 ```bash
 python cache_latents.py --dataset_config path/to/toml --vae path/to/ckpts/hunyuan-video-t2v-720p/vae/pytorch_model.pt --vae_chunk_size 32 --vae_tiling
 ```
+
+uvでインストールした場合は、`uv run python cache_latents.py ...`のように、`uv run`を先頭につけてください。以下のコマンドも同様です。
 
 その他のオプションは`python cache_latents.py --help`で確認できます。
 

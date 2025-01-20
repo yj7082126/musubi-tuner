@@ -45,6 +45,9 @@ This repository provides scripts for training LoRA (Low-Rank Adaptation) models 
 
 ### Recent Updates
 
+- Jan 20, 2025
+    - Added experimental installation instructions using uv. Thanks to bmaltais for PR [#51](https://github.com/kohya-ss/musubi-tuner/pull/51) for this addition. However, the settings are incomplete, so feedback is welcome.
+
 - Jan 19, 2025
     - When pre-caching latents and Text Encoder outputs, files not included in the dataset are automatically deleted. This prevents unexpected files from being left behind and used in training.
         - You can still keep cache files as before by specifying `--keep_cache`.
@@ -115,11 +118,13 @@ Optional dependencies for additional features:
 pip install ascii-magic matplotlib tensorboard
 ```
 
-### uv based installation
+### uv based installation (experimenal)
+
+You can also install using uv, but installation with uv is experimental. Feedback is welcome.
 
 1. Install uv (if not already present on your OS).
 
-### Linux/MacOS
+#### Linux/MacOS
 
 ```sh
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -127,7 +132,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 Follow the instructions to add the uv path manually until you restart your session...
 
-### Windows
+#### Windows
 
 ```powershell
 powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
@@ -189,6 +194,8 @@ python cache_latents.py --dataset_config path/to/toml --vae path/to/ckpts/hunyua
 
 #### uv based install
 
+If you have installed with `uv`, you can use `uv run` to run the script. Other scripts can be run in the same way. (Note that the installation with `uv` is experimental. Feedback is welcome. If you encounter any issues, please use the pip-based installation.)
+
 ```bash
 uv run cache_latents.py --dataset_config path/to/toml --vae path/to/ckpts/hunyuan-video-t2v-720p/vae/pytorch_model.pt --vae_chunk_size 32 --vae_tiling
 ```
@@ -209,7 +216,7 @@ Text Encoder output pre-caching is required. Create the cache using the followin
 python cache_text_encoder_outputs.py --dataset_config path/to/toml  --text_encoder1 path/to/ckpts/text_encoder --text_encoder2 path/to/ckpts/text_encoder_2 --batch_size 16
 ```
 
-or
+or for uv:
 
 ```bash
 uv run cache_text_encoder_outputs.py --dataset_config path/to/toml  --text_encoder1 path/to/ckpts/text_encoder --text_encoder2 path/to/ckpts/text_encoder_2 --batch_size 16
@@ -239,7 +246,7 @@ accelerate launch --num_cpu_threads_per_process 1 --mixed_precision bf16 hv_trai
     --output_dir path/to/output_dir --output_name name-of-lora
 ```
 
-or
+or for uv:
 
 ```bash
 uv run accelerate launch --num_cpu_threads_per_process 1 --mixed_precision bf16 hv_train_network.py 
@@ -286,7 +293,7 @@ python merge_lora.py \
     --lora_multiplier 1.0
 ```
 
-or
+or for uv:
 
 ```bash
 uv run merge_lora.py \
@@ -316,7 +323,7 @@ python hv_generate_video.py --fp8 --video_size 544 960 --video_length 5 --infer_
     --seed 1234 --lora_multiplier 1.0 --lora_weight path/to/lora.safetensors
 ```
 
-or
+or for uv:
 
 ```bash
 uv run hv_generate_video.py --fp8 --video_size 544 960 --video_length 5 --infer_steps 30 
@@ -361,7 +368,7 @@ You can convert LoRA to a format compatible with ComfyUI (presumed to be Diffusi
 python convert_lora.py --input path/to/musubi_lora.safetensors --output path/to/another_format.safetensors --target other
 ```
 
-or
+or for uv:
 
 ```bash
 uv run convert_lora.py --input path/to/musubi_lora.safetensors --output path/to/another_format.safetensors --target other
