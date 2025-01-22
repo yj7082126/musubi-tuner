@@ -27,6 +27,11 @@ from hunyuan_model.vae import load_vae
 from hunyuan_model.models import load_transformer, get_rotary_pos_embed
 from modules.scheduling_flow_match_discrete import FlowMatchDiscreteScheduler
 from networks import lora
+try:
+    from lycoris.kohya import create_network_from_weights
+except:
+    pass
+
 from utils.model_utils import str_to_dtype
 from utils.safetensors_utils import mem_eff_save_file
 from dataset.image_video_dataset import load_video, glob_images, resize_image_to_bucket
@@ -448,6 +453,7 @@ def parse_args():
     )
     parser.add_argument("--no_metadata", action="store_true", help="do not save metadata")
     parser.add_argument("--latent_path", type=str, nargs="*", default=None, help="path to latent for decode. no inference")
+    parser.add_argument("--lycoris", action="store_true", help="use lycoris for inference")
 
     args = parser.parse_args()
 
@@ -569,11 +575,27 @@ def main():
 
                 logger.info(f"Loading LoRA weights from {lora_weight} with multiplier {lora_multiplier}")
                 weights_sd = load_file(lora_weight)
-                network = lora.create_network_from_weights_hunyuan_video(
-                    lora_multiplier, weights_sd, unet=transformer, for_inference=True
-                )
+                if args.lycoris:
+                    lycoris_net, _ = create_network_from_weights(
+                        multiplier=lora_multiplier, file=None, weights_sd=weights_sd, unet=transformer, text_encoder=None, vae=None, for_inference=True
+                    )
+                else:
+                    network = lora.create_network_from_weights_hunyuan_video(
+                        lora_multiplier, weights_sd, unet=transformer, for_inference=True
+                    )
                 logger.info("Merging LoRA weights to DiT model")
-                network.merge_to(None, transformer, weights_sd, device=device, non_blocking=True)
+
+                # try:
+                #     network.apply_to(None, transformer, apply_text_encoder=False, apply_unet=True)
+                #     info = network.load_state_dict(weights_sd, strict=True)
+                #     logger.info(f"Loaded LoRA weights from {weights_file}: {info}")
+                #     network.eval()
+                #     network.to(device)
+                # except Exception as e:
+                if args.lycoris:
+                    lycoris_net.merge_to(None, transformer, weights_sd, dtype=None,device=device)
+                else:
+                    network.merge_to(None, transformer, weights_sd, device=device, non_blocking=True)
 
                 synchronize_device(device)
 
