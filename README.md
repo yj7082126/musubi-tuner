@@ -187,13 +187,11 @@ Please refer to [dataset configuration guide](./dataset/dataset_config.md).
 
 Latent pre-caching is required. Create the cache using the following command:
 
-#### pip based install
+If you have installed using pip:
 
 ```bash
 python cache_latents.py --dataset_config path/to/toml --vae path/to/ckpts/hunyuan-video-t2v-720p/vae/pytorch_model.pt --vae_chunk_size 32 --vae_tiling
 ```
-
-#### uv based install
 
 If you have installed with `uv`, you can use `uv run` to run the script. Other scripts can be run in the same way. (Note that the installation with `uv` is experimental. Feedback is welcome. If you encounter any issues, please use the pip-based installation.)
 
