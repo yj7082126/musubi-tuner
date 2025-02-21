@@ -14,6 +14,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="HunyuanVideo model merger script")
 
     parser.add_argument("--dit", type=str, required=True, help="DiT checkpoint path or directory")
+    parser.add_argument("--dit_in_channels", type=int, default=16, help="input channels for DiT, default is 16, skyreels I2V is 32")
     parser.add_argument("--lora_weight", type=str, nargs="*", required=False, default=None, help="LoRA weight path")
     parser.add_argument("--lora_multiplier", type=float, nargs="*", default=[1.0], help="LoRA multiplier (can specify multiple values)")
     parser.add_argument("--save_merged_model", type=str, required=True, help="Path to save the merged model")
@@ -30,7 +31,7 @@ def main():
 
     # Load DiT model
     logger.info(f"Loading DiT model from {args.dit}")
-    transformer = load_transformer(args.dit, "torch", False, "cpu", torch.bfloat16)
+    transformer = load_transformer(args.dit, "torch", False, "cpu", torch.bfloat16, in_channels=args.dit_in_channels)
     transformer.eval()
 
     # Load LoRA weights and merge

@@ -803,7 +803,7 @@ class FineTuningTrainer:
             raise ValueError(
                 f"either --sdpa, --flash-attn, --sage-attn or --xformers must be specified / --sdpa, --flash-attn, --sage-attn, --xformersのいずれかを指定してください"
             )
-        transformer = load_transformer(args.dit, attn_mode, args.split_attn, loading_device, None)  # load as is
+        transformer = load_transformer(args.dit, attn_mode, args.split_attn, loading_device, None, in_channels=args.dit_in_channels)  # load as is
 
         if blocks_to_swap > 0:
             logger.info(f"enable swap {blocks_to_swap} blocks to CPU from device: {accelerator.device}")
@@ -1448,6 +1448,7 @@ def setup_parser() -> argparse.ArgumentParser:
     # model settings
     parser.add_argument("--dit", type=str, required=True, help="DiT checkpoint path / DiTのチェックポイントのパス")
     parser.add_argument("--dit_dtype", type=str, default=None, help="data type for DiT, default is bfloat16")
+    parser.add_argument("--dit_in_channels", type=int, default=16, help="input channels for DiT, default is 16, skyreels I2V is 32")
     parser.add_argument("--vae", type=str, help="VAE checkpoint path / VAEのチェックポイントのパス")
     parser.add_argument("--vae_dtype", type=str, default=None, help="data type for VAE, default is float16")
     parser.add_argument(
