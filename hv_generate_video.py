@@ -403,6 +403,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="HunyuanVideo inference script")
 
     parser.add_argument("--dit", type=str, required=True, help="DiT checkpoint path or directory")
+    parser.add_argument("--dit_in_channels", type=int, default=16, help="input channels for DiT, default is 16, skyreels I2V is 32")
     parser.add_argument("--vae", type=str, required=True, help="VAE checkpoint path or directory")
     parser.add_argument("--vae_dtype", type=str, default=None, help="data type for VAE, default is float16")
     parser.add_argument("--text_encoder1", type=str, required=True, help="Text Encoder 1 directory")
@@ -562,7 +563,7 @@ def main():
         # if we use LoRA, weigths should be bf16 instead of fp8, because merging should be done in bf16
         # the model is too large, so we load the model to cpu. in addition, the .pt file is loaded to cpu anyway
         # on the fly merging will be a solution for this issue for .safetenors files
-        transformer = load_transformer(args.dit, args.attn_mode, args.split_attn, loading_device, dit_dtype)
+        transformer = load_transformer(args.dit, args.attn_mode, args.split_attn, loading_device, dit_dtype, in_channels=args.dit_in_channels)
         transformer.eval()
 
         # load LoRA weights
@@ -643,7 +644,7 @@ def main():
         generator = [torch.Generator(device).manual_seed(seed) for seed in seeds]
 
         # Prepare latents
-        num_channels_latents = 16  # transformer.config.in_channels
+        num_channels_latents = args.dit_in_channels  # transformer.config.in_channels
         vae_scale_factor = 2 ** (4 - 1)  # len(self.vae.config.block_out_channels) == 4
 
         vae_ver = vae.VAE_VER
