@@ -23,12 +23,11 @@
   - [Usage](#usage)
     - [Dataset Configuration](#dataset-configuration)
     - [Latent Pre-caching](#latent-pre-caching)
-      - [pip based install](#pip-based-install)
-      - [uv based install](#uv-based-install)
     - [Text Encoder Output Pre-caching](#text-encoder-output-pre-caching)
     - [Training](#training)
     - [Merging LoRA Weights](#merging-lora-weights)
     - [Inference](#inference)
+    - [Inference with SkyReels V1](#inference-with-skyreels-v1)
     - [Convert LoRA to another format](#convert-lora-to-another-format)
   - [Miscellaneous](#miscellaneous)
     - [SageAttention Installation](#sageattention-installation)
@@ -44,6 +43,9 @@ This repository provides scripts for training LoRA (Low-Rank Adaptation) models 
 *This repository is under development.*
 
 ### Recent Updates
+
+- Feb 22, 2025
+    - Added support for inference with SkyReels V1 T2V and I2V models. For details, please refer to [Inference with SkyReels V1](#inference-with-skyreels-v1). Thank you to sdbds for the contribution.
 
 - Jan 20, 2025
     - Added experimental installation instructions using uv. Thanks to bmaltais for PR [#51](https://github.com/kohya-ss/musubi-tuner/pull/51) for this addition. However, the settings are incomplete, so feedback is welcome.
@@ -360,6 +362,32 @@ By specifying `--video_path`, video2video inference is possible. Specify a video
 Note that video2video inference is experimental.
 
 You can save the DiT model after LoRA merge with the `--save_merged_model` option. Specify `--save_merged_model path/to/merged_model.safetensors`. Note that inference will not be performed when this option is specified.
+
+### Inference with SkyReels V1
+
+SkyReels V1 T2V and I2V models are supported (inference only). 
+
+The model can be downloaded from [here](https://huggingface.co/Kijai/SkyReels-V1-Hunyuan_comfy). Many thanks to Kijai for providing the model. `skyreels_hunyuan_i2v_bf16.safetensors` is the I2V model, and `skyreels_hunyuan_t2v_bf16.safetensors` is the T2V model. The models other than bf16 are not tested (`fp8_e4m3fn` may work).
+
+For T2V inference, add the following options to the inference command:
+
+```bash
+--guidance_scale 6.0 --embedded_cfg_scale 1.0 --negative_prompt "Aerial view, aerial view, overexposed, low quality, deformation, a poor composition, bad hands, bad teeth, bad eyes, bad limbs, distortion" --split_uncond
+```
+
+SkyReels V1 seems to require a classfier free guidance (negative prompt).`--guidance_scale` is a guidance scale for the negative prompt. The recommended value is 6.0 from the official repository. The default is 1.0, it means no classifier free guidance.
+
+`--embedded_cfg_scale` is a scale of the embedded guidance. The recommended value is 1.0 from the official repository (it may mean no embedded guidance).
+
+`--negative_prompt` is a negative prompt for the classifier free guidance. The above sample is from the official repository. If you don't specify this, and specify `--guidance_scale` other than 1.0, an empty string will be used as the negative prompt.
+
+`--split_uncond` is a flag to split the model call into unconditional and conditional parts. This reduces VRAM usage but may slow down inference. If `--split_attn` is specified, `--split_uncond` is automatically set.
+
+You can also perform image2video inference with SkyReels V1 I2V model. Specify the image file path with `--image_path`. The image will be resized to the given `--video_size`.
+
+```bash
+--image_path path/to/image.jpg
+``` 
 
 ### Convert LoRA to another format
 
