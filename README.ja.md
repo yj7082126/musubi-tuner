@@ -21,6 +21,7 @@
     - [学習](#学習)
     - [LoRAの重みのマージ](#LoRAの重みのマージ)
     - [推論](#推論)
+    - [SkyReels V1での推論](#SkyReels-V1での推論)
     - [LoRAの形式の変換](#LoRAの形式の変換)
 - [その他](#その他)
     - [SageAttentionのインストール方法](#SageAttentionのインストール方法)
@@ -35,6 +36,9 @@
 *リポジトリは開発中です。*
 
 ### 最近の更新
+
+- 2025/02/22
+    - SkyReels V1のT2VとI2Vモデルでの推論がサポートされました。詳細は[こちら](#SkyReels-V1での推論)を参照してください。ご助力いただいた sdbds 氏に感謝いたします。
 
 - 2025/01/20
     - uv によるインストール手順を試験的に追加しました。PR [#51](https://github.com/kohya-ss/musubi-tuner/pull/51) bmaltais 氏に感謝いたします。ただ、設定等は詰められていないため、フィードバックを歓迎します。
@@ -293,6 +297,26 @@ VRAMが足りない場合は、`--blocks_to_swap`を指定して、一部のブ�
 なおvideo2video推論の処理は実験的なものです。
 
 `--save_merged_model`オプションで、LoRAマージ後のDiTモデルを保存できます。`--save_merged_model path/to/merged_model.safetensors`のように指定してください。なおこのオプションを指定すると推論は行われません。
+
+### SkyReels V1での推論
+
+SkyReels V1のT2VとI2Vモデルがサポートされています（推論のみ）。
+
+モデルは[こちら](https://huggingface.co/Kijai/SkyReels-V1-Hunyuan_comfy)からダウンロードできます。モデルを提供してくださったKijai氏に感謝します。`skyreels_hunyuan_i2v_bf16.safetensors`がI2Vモデル、`skyreels_hunyuan_t2v_bf16.safetensors`がT2Vモデルです。`bf16`以外の形式は未検証です（`fp8_e4m3fn`は動作するかもしれません）。
+
+T2V推論を行う場合、以下のオプションを推論コマンドに追加してください：
+
+```bash
+--guidance_scale 6.0 --embedded_cfg_scale 1.0 --negative_prompt "Aerial view, aerial view, overexposed, low quality, deformation, a poor composition, bad hands, bad teeth, bad eyes, bad limbs, distortion" --split_uncond
+```
+
+SkyReels V1はclassifier free guidance（ネガティブプロンプト）を必要とするようです。`--guidance_scale`はネガティブプロンプトのガイダンススケールです。公式リポジトリの推奨値は6.0です。デフォルトは1.0で、この場合はclassifier free guidanceは使用されません（ネガティブプロンプトは無視されます）。
+
+`--embedded_cfg_scale`は埋め込みガイダンスのスケールです。公式リポジトリの推奨値は1.0です（埋め込みガイダンスなしを意味すると思われます）。
+
+`--negative_prompt`はいわゆるネガティブプロンプトです。上記のサンプルは公式リポジトリのものです。`--guidance_scale`を指定し、`--negative_prompt`を指定しなかった場合は、空文字列が使用されます。
+
+`--split_uncond`を指定すると、モデル呼び出しをuncondとcond（ネガティブプロンプトとプロンプト）に分割します。VRAM使用量が減りますが、推論速度は低下する可能性があります。`--split_attn`が指定されている場合、`--split_uncond`は自動的に有効になります。
 
 ### LoRAの形式の変換
 
