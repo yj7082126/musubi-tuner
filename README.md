@@ -44,31 +44,15 @@ This repository provides scripts for training LoRA (Low-Rank Adaptation) models 
 
 ### Recent Updates
 
+- Feb 24, 2025
+    - Added `--exclude_single_blocks` option to `hv_generate_video.py`. When specified, single block LoRA will not be applied. Thanks to maybleMyers for PR [#69](https://github.com/kohya-ss/musubi-tuner/pull/69)
+
 - Feb 22, 2025
     - Added support for inference with SkyReels V1 T2V and I2V models. For details, please refer to [Inference with SkyReels V1](#inference-with-skyreels-v1). Thank you to sdbds for the contribution.
 
 - Jan 20, 2025
     - Added experimental installation instructions using uv. Thanks to bmaltais for PR [#51](https://github.com/kohya-ss/musubi-tuner/pull/51) for this addition. However, the settings are incomplete, so feedback is welcome.
     - Added a documentation for [TensorBoard logging](./docs/advanced_config.md#save-and-view-logs-in-tensorboard-format--tensorboard形式のログの保存と参照). 
-
-- Jan 19, 2025
-    - When pre-caching latents and Text Encoder outputs, files not included in the dataset are automatically deleted. This prevents unexpected files from being left behind and used in training.
-        - You can still keep cache files as before by specifying `--keep_cache`.
-    - Fixed an issue where specifying `--skip_existing` during pre-caching of Text Encoder outputs did not work correctly.
-
-- Jan 18, 2025
-    - Video2video inference is now possible with `hv_generate_video.py`. For details, please refer to [Inference](#inference).
-
-- Jan 16, 2025
-    - Added a script to merge LoRA weights, `merge_lora.py`. Thanks to kaykyr for PR [#37](https://github.com/kohya-ss/musubi-tuner/pull/37). For details, please refer to [Merging LoRA Weights](#merging-lora-weights).
-    - Changed the sample training settings to a learning rate of 2e-4, `--timestep_sampling` to `shift`, and `--discrete_flow_shift` to 7.0. Faster training is expected. For details, please refer to [Training](#training).
-
-- Jan 14, 2025
-    - Added a temporary `--save_merged_model` option to `hv_generate_video.py` to save the DiT model after LoRA merge. For details, please refer to [Inference](#inference).
-
-- Jan 13, 2025
-    - Changed the settings for sample image/video generation to address the issue of blurry sample images/videos during training. For details, please refer to [this document](./docs/sampling_during_training.md).
-        - You need to set the discrete flow shift and guidance scale correctly during inference, but the training settings were used as they were, causing this issue. We have set default values, which should improve the situation. You can specify the discrete flow shift with `--fs` and the guidance scale with `--g`.
 
 ### Releases
 
