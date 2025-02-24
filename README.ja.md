@@ -37,6 +37,20 @@
 
 ### 最近の更新
 
+- 2025/02/XX
+    - SkyReels V1のI2Vモデルの学習をサポートしました。
+        - `hv_train_network.py`に以下のI2V学習用のオプションを追加しました。`--guidance_scale`はI2V学習時には1.0に設定してください。
+        ```bash
+        --dit_in_channels 32  --guidance_scale 1.0
+        ```
+        - 学習動画の最初のフレームがI2Vモデルへの入力として使用されます。
+        - プロンプトファイルにオプションが追加されました。
+            - `--n negative prompt...`: classifier free guidanceのためのネガティブプロンプト。
+            - `--l 6.0`: classifier free guidanceスケール。SkyReels V1モデルの場合は6.0に設定してください。
+            - `--i path/to/image.png`: image2video推論用の画像パス。
+            - `--g 1.0`: （このオプションは既存です）埋め込みガイダンススケール。SkyReels V1モデルの場合は1.0に設定してください。
+          - `--n`、`--l`、`--g`はSkyReels V1 T2Vモデルでも使用できます。
+
 - 2025/02/24
     - `hv_generate_video.py`に`--exclude_single_blocks`オプションが追加されました。指定すると、single blockのLoRAが適用されなくなります。PR [#69](https://github.com/kohya-ss/musubi-tuner/pull/69) maybleMyers 氏に感謝いたします。
 

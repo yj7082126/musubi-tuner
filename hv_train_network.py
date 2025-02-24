@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 import accelerate
 import numpy as np
 from packaging.version import Version
+from PIL import Image
 
 import huggingface_hub
 import toml
@@ -41,7 +42,7 @@ import hunyuan_model.vae as vae_module
 from modules.scheduling_flow_match_discrete import FlowMatchDiscreteScheduler
 import networks.lora as lora_module
 from dataset.config_utils import BlueprintGenerator, ConfigSanitizer
-from hv_generate_video import save_images_grid, save_videos_grid
+from hv_generate_video import save_images_grid, save_videos_grid, resize_image_to_bucket, encode_to_latents
 
 import logging
 
@@ -213,14 +214,20 @@ def line_to_prompt_dict(line: str) -> dict:
                 prompt_dict["discrete_flow_shift"] = float(m.group(1))
                 continue
 
-            # m = re.match(r"l ([\d\.]+)", parg, re.IGNORECASE)
-            # if m:  # scale
-            #     prompt_dict["scale"] = float(m.group(1))
-            #     continue
-            # m = re.match(r"n (.+)", parg, re.IGNORECASE)
-            # if m:  # negative prompt
-            #     prompt_dict["negative_prompt"] = m.group(1)
-            #     continue
+            m = re.match(r"l ([\d\.]+)", parg, re.IGNORECASE)
+            if m:  # scale
+                prompt_dict["cfg_scale"] = float(m.group(1))
+                continue
+
+            m = re.match(r"n (.+)", parg, re.IGNORECASE)
+            if m:  # negative prompt
+                prompt_dict["negative_prompt"] = m.group(1)
+                continue
+
+            m = re.match(r"i (.+)", parg, re.IGNORECASE)
+            if m:  # negative prompt
+                prompt_dict["image_path"] = m.group(1)
+                continue
 
         except ValueError as ex:
             logger.error(f"Exception in parsing / 解析エラー: {parg}")
@@ -387,7 +394,9 @@ def sample_images(accelerator, args, epoch, steps, vae, transformer, sample_para
     clean_memory_on_device(accelerator.device)
 
 
-def sample_image_inference(accelerator, args, transformer, dit_dtype, vae, save_dir, sample_parameter, epoch, steps):
+def sample_image_inference(
+    accelerator, args, transformer: HYVideoDiffusionTransformer, dit_dtype, vae, save_dir, sample_parameter, epoch, steps
+):
     sample_steps = sample_parameter.get("sample_steps", 20)
     width = sample_parameter.get("width", 256)  # make smaller for faster and memory saving inference
     height = sample_parameter.get("height", 256)
@@ -396,6 +405,17 @@ def sample_image_inference(accelerator, args, transformer, dit_dtype, vae, save_
     discrete_flow_shift = sample_parameter.get("discrete_flow_shift", 14.5)
     seed = sample_parameter.get("seed")
     prompt: str = sample_parameter.get("prompt", "")
+    cfg_scale = sample_parameter.get("cfg_scale", 1.0)
+    negative_prompt = sample_parameter.get("negative_prompt", None)
+
+    i2v_model = transformer.in_channels == 32
+    if i2v_model:
+        image_path = sample_parameter.get("image_path", None)
+        if image_path is None:
+            logger.error("No image_path for i2v model / i2vモデルのサンプル画像生成にはimage_pathが必要です")
+            return
+    else:
+        image_path = None
 
     # Calculate latent video length based on VAE version
     if "884" in VAE_VER:
@@ -426,6 +446,15 @@ def sample_image_inference(accelerator, args, transformer, dit_dtype, vae, save_
     if seed is not None:
         logger.info(f"seed: {seed}")
 
+    do_classifier_free_guidance = False
+    if negative_prompt is not None:
+        do_classifier_free_guidance = True
+        logger.info(f"negative prompt: {negative_prompt}")
+        logger.info(f"cfg scale: {cfg_scale}")
+
+    if i2v_model:
+        logger.info(f"image path: {image_path}")
+
     # Prepare scheduler for each prompt
     scheduler = FlowMatchDiscreteScheduler(shift=discrete_flow_shift, reverse=True, solver="euler")
 
@@ -437,6 +466,14 @@ def sample_image_inference(accelerator, args, transformer, dit_dtype, vae, save_
     prompt_embeds = sample_parameter["llm_embeds"].to(device=device, dtype=dit_dtype)
     prompt_mask = sample_parameter["llm_mask"].to(device=device)
     prompt_embeds_2 = sample_parameter["clipL_embeds"].to(device=device, dtype=dit_dtype)
+
+    if do_classifier_free_guidance:
+        negative_prompt_embeds = sample_parameter["negative_llm_embeds"].to(device=device, dtype=dit_dtype)
+        negative_prompt_mask = sample_parameter["negative_llm_mask"].to(device=device)
+        negative_prompt_embeds_2 = sample_parameter["negative_clipL_embeds"].to(device=device, dtype=dit_dtype)
+        prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)
+        prompt_mask = torch.cat([negative_prompt_mask, prompt_mask], dim=0)
+        prompt_embeds_2 = torch.cat([negative_prompt_embeds_2, prompt_embeds_2], dim=0)
 
     num_channels_latents = 16  # transformer.config.in_channels
     vae_scale_factor = 2 ** (4 - 1)  # Assuming 4 VAE blocks
@@ -454,6 +491,27 @@ def sample_image_inference(accelerator, args, transformer, dit_dtype, vae, save_
         latents.append(torch.randn(shape_or_frame, generator=generator, device=device, dtype=dit_dtype))
     latents = torch.cat(latents, dim=2)
 
+    if i2v_model:
+        # Move VAE to the appropriate device for sampling
+        vae.to(device)
+        vae.eval()
+
+        image = Image.open(image_path)
+        image = resize_image_to_bucket(image, (width, height))  # returns a numpy array
+        image = torch.from_numpy(image).permute(2, 0, 1).unsqueeze(0).unsqueeze(2).float()  # 1, C, 1, H, W
+        image = image / 255.0
+
+        logger.info(f"Encoding image to latents")
+        image_latents = encode_to_latents(args, image, device)  # 1, C, 1, H, W
+        image_latents = image_latents.to(device=device, dtype=dit_dtype)
+
+        vae.to("cpu")
+        clean_memory_on_device(device)
+
+        zero_latents = torch.zeros_like(latents)
+        zero_latents[:, :, :1, :, :] = image_latents
+        image_latents = zero_latents
+
     # Guidance scale
     guidance_expand = torch.tensor([guidance_scale * 1000.0], dtype=torch.float32, device=device).to(dit_dtype)
 
@@ -466,9 +524,19 @@ def sample_image_inference(accelerator, args, transformer, dit_dtype, vae, save_
     prompt_idx = sample_parameter.get("enum", 0)
     with torch.no_grad():
         for i, t in enumerate(tqdm(timesteps, desc=f"Sampling timesteps for prompt {prompt_idx+1}")):
-            latents = scheduler.scale_model_input(latents, t)
+            latents_input = scheduler.scale_model_input(latents, t)
+
+            if do_classifier_free_guidance:
+                latents_input = torch.cat([latents_input, latents_input], dim=0)  # 2, C, F, H, W
+
+            if image_latents is not None:
+                latents_image_input = (
+                    image_latents if not do_classifier_free_guidance else torch.cat([image_latents, image_latents], dim=0)
+                )
+                latents_input = torch.cat([latents_input, latents_image_input], dim=1)  # 1 or 2, C*2, F, H, W
+
             noise_pred = transformer(
-                latents,
+                latents_input,
                 t.repeat(latents.shape[0]).to(device=device, dtype=dit_dtype),
                 text_states=prompt_embeds,
                 text_mask=prompt_mask,
@@ -478,6 +546,11 @@ def sample_image_inference(accelerator, args, transformer, dit_dtype, vae, save_
                 guidance=guidance_expand,
                 return_dict=True,
             )["x"]
+
+            # perform classifier free guidance
+            if do_classifier_free_guidance:
+                noise_pred_uncond, noise_pred_cond = noise_pred.chunk(2)
+                noise_pred = noise_pred_uncond + cfg_scale * (noise_pred_cond - noise_pred_uncond)
 
             # Compute the previous noisy sample x_t -> x_t-1
             latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]
@@ -595,7 +668,9 @@ class NetworkTrainer:
             sample_prompts_te_outputs = {}  # (prompt) -> (embeds, mask)
             with accelerator.autocast(), torch.no_grad():
                 for prompt_dict in prompts:
-                    for p in [prompt_dict.get("prompt", "")]:
+                    for p in [prompt_dict.get("prompt", ""), prompt_dict.get("negative_prompt", None)]:
+                        if p is None:
+                            continue
                         if p not in sample_prompts_te_outputs:
                             logger.info(f"cache Text Encoder outputs for prompt: {p}")
 
@@ -628,11 +703,20 @@ class NetworkTrainer:
         sample_parameters = []
         for prompt_dict in prompts:
             prompt_dict_copy = prompt_dict.copy()
+
             p = prompt_dict.get("prompt", "")
             prompt_dict_copy["llm_embeds"] = te_outputs_1[p][0]
             prompt_dict_copy["llm_mask"] = te_outputs_1[p][1]
             prompt_dict_copy["clipL_embeds"] = te_outputs_2[p][0]
             prompt_dict_copy["clipL_mask"] = te_outputs_2[p][1]
+
+            p = prompt_dict.get("negative_prompt", None)
+            if p is not None:
+                prompt_dict_copy["negative_llm_embeds"] = te_outputs_1[p][0]
+                prompt_dict_copy["negative_llm_mask"] = te_outputs_1[p][1]
+                prompt_dict_copy["negative_clipL_embeds"] = te_outputs_2[p][0]
+                prompt_dict_copy["negative_clipL_mask"] = te_outputs_2[p][1]
+
             sample_parameters.append(prompt_dict_copy)
 
         clean_memory_on_device(accelerator.device)
@@ -1091,9 +1175,9 @@ class NetworkTrainer:
         # check required arguments
         if args.dataset_config is None:
             raise ValueError("dataset_config is required / dataset_configが必要です")
-        if args.dit is None:   
+        if args.dit is None:
             raise ValueError("path to DiT model is required / DiTモデルのパスが必要です")
-        
+
         # show timesteps for debugging
         if args.show_timesteps:
             self.show_timesteps(args)
@@ -1143,6 +1227,7 @@ class NetworkTrainer:
             sample_parameters = self.process_sample_prompts(
                 args, accelerator, args.sample_prompts, args.text_encoder1, args.text_encoder2, args.fp8_llm
             )
+
             # Load VAE model for sampling images: VAE is loaded to cpu to save gpu memory
             vae, _, s_ratio, t_ratio = load_vae(vae_dtype=vae_dtype, device="cpu", vae_path=args.vae)
             vae.requires_grad_(False)
@@ -1175,9 +1260,13 @@ class NetworkTrainer:
             raise ValueError(
                 f"either --sdpa, --flash-attn, --sage-attn or --xformers must be specified / --sdpa, --flash-attn, --sage-attn, --xformersのいずれかを指定してください"
             )
-        transformer = load_transformer(args.dit, attn_mode, args.split_attn, loading_device, dit_weight_dtype)
+        transformer = load_transformer(args.dit, attn_mode, args.split_attn, loading_device, dit_weight_dtype, args.dit_in_channels)
         transformer.eval()
         transformer.requires_grad_(False)
+
+        i2v_training = args.dit_in_channels == 32  # may be changed in the future
+        if i2v_training:
+            logger.info("I2V training mode")
 
         if blocks_to_swap > 0:
             logger.info(f"enable swap {blocks_to_swap} blocks to CPU from device: {accelerator.device}")
@@ -1222,7 +1311,7 @@ class NetworkTrainer:
             weights_sd = load_file(args.dim_from_weights)
             network, _ = network_module.create_network_from_weights_hunyuan_video(1, weights_sd, unet=transformer)
         else:
-            if hasattr(network_module, 'create_network_hunyuan_video'):
+            if hasattr(network_module, "create_network_hunyuan_video"):
                 network = network_module.create_network_hunyuan_video(
                     1.0,
                     args.network_dim,
@@ -1246,7 +1335,7 @@ class NetworkTrainer:
         if network is None:
             return
 
-        if hasattr(network_module, 'prepare_network'):
+        if hasattr(network_module, "prepare_network"):
             network.prepare_network(args)
 
         # apply network to DiT
@@ -1590,6 +1679,12 @@ class NetworkTrainer:
                     noisy_model_input, timesteps = self.get_noisy_model_input_and_timesteps(
                         args, noise, latents, noise_scheduler, accelerator.device, dit_dtype
                     )
+
+                    # I2V training
+                    if i2v_training:
+                        image_latents = torch.zeros_like(latents)
+                        image_latents[:, :, :1, :, :] = latents[:, :, :1, :, :]
+                        noisy_model_input = torch.cat([noisy_model_input, image_latents], dim=1)  # concat along channel dim
 
                     weighting = compute_loss_weighting_for_sd3(
                         args.weighting_scheme, noise_scheduler, timesteps, accelerator.device, dit_dtype

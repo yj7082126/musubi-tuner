@@ -44,6 +44,20 @@ This repository provides scripts for training LoRA (Low-Rank Adaptation) models 
 
 ### Recent Updates
 
+- Feb XX, 2025
+    - Support I2V model training with SkyReels V1. 
+        - Add following options for I2V training in `hv_train_network.py`. `--guidance_scale` should be set to 1.0 for I2V training. 
+        ```bash
+        --dit_in_channels 32  --guidance_scale 1.0
+        ```
+        - The first frame of the traiing video is used as the input to the I2V model. 
+        - The prompt file has the following additional options.
+            - `--n negative prompt...`: the negative prompt for the classifier free guidance.
+            - `--l 6.0`: the classifier free guidance scale. Should be set to 6.0 for SkyReels V1 models.
+            - `--i path/to/image.png`: the image path for image2video inference.
+            - `--g 1.0`: (this option already exists) the embedded guidance scale. Should be set to 1.0 for SkyReels V1 models.
+          - `--n`, `--l` and `--g` can be used SkyReels V1 T2V model as well.
+
 - Feb 24, 2025
     - Added `--exclude_single_blocks` option to `hv_generate_video.py`. When specified, single block LoRA will not be applied. Thanks to maybleMyers for PR [#69](https://github.com/kohya-ss/musubi-tuner/pull/69)
 
