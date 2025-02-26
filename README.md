@@ -44,8 +44,8 @@ This repository provides scripts for training LoRA (Low-Rank Adaptation) models 
 
 ### Recent Updates
 
-- Feb XX, 2025
-    - Support I2V model training with SkyReels V1. 
+- Feb 26, 2025
+    - Support I2V model training with SkyReels V1. This feature is highly experimental.
         - Add following options for I2V training in `hv_train_network.py`. `--guidance_scale` should be set to 1.0 for I2V training. 
         ```bash
         --dit_in_channels 32  --guidance_scale 1.0

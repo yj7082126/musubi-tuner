@@ -37,8 +37,8 @@
 
 ### 最近の更新
 
-- 2025/02/XX
-    - SkyReels V1のI2Vモデルの学習をサポートしました。
+- 2025/02/26
+    - SkyReels V1のI2Vモデルの学習をサポートしました。この機能は実験的なものです。
         - `hv_train_network.py`に以下のI2V学習用のオプションを追加しました。`--guidance_scale`はI2V学習時には1.0に設定してください。
         ```bash
         --dit_in_channels 32  --guidance_scale 1.0
