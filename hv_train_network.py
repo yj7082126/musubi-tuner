@@ -24,7 +24,7 @@ import toml
 
 import torch
 from tqdm import tqdm
-from accelerate.utils import set_seed
+from accelerate.utils import TorchDynamoPlugin, set_seed
 from accelerate import Accelerator, InitProcessGroupKwargs, DistributedDataParallelKwargs, PartialState
 from safetensors.torch import load_file
 import transformers
@@ -160,11 +160,19 @@ def prepare_accelerator(args: argparse.Namespace) -> Accelerator:
     ]
     kwargs_handlers = [i for i in kwargs_handlers if i is not None]
 
+    dynamo_plugin = TorchDynamoPlugin(
+        backend=args.dynamo_backend,
+        mode=args.dynamo_mode,
+        fullgraph=args.dynamo_fullgraph,
+        dynamic=args.dynamo_dynamic,
+    )
+
     accelerator = Accelerator(
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         mixed_precision=args.mixed_precision,
         log_with=log_with,
         project_dir=logging_dir,
+        dynamo_plugin=dynamo_plugin,
         kwargs_handlers=kwargs_handlers,
     )
     print("accelerator device:", accelerator.device)
@@ -2135,6 +2143,45 @@ def setup_parser() -> argparse.ArgumentParser:
     parser.add_argument("--fp8_base", action="store_true", help="use fp8 for base model / base modelにfp8を使う")
     # parser.add_argument("--full_fp16", action="store_true", help="fp16 training including gradients / 勾配も含めてfp16で学習する")
     # parser.add_argument("--full_bf16", action="store_true", help="bf16 training including gradients / 勾配も含めてbf16で学習する")
+
+    parser.add_argument(
+        "--dynamo_backend",
+        type=str,
+        default=None,
+        # available backends:
+        # https://github.com/huggingface/accelerate/blob/d1abd59114ada8ba673e1214218cb2878c13b82d/src/accelerate/utils/dataclasses.py#L376-L388C5
+        # https://pytorch.org/docs/stable/torch.compiler.html
+        choices=[
+            "eager",
+            "aot_eager",
+            "inductor",
+            "aot_ts_nvfuser",
+            "nvprims_nvfuser",
+            "cudagraphs",
+            "onnxrt",
+        ],
+        help="dynamo backend type (default is inductor) / dynamoのbackendの種類（デフォルトは inductor）",
+    )
+
+    parser.add_argument(
+        "--dynamo_mode",
+        type=str,
+        default=None,
+        choices=["default", "reduce-overhead", "max-autotune"],
+        help="dynamo mode (default is default) / dynamoのモード（デフォルトは default）",
+    )
+
+    parser.add_argument(
+        "--dynamo_fullgraph",
+        action="store_true",
+        help="use fullgraph mode for dynamo / dynamoのfullgraphモードを使う",
+    )
+
+    parser.add_argument(
+        "--dynamo_dynamic",
+        action="store_true",
+        help="use dynamic mode for dynamo / dynamoのdynamicモードを使う",
+    )
 
     parser.add_argument(
         "--blocks_to_swap",

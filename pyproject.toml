@@ -5,7 +5,7 @@ description = "Musubi Tuner by kohya_ss"
 readme = "README.md"
 requires-python = ">=3.10, <3.11"
 dependencies = [
-    "accelerate>=1.0.0",
+    "accelerate>=1.2.1",
     "ascii-magic==2.3.0",
     "av==14.0.1",
     "bitsandbytes>=0.45.0",
