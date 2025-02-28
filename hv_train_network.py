@@ -24,7 +24,7 @@ import toml
 
 import torch
 from tqdm import tqdm
-from accelerate.utils import TorchDynamoPlugin, set_seed
+from accelerate.utils import TorchDynamoPlugin, set_seed, DynamoBackend
 from accelerate import Accelerator, InitProcessGroupKwargs, DistributedDataParallelKwargs, PartialState
 from safetensors.torch import load_file
 import transformers
@@ -160,12 +160,14 @@ def prepare_accelerator(args: argparse.Namespace) -> Accelerator:
     ]
     kwargs_handlers = [i for i in kwargs_handlers if i is not None]
 
-    dynamo_plugin = TorchDynamoPlugin(
-        backend=args.dynamo_backend,
-        mode=args.dynamo_mode,
-        fullgraph=args.dynamo_fullgraph,
-        dynamic=args.dynamo_dynamic,
-    )
+    dynamo_plugin = None
+    if args.dynamo_backend.upper() != "NO":
+        dynamo_plugin = TorchDynamoPlugin(
+            backend=DynamoBackend(args.dynamo_backend.upper()),
+            mode=args.dynamo_mode,
+            fullgraph=args.dynamo_fullgraph,
+            dynamic=args.dynamo_dynamic,
+        )
 
     accelerator = Accelerator(
         gradient_accumulation_steps=args.gradient_accumulation_steps,
@@ -424,6 +426,7 @@ def sample_image_inference(
             return
     else:
         image_path = None
+        image_latents = None
 
     # Calculate latent video length based on VAE version
     if "884" in VAE_VER:
@@ -2148,19 +2151,8 @@ def setup_parser() -> argparse.ArgumentParser:
         "--dynamo_backend",
         type=str,
         default=None,
-        # available backends:
-        # https://github.com/huggingface/accelerate/blob/d1abd59114ada8ba673e1214218cb2878c13b82d/src/accelerate/utils/dataclasses.py#L376-L388C5
-        # https://pytorch.org/docs/stable/torch.compiler.html
-        choices=[
-            "eager",
-            "aot_eager",
-            "inductor",
-            "aot_ts_nvfuser",
-            "nvprims_nvfuser",
-            "cudagraphs",
-            "onnxrt",
-        ],
-        help="dynamo backend type (default is inductor) / dynamoのbackendの種類（デフォルトは inductor）",
+        choices=[e.value for e in DynamoBackend],
+        help="dynamo backend type (default is None) / dynamoのbackendの種類（デフォルトは None）",
     )
 
     parser.add_argument(
