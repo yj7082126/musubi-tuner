@@ -416,6 +416,7 @@ def sample_image_inference(
             return
     else:
         image_path = None
+        image_latents = None
 
     # Calculate latent video length based on VAE version
     if "884" in VAE_VER:
