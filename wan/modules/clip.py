@@ -542,6 +542,5 @@ class CLIPModel:
 
         # forward
         # with torch.cuda.amp.autocast(dtype=self.dtype):
-        print(videos.shape, videos.min(), videos.max(), videos.mean(), videos.std())
         out = self.model.visual(videos, use_31_block=True)
         return out
