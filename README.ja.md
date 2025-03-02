@@ -39,7 +39,8 @@
 
 - 2025/03/02
     - Wan 2.1の推論をサポートしました。`wan_generate_video.py`を使用してください。詳細は[こちら](./docs/wan.md)を参照してください。
-    
+        - `requirements.txt`が更新されました。`pip install -r requirements.txt`を実行してください。
+
 - 2025/02/26
     - SkyReels V1のI2Vモデルの学習をサポートしました。この機能は実験的なものです。
         - `hv_train_network.py`に以下のI2V学習用のオプションを追加しました。`--guidance_scale`はI2V学習時には1.0に設定してください。

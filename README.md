@@ -46,6 +46,7 @@ This repository provides scripts for training LoRA (Low-Rank Adaptation) models 
 
 - Mar 2, 2025
     - Added support for Wan 2.1 inference. Please use `wan_generate_video.py`. For details, please refer to [here](./docs/wan.md).
+        - `requirements.txt` has been updated. Please run `pip install -r requirements.txt` again.
 
 - Feb 26, 2025
     - Support I2V model training with SkyReels V1. This feature is highly experimental.
