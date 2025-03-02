@@ -37,6 +37,9 @@
 
 ### 最近の更新
 
+- 2025/03/02
+    - Wan 2.1の推論をサポートしました。`wan_generate_video.py`を使用してください。詳細は[こちら](./docs/wan.md)を参照してください。
+    
 - 2025/02/26
     - SkyReels V1のI2Vモデルの学習をサポートしました。この機能は実験的なものです。
         - `hv_train_network.py`に以下のI2V学習用のオプションを追加しました。`--guidance_scale`はI2V学習時には1.0に設定してください。
@@ -395,5 +398,7 @@ sdbds氏によるWindows対応のSageAttentionのwheelが https://github.com/sdb
 ## ライセンス
 
 `hunyuan_model`ディレクトリ以下のコードは、[HunyuanVideo](https://github.com/Tencent/HunyuanVideo)のコードを一部改変して使用しているため、そちらのライセンスに従います。
+
+`wan`ディレクトリ以下のコードは、[Wan2.1](https://github.com/Wan-Video/Wan2.1)のコードを一部改変して使用しています。ライセンスはApache License 2.0です。
 
 他のコードはApache License 2.0に従います。一部Diffusersのコードをコピー、改変して使用しています。

@@ -44,6 +44,9 @@ This repository provides scripts for training LoRA (Low-Rank Adaptation) models 
 
 ### Recent Updates
 
+- Mar 2, 2025
+    - Added support for Wan 2.1 inference. Please use `wan_generate_video.py`. For details, please refer to [here](./docs/wan.md).
+
 - Feb 26, 2025
     - Support I2V model training with SkyReels V1. This feature is highly experimental.
         - Add following options for I2V training in `hv_train_network.py`. `--guidance_scale` should be set to 1.0 for I2V training. 
@@ -473,5 +476,7 @@ We welcome contributions! However, please note:
 ## License
 
 Code under the `hunyuan_model` directory is modified from [HunyuanVideo](https://github.com/Tencent/HunyuanVideo) and follows their license.
+
+Code under the `wan` directory is modified from [Wan2.1](https://github.com/Wan-Video/Wan2.1). The license is under the Apache License 2.0.
 
 Other code is under the Apache License 2.0. Some code is copied and modified from Diffusers.
