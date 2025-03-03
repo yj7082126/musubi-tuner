@@ -302,7 +302,9 @@ def main():
             del wan_i2v
             latents = latents.unsqueeze(0)
 
-    clean_memory_on_device(device)
+        logger.info(f"wait for 5s to clean memory")
+        time.sleep(5.0)
+        clean_memory_on_device(device)
 
     # prepare accelerator for decode
     output_type = args.output_type
