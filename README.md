@@ -44,6 +44,10 @@ This repository provides scripts for training LoRA (Low-Rank Adaptation) models 
 
 ### Recent Updates
 
+- Mar 4, 2025
+    - Added support for Wan 2.1 inference. Please use `wan_generate_video.py`. For details, please refer to [here](./docs/wan.md).
+        - `requirements.txt` has been updated. Please run `pip install -r requirements.txt` again.
+
 - Feb 26, 2025
     - Support I2V model training with SkyReels V1. This feature is highly experimental.
         - Add following options for I2V training in `hv_train_network.py`. `--guidance_scale` should be set to 1.0 for I2V training. 
@@ -63,10 +67,6 @@ This repository provides scripts for training LoRA (Low-Rank Adaptation) models 
 
 - Feb 22, 2025
     - Added support for inference with SkyReels V1 T2V and I2V models. For details, please refer to [Inference with SkyReels V1](#inference-with-skyreels-v1). Thank you to sdbds for the contribution.
-
-- Jan 20, 2025
-    - Added experimental installation instructions using uv. Thanks to bmaltais for PR [#51](https://github.com/kohya-ss/musubi-tuner/pull/51) for this addition. However, the settings are incomplete, so feedback is welcome.
-    - Added a documentation for [TensorBoard logging](./docs/advanced_config.md#save-and-view-logs-in-tensorboard-format--tensorboard形式のログの保存と参照). 
 
 ### Releases
 
@@ -473,5 +473,7 @@ We welcome contributions! However, please note:
 ## License
 
 Code under the `hunyuan_model` directory is modified from [HunyuanVideo](https://github.com/Tencent/HunyuanVideo) and follows their license.
+
+Code under the `wan` directory is modified from [Wan2.1](https://github.com/Wan-Video/Wan2.1). The license is under the Apache License 2.0.
 
 Other code is under the Apache License 2.0. Some code is copied and modified from Diffusers.
