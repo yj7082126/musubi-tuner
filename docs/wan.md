@@ -78,6 +78,8 @@ python wan_generate_video.py --fp8 --task t2v-1.3B --video_size  832 480 --video
 
 `--blocks_to_swap` is the number of blocks to swap during inference. The default value is None (no block swap). The maximum value is 39 for 14B model and 29 for 1.3B model.
 
+`--vae_cache_cpu` enables VAE cache in main memory. This reduces VRAM usage slightly but processing is slower.
+
 Other options are same as `hv_generate_video.py` (some options are not supported, please check the help).
 
 <details>
@@ -96,6 +98,8 @@ Other options are same as `hv_generate_video.py` (some options are not supported
 
 `--blocks_to_swap` は推論時のblock swapの数です。デフォルト値はNone（block swapなし）です。最大値は14Bモデルの場合39、1.3Bモデルの場合29です。
 
+`--vae_cache_cpu` を有効にすると、VAEのキャッシュをメインメモリに保持します。VRAM使用量が多少減りますが、処理は遅くなります。
+
 その他のオプションは `hv_generate_video.py` と同じです（一部のオプションはサポートされていないため、ヘルプを確認してください）。
 </details>
 
@@ -110,3 +114,14 @@ python wan_generate_video.py --fp8 --task i2v-14B --video_size 832 480 --video_l
 --t5 path/to/models_t5_umt5-xxl-enc-bf16.pth --clip path/to/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth 
 --attn_mode torch --image_path path/to/image.jpg
 ```
+
+Add `--clip` to specify the CLIP model. `--image_path` is the path to the image to be used as the initial frame.
+
+Other options are same as T2V inference.
+
+<details>
+<summary>日本語</summary>
+`--clip` を追加してCLIPモデルを指定します。`--image_path` は初期フレームとして使用する画像のパスです。
+
+その他のオプションはT2V推論と同じです。
+</details>

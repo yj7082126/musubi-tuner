@@ -37,7 +37,7 @@
 
 ### 最近の更新
 
-- 2025/03/02
+- 2025/03/04
     - Wan 2.1の推論をサポートしました。`wan_generate_video.py`を使用してください。詳細は[こちら](./docs/wan.md)を参照してください。
         - `requirements.txt`が更新されました。`pip install -r requirements.txt`を実行してください。
 
@@ -60,10 +60,6 @@
 
 - 2025/02/22
     - SkyReels V1のT2VとI2Vモデルでの推論がサポートされました。詳細は[こちら](#SkyReels-V1での推論)を参照してください。ご助力いただいた sdbds 氏に感謝いたします。
-
-- 2025/01/20
-    - uv によるインストール手順を試験的に追加しました。PR [#51](https://github.com/kohya-ss/musubi-tuner/pull/51) bmaltais 氏に感謝いたします。ただ、設定等は詰められていないため、フィードバックを歓迎します。
-    - 高度な設定に、[TensorBoard形式のログの保存と参照](./docs/advanced_config.md#save-and-view-logs-in-tensorboard-format--tensorboard形式のログの保存と参照)を追加しました。    
 
 ### リリースについて
 

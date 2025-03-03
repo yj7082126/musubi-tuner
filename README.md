@@ -44,7 +44,7 @@ This repository provides scripts for training LoRA (Low-Rank Adaptation) models 
 
 ### Recent Updates
 
-- Mar 2, 2025
+- Mar 4, 2025
     - Added support for Wan 2.1 inference. Please use `wan_generate_video.py`. For details, please refer to [here](./docs/wan.md).
         - `requirements.txt` has been updated. Please run `pip install -r requirements.txt` again.
 
@@ -67,10 +67,6 @@ This repository provides scripts for training LoRA (Low-Rank Adaptation) models 
 
 - Feb 22, 2025
     - Added support for inference with SkyReels V1 T2V and I2V models. For details, please refer to [Inference with SkyReels V1](#inference-with-skyreels-v1). Thank you to sdbds for the contribution.
-
-- Jan 20, 2025
-    - Added experimental installation instructions using uv. Thanks to bmaltais for PR [#51](https://github.com/kohya-ss/musubi-tuner/pull/51) for this addition. However, the settings are incomplete, so feedback is welcome.
-    - Added a documentation for [TensorBoard logging](./docs/advanced_config.md#save-and-view-logs-in-tensorboard-format--tensorboard形式のログの保存と参照). 
 
 ### Releases
 
