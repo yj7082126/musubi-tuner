@@ -41,6 +41,7 @@ import hunyuan_model.vae as vae_module
 from modules.scheduling_flow_match_discrete import FlowMatchDiscreteScheduler
 import networks.lora as lora_module
 from dataset.config_utils import BlueprintGenerator, ConfigSanitizer
+from dataset.image_video_dataset import ARCHITECTURE_HUNYUAN_VIDEO
 
 import logging
 
@@ -741,7 +742,7 @@ class FineTuningTrainer:
         blueprint_generator = BlueprintGenerator(ConfigSanitizer())
         logger.info(f"Load dataset config from {args.dataset_config}")
         user_config = config_utils.load_user_config(args.dataset_config)
-        blueprint = blueprint_generator.generate(user_config, args)
+        blueprint = blueprint_generator.generate(user_config, args, architecture=ARCHITECTURE_HUNYUAN_VIDEO)
         train_dataset_group = config_utils.generate_dataset_group_by_blueprint(blueprint.dataset_group, training=True)
 
         current_epoch = Value("i", 0)

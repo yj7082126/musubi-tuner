@@ -13,7 +13,7 @@ from PIL import Image
 
 import logging
 
-from dataset.image_video_dataset import BaseDataset, ItemInfo, save_latent_cache
+from dataset.image_video_dataset import BaseDataset, ItemInfo, save_latent_cache, ARCHITECTURE_HUNYUAN_VIDEO
 from hunyuan_model.vae import load_vae
 from hunyuan_model.autoencoder_kl_causal_3d import AutoencoderKLCausal3D
 from utils.model_utils import str_to_dtype
@@ -158,6 +158,39 @@ def encode_and_save_batch(vae: AutoencoderKLCausal3D, batch: list[ItemInfo]):
         save_latent_cache(item, l)
 
 
+def encode_datasets(datasets: list[BaseDataset], encode: callable, args: argparse.Namespace):
+    num_workers = args.num_workers if args.num_workers is not None else max(1, os.cpu_count() - 1)
+    for i, dataset in enumerate(datasets):
+        logger.info(f"Encoding dataset [{i}]")
+        all_latent_cache_paths = []
+        for _, batch in tqdm(dataset.retrieve_latent_cache_batches(num_workers)):
+            all_latent_cache_paths.extend([item.latent_cache_path for item in batch])
+
+            if args.skip_existing:
+                filtered_batch = [item for item in batch if not os.path.exists(item.latent_cache_path)]
+                if len(filtered_batch) == 0:
+                    continue
+                batch = filtered_batch
+
+            bs = args.batch_size if args.batch_size is not None else len(batch)
+            for i in range(0, len(batch), bs):
+                encode(batch[i : i + bs])
+
+        # normalize paths
+        all_latent_cache_paths = [os.path.normpath(p) for p in all_latent_cache_paths]
+        all_latent_cache_paths = set(all_latent_cache_paths)
+
+        # remove old cache files not in the dataset
+        all_cache_files = dataset.get_all_latent_cache_files()
+        for cache_file in all_cache_files:
+            if os.path.normpath(cache_file) not in all_latent_cache_paths:
+                if args.keep_cache:
+                    logger.info(f"Keep cache file not in the dataset: {cache_file}")
+                else:
+                    os.remove(cache_file)
+                    logger.info(f"Removed old cache file: {cache_file}")
+
+
 def main(args):
     device = args.device if args.device is not None else "cuda" if torch.cuda.is_available() else "cpu"
     device = torch.device(device)
@@ -166,7 +199,7 @@ def main(args):
     blueprint_generator = BlueprintGenerator(ConfigSanitizer())
     logger.info(f"Load dataset config from {args.dataset_config}")
     user_config = config_utils.load_user_config(args.dataset_config)
-    blueprint = blueprint_generator.generate(user_config, args)
+    blueprint = blueprint_generator.generate(user_config, args, architecture=ARCHITECTURE_HUNYUAN_VIDEO)
     train_dataset_group = config_utils.generate_dataset_group_by_blueprint(blueprint.dataset_group)
 
     datasets = train_dataset_group.datasets
@@ -194,53 +227,18 @@ def main(args):
         vae.enable_spatial_tiling(True)
 
     # Encode images
-    num_workers = args.num_workers if args.num_workers is not None else max(1, os.cpu_count() - 1)
-    for i, dataset in enumerate(datasets):
-        logger.info(f"Encoding dataset [{i}]")
-        all_latent_cache_paths = []
-        for _, batch in tqdm(dataset.retrieve_latent_cache_batches(num_workers)):
-            all_latent_cache_paths.extend([item.latent_cache_path for item in batch])
+    def encode(one_batch: list[ItemInfo]):
+        encode_and_save_batch(vae, one_batch)
 
-            if args.skip_existing:
-                filtered_batch = [item for item in batch if not os.path.exists(item.latent_cache_path)]
-                if len(filtered_batch) == 0:
-                    continue
-                batch = filtered_batch
-
-            bs = args.batch_size if args.batch_size is not None else len(batch)
-            for i in range(0, len(batch), bs):
-                encode_and_save_batch(vae, batch[i : i + bs])
-
-        # normalize paths
-        all_latent_cache_paths = [os.path.normpath(p) for p in all_latent_cache_paths]
-        all_latent_cache_paths = set(all_latent_cache_paths)
-
-        # remove old cache files not in the dataset
-        all_cache_files = dataset.get_all_latent_cache_files()
-        for cache_file in all_cache_files:
-            if os.path.normpath(cache_file) not in all_latent_cache_paths:
-                if args.keep_cache:
-                    logger.info(f"Keep cache file not in the dataset: {cache_file}")
-                else:
-                    os.remove(cache_file)
-                    logger.info(f"Removed old cache file: {cache_file}")
+    encode_datasets(datasets, encode, args)
 
 
-def setup_parser():
+def setup_parser_common() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--dataset_config", type=str, required=True, help="path to dataset config .toml file")
     parser.add_argument("--vae", type=str, required=False, default=None, help="path to vae checkpoint")
     parser.add_argument("--vae_dtype", type=str, default=None, help="data type for VAE, default is float16")
-    parser.add_argument(
-        "--vae_tiling",
-        action="store_true",
-        help="enable spatial tiling for VAE, default is False. If vae_spatial_tile_sample_min_size is set, this is automatically enabled",
-    )
-    parser.add_argument("--vae_chunk_size", type=int, default=None, help="chunk size for CausalConv3d in VAE")
-    parser.add_argument(
-        "--vae_spatial_tile_sample_min_size", type=int, default=None, help="spatial tile sample min size for VAE, default 256"
-    )
     parser.add_argument("--device", type=str, default=None, help="device to use, default is cuda if available")
     parser.add_argument(
         "--batch_size", type=int, default=None, help="batch size, override dataset config if dataset batch size > this"
@@ -262,8 +260,22 @@ def setup_parser():
     return parser
 
 
+def setup_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    parser.add_argument(
+        "--vae_tiling",
+        action="store_true",
+        help="enable spatial tiling for VAE, default is False. If vae_spatial_tile_sample_min_size is set, this is automatically enabled",
+    )
+    parser.add_argument("--vae_chunk_size", type=int, default=None, help="chunk size for CausalConv3d in VAE")
+    parser.add_argument(
+        "--vae_spatial_tile_sample_min_size", type=int, default=None, help="spatial tile sample min size for VAE, default 256"
+    )
+    return parser
+
+
 if __name__ == "__main__":
-    parser = setup_parser()
+    parser = setup_parser_common()
+    parser = setup_parser(parser)
 
     args = parser.parse_args()
     main(args)

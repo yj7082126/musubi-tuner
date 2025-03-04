@@ -34,6 +34,7 @@ class BaseDatasetParams:
     num_repeats: int = 1
     cache_directory: Optional[str] = None
     debug_dataset: bool = False
+    architecture: str = "no_default"  # short style like "hv" or "wan"
 
 
 @dataclass

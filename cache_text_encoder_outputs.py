@@ -10,7 +10,7 @@ from dataset import config_utils
 from dataset.config_utils import BlueprintGenerator, ConfigSanitizer
 import accelerate
 
-from dataset.image_video_dataset import ItemInfo, save_text_encoder_output_cache
+from dataset.image_video_dataset import ARCHITECTURE_HUNYUAN_VIDEO, ItemInfo, save_text_encoder_output_cache
 from hunyuan_model import text_encoder as text_encoder_module
 from hunyuan_model.text_encoder import TextEncoder
 
@@ -62,7 +62,7 @@ def main(args):
     blueprint_generator = BlueprintGenerator(ConfigSanitizer())
     logger.info(f"Load dataset config from {args.dataset_config}")
     user_config = config_utils.load_user_config(args.dataset_config)
-    blueprint = blueprint_generator.generate(user_config, args)
+    blueprint = blueprint_generator.generate(user_config, args, architecture=ARCHITECTURE_HUNYUAN_VIDEO)
     train_dataset_group = config_utils.generate_dataset_group_by_blueprint(blueprint.dataset_group)
 
     datasets = train_dataset_group.datasets

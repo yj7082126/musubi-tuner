@@ -73,6 +73,9 @@ VIDEO_EXTENSIONS = [
 ]  # some of them are not tested
 
 ARCHITECTURE_HUNYUAN_VIDEO = "hv"
+ARCHITECTURE_HUNYUAN_VIDEO_FULL = "hunyuan_video"
+ARCHITECTURE_WAN = "wan"
+ARCHITECTURE_WAN_FULL = "wan"
 
 
 def glob_images(directory, base="*"):
@@ -170,26 +173,50 @@ class ItemInfo:
         )
 
 
+# We use simple if-else approach to support multiple architectures.
+# Maybe we can use a plugin system in the future.
+
+
 def save_latent_cache(item_info: ItemInfo, latent: torch.Tensor):
+    """HunyuanVideo architecture only"""
     assert latent.dim() == 4, "latent should be 4D tensor (frame, channel, height, width)"
-
-    # NaN check and show warning, replace NaN with 0
-    if torch.isnan(latent).any():
-        logger.warning(f"latent tensor has NaN: {item_info.item_key}, replace NaN with 0")
-        latent[torch.isnan(latent)] = 0
-
-    metadata = {
-        "architecture": "hunyuan_video",
-        "width": f"{item_info.original_size[0]}",
-        "height": f"{item_info.original_size[1]}",
-        "format_version": "1.0.0",
-    }
-    if item_info.frame_count is not None:
-        metadata["frame_count"] = f"{item_info.frame_count}"
 
     _, F, H, W = latent.shape
     dtype_str = dtype_to_str(latent.dtype)
     sd = {f"latents_{F}x{H}x{W}_{dtype_str}": latent.detach().cpu()}
+
+    save_latent_cache_common(item_info, sd, ARCHITECTURE_HUNYUAN_VIDEO_FULL)
+
+
+def save_latent_cache_wan(item_info: ItemInfo, latent: torch.Tensor, clip_embed: Optional[torch.Tensor]):
+    """Wan architecture only"""
+    assert latent.dim() == 4, "latent should be 4D tensor (frame, channel, height, width)"
+
+    _, F, H, W = latent.shape
+    dtype_str = dtype_to_str(latent.dtype)
+    sd = {f"latents_{F}x{H}x{W}_{dtype_str}": latent.detach().cpu()}
+
+    if clip_embed is not None:
+        sd[f"clip_{dtype_str}"] = clip_embed.detach().cpu()
+
+    save_latent_cache_common(item_info, sd, ARCHITECTURE_WAN_FULL)
+
+
+def save_latent_cache_common(item_info: ItemInfo, sd: dict[str, torch.Tensor], arch_fullname: str):
+    metadata = {
+        "architecture": arch_fullname,
+        "width": f"{item_info.original_size[0]}",
+        "height": f"{item_info.original_size[1]}",
+        "format_version": "1.0.1",
+    }
+    if item_info.frame_count is not None:
+        metadata["frame_count"] = f"{item_info.frame_count}"
+
+    for key, value in sd.items():
+        # NaN check and show warning, replace NaN with 0
+        if torch.isnan(value).any():
+            logger.warning(f"{key} tensor has NaN: {item_info.item_key}, replace NaN with 0")
+            value[torch.isnan(value)] = 0
 
     latent_dir = os.path.dirname(item_info.latent_cache_path)
     os.makedirs(latent_dir, exist_ok=True)
@@ -198,29 +225,53 @@ def save_latent_cache(item_info: ItemInfo, latent: torch.Tensor):
 
 
 def save_text_encoder_output_cache(item_info: ItemInfo, embed: torch.Tensor, mask: Optional[torch.Tensor], is_llm: bool):
+    """HunyuanVideo architecture only"""
     assert (
         embed.dim() == 1 or embed.dim() == 2
     ), f"embed should be 2D tensor (feature, hidden_size) or (hidden_size,), got {embed.shape}"
     assert mask is None or mask.dim() == 1, f"mask should be 1D tensor (feature), got {mask.shape}"
 
-    # NaN check and show warning, replace NaN with 0
-    if torch.isnan(embed).any():
-        logger.warning(f"embed tensor has NaN: {item_info.item_key}, replace NaN with 0")
-        embed[torch.isnan(embed)] = 0
+    sd = {}
+    dtype_str = dtype_to_str(embed.dtype)
+    text_encoder_type = "llm" if is_llm else "clipL"
+    sd[f"{text_encoder_type}_{dtype_str}"] = embed.detach().cpu()
+    if mask is not None:
+        sd[f"{text_encoder_type}_mask"] = mask.detach().cpu()
 
-    metadata = {
-        "architecture": "hunyuan_video",
-        "caption1": item_info.caption,
-        "format_version": "1.0.0",
-    }
+    save_text_encoder_output_cache_common(item_info, sd, ARCHITECTURE_HUNYUAN_VIDEO_FULL)
+
+
+def save_text_encoder_output_cache_wan(item_info: ItemInfo, embed: torch.Tensor):
+    """Wan architecture only. Wan2.1 only has a single text encoder"""
 
     sd = {}
+    dtype_str = dtype_to_str(embed.dtype)
+    text_encoder_type = "t5"
+    sd[f"{text_encoder_type}_{dtype_str}"] = embed.detach().cpu()
+
+    save_text_encoder_output_cache_common(item_info, sd, ARCHITECTURE_WAN_FULL)
+
+
+def save_text_encoder_output_cache_common(item_info: ItemInfo, sd: dict[str, torch.Tensor], arch_fullname: str):
+    for key, value in sd.items():
+        # NaN check and show warning, replace NaN with 0
+        if torch.isnan(value).any():
+            logger.warning(f"{key} tensor has NaN: {item_info.item_key}, replace NaN with 0")
+            value[torch.isnan(value)] = 0
+
+    metadata = {
+        "architecture": arch_fullname,
+        "caption1": item_info.caption,
+        "format_version": "1.0.1",
+    }
+
     if os.path.exists(item_info.text_encoder_output_cache_path):
         # load existing cache and update metadata
         with safetensors_utils.MemoryEfficientSafeOpen(item_info.text_encoder_output_cache_path) as f:
             existing_metadata = f.metadata()
             for key in f.keys():
-                sd[key] = f.get_tensor(key)
+                if key not in sd:  # avoid overwriting by existing cache, we keep the new one
+                    sd[key] = f.get_tensor(key)
 
         assert existing_metadata["architecture"] == metadata["architecture"], "architecture mismatch"
         if existing_metadata["caption1"] != metadata["caption1"]:
@@ -229,16 +280,10 @@ def save_text_encoder_output_cache(item_info: ItemInfo, embed: torch.Tensor, mas
 
         existing_metadata.pop("caption1", None)
         existing_metadata.pop("format_version", None)
-        metadata.update(existing_metadata)  # copy existing metadata
+        metadata.update(existing_metadata)  # copy existing metadata except caption and format_version
     else:
         text_encoder_output_dir = os.path.dirname(item_info.text_encoder_output_cache_path)
         os.makedirs(text_encoder_output_dir, exist_ok=True)
-
-    dtype_str = dtype_to_str(embed.dtype)
-    text_encoder_type = "llm" if is_llm else "clipL"
-    sd[f"{text_encoder_type}_{dtype_str}"] = embed.detach().cpu()
-    if mask is not None:
-        sd[f"{text_encoder_type}_mask"] = mask.detach().cpu()
 
     safetensors_utils.mem_eff_save_file(sd, item_info.text_encoder_output_cache_path, metadata=metadata)
 
@@ -748,6 +793,7 @@ class BaseDataset(torch.utils.data.Dataset):
         bucket_no_upscale: bool = False,
         cache_directory: Optional[str] = None,
         debug_dataset: bool = False,
+        architecture: str = "no_default",
     ):
         self.resolution = resolution
         self.caption_extension = caption_extension
@@ -757,6 +803,7 @@ class BaseDataset(torch.utils.data.Dataset):
         self.bucket_no_upscale = bucket_no_upscale
         self.cache_directory = cache_directory
         self.debug_dataset = debug_dataset
+        self.architecture = architecture
         self.seed = None
         self.current_epoch = 0
 
@@ -775,10 +822,10 @@ class BaseDataset(torch.utils.data.Dataset):
         return metadata
 
     def get_all_latent_cache_files(self):
-        return glob.glob(os.path.join(self.cache_directory, f"*_{ARCHITECTURE_HUNYUAN_VIDEO}.safetensors"))
+        return glob.glob(os.path.join(self.cache_directory, f"*_{self.architecture}.safetensors"))
 
     def get_all_text_encoder_output_cache_files(self):
-        return glob.glob(os.path.join(self.cache_directory, f"*_{ARCHITECTURE_HUNYUAN_VIDEO}_te.safetensors"))
+        return glob.glob(os.path.join(self.cache_directory, f"*_{self.architecture}_te.safetensors"))
 
     def get_latent_cache_path(self, item_info: ItemInfo) -> str:
         """
@@ -794,12 +841,12 @@ class BaseDataset(torch.utils.data.Dataset):
         w, h = item_info.original_size
         basename = os.path.splitext(os.path.basename(item_info.item_key))[0]
         assert self.cache_directory is not None, "cache_directory is required / cache_directoryは必須です"
-        return os.path.join(self.cache_directory, f"{basename}_{w:04d}x{h:04d}_{ARCHITECTURE_HUNYUAN_VIDEO}.safetensors")
+        return os.path.join(self.cache_directory, f"{basename}_{w:04d}x{h:04d}_{self.architecture}.safetensors")
 
     def get_text_encoder_output_cache_path(self, item_info: ItemInfo) -> str:
         basename = os.path.splitext(os.path.basename(item_info.item_key))[0]
         assert self.cache_directory is not None, "cache_directory is required / cache_directoryは必須です"
-        return os.path.join(self.cache_directory, f"{basename}_{ARCHITECTURE_HUNYUAN_VIDEO}_te.safetensors")
+        return os.path.join(self.cache_directory, f"{basename}_{self.architecture}_te.safetensors")
 
     def retrieve_latent_cache_batches(self, num_workers: int):
         raise NotImplementedError
@@ -1021,7 +1068,7 @@ class ImageDataset(BaseDataset):
         bucket_selector = BucketSelector(self.resolution, self.enable_bucket, self.bucket_no_upscale)
 
         # glob cache files
-        latent_cache_files = glob.glob(os.path.join(self.cache_directory, f"*_{ARCHITECTURE_HUNYUAN_VIDEO}.safetensors"))
+        latent_cache_files = glob.glob(os.path.join(self.cache_directory, f"*_{self.architecture}.safetensors"))
 
         # assign cache files to item info
         bucketed_item_info: dict[tuple[int, int], list[ItemInfo]] = {}  # (width, height) -> [ItemInfo]
@@ -1033,9 +1080,7 @@ class ImageDataset(BaseDataset):
             image_size = (image_width, image_height)
 
             item_key = "_".join(tokens[:-2])
-            text_encoder_output_cache_file = os.path.join(
-                self.cache_directory, f"{item_key}_{ARCHITECTURE_HUNYUAN_VIDEO}_te.safetensors"
-            )
+            text_encoder_output_cache_file = os.path.join(self.cache_directory, f"{item_key}_{self.architecture}_te.safetensors")
             if not os.path.exists(text_encoder_output_cache_file):
                 logger.warning(f"Text encoder output cache file not found: {text_encoder_output_cache_file}")
                 continue
@@ -1248,7 +1293,7 @@ class VideoDataset(BaseDataset):
         bucket_selector = BucketSelector(self.resolution, self.enable_bucket, self.bucket_no_upscale)
 
         # glob cache files
-        latent_cache_files = glob.glob(os.path.join(self.cache_directory, f"*_{ARCHITECTURE_HUNYUAN_VIDEO}.safetensors"))
+        latent_cache_files = glob.glob(os.path.join(self.cache_directory, f"*_{self.architecture}.safetensors"))
 
         # assign cache files to item info
         bucketed_item_info: dict[tuple[int, int, int], list[ItemInfo]] = {}  # (width, height, frame_count) -> [ItemInfo]
@@ -1263,9 +1308,7 @@ class VideoDataset(BaseDataset):
             frame_pos, frame_count = int(frame_pos), int(frame_count)
 
             item_key = "_".join(tokens[:-3])
-            text_encoder_output_cache_file = os.path.join(
-                self.cache_directory, f"{item_key}_{ARCHITECTURE_HUNYUAN_VIDEO}_te.safetensors"
-            )
+            text_encoder_output_cache_file = os.path.join(self.cache_directory, f"{item_key}_{self.architecture}_te.safetensors")
             if not os.path.exists(text_encoder_output_cache_file):
                 logger.warning(f"Text encoder output cache file not found: {text_encoder_output_cache_file}")
                 continue

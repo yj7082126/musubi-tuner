@@ -42,6 +42,7 @@ import hunyuan_model.vae as vae_module
 from modules.scheduling_flow_match_discrete import FlowMatchDiscreteScheduler
 import networks.lora as lora_module
 from dataset.config_utils import BlueprintGenerator, ConfigSanitizer
+from dataset.image_video_dataset import ARCHITECTURE_HUNYUAN_VIDEO
 from hv_generate_video import save_images_grid, save_videos_grid, resize_image_to_bucket, encode_to_latents
 
 import logging
@@ -1172,12 +1173,22 @@ class NetworkTrainer:
                 line += "#" * int(w / max_weighting * CONSOLE_WIDTH)
                 print(line)
 
+    # region model specific
+
+    def assert_model_specific_args(self, args: argparse.Namespace):
+        pass
+
+    # endregion model specific
+
     def train(self, args):
         # check required arguments
         if args.dataset_config is None:
             raise ValueError("dataset_config is required / dataset_configが必要です")
         if args.dit is None:
             raise ValueError("path to DiT model is required / DiTモデルのパスが必要です")
+
+        # check model specific arguments
+        self.assert_model_specific_args(args)
 
         # show timesteps for debugging
         if args.show_timesteps:
@@ -1196,7 +1207,7 @@ class NetworkTrainer:
         blueprint_generator = BlueprintGenerator(ConfigSanitizer())
         logger.info(f"Load dataset config from {args.dataset_config}")
         user_config = config_utils.load_user_config(args.dataset_config)
-        blueprint = blueprint_generator.generate(user_config, args)
+        blueprint = blueprint_generator.generate(user_config, args, architecture=ARCHITECTURE_HUNYUAN_VIDEO)
         train_dataset_group = config_utils.generate_dataset_group_by_blueprint(blueprint.dataset_group, training=True)
 
         current_epoch = Value("i", 0)
@@ -2113,25 +2124,6 @@ def setup_parser() -> argparse.ArgumentParser:
         help='additional arguments for scheduler (like "T_max=100") / スケジューラの追加引数（例： "T_max100"）',
     )
 
-    # model settings
-    parser.add_argument("--dit", type=str, help="DiT checkpoint path / DiTのチェックポイントのパス")
-    parser.add_argument("--dit_dtype", type=str, default=None, help="data type for DiT, default is bfloat16")
-    parser.add_argument("--dit_in_channels", type=int, default=16, help="input channels for DiT, default is 16, skyreels I2V is 32")
-    parser.add_argument("--vae", type=str, help="VAE checkpoint path / VAEのチェックポイントのパス")
-    parser.add_argument("--vae_dtype", type=str, default=None, help="data type for VAE, default is float16")
-    parser.add_argument(
-        "--vae_tiling",
-        action="store_true",
-        help="enable spatial tiling for VAE, default is False. If vae_spatial_tile_sample_min_size is set, this is automatically enabled."
-        " / VAEの空間タイリングを有効にする、デフォルトはFalse。vae_spatial_tile_sample_min_sizeが設定されている場合、自動的に有効になります。",
-    )
-    parser.add_argument("--vae_chunk_size", type=int, default=None, help="chunk size for CausalConv3d in VAE")
-    parser.add_argument(
-        "--vae_spatial_tile_sample_min_size", type=int, default=None, help="spatial tile sample min size for VAE, default 256"
-    )
-    parser.add_argument("--text_encoder1", type=str, help="Text Encoder 1 directory / テキストエンコーダ1のディレクトリ")
-    parser.add_argument("--text_encoder2", type=str, help="Text Encoder 2 directory / テキストエンコーダ2のディレクトリ")
-    parser.add_argument("--text_encoder_dtype", type=str, default=None, help="data type for Text Encoder, default is float16")
     parser.add_argument("--fp8_llm", action="store_true", help="use fp8 for LLM / LLMにfp8を使う")
     parser.add_argument("--fp8_base", action="store_true", help="use fp8 for base model / base modelにfp8を使う")
     # parser.add_argument("--full_fp16", action="store_true", help="fp16 training including gradients / 勾配も含めてfp16で学習する")
@@ -2416,6 +2408,14 @@ def setup_parser() -> argparse.ArgumentParser:
         help="upload to huggingface asynchronously / huggingfaceに非同期でアップロードする",
     )
 
+    parser.add_argument("--dit", type=str, help="DiT checkpoint path / DiTのチェックポイントのパス")
+    parser.add_argument("--dit_dtype", type=str, default=None, help="data type for DiT, default is bfloat16")
+    parser.add_argument("--vae", type=str, help="VAE checkpoint path / VAEのチェックポイントのパス")
+    parser.add_argument("--vae_dtype", type=str, default=None, help="data type for VAE, default is float16")
+    parser.add_argument("--text_encoder1", type=str, help="Text Encoder 1 directory / テキストエンコーダ1のディレクトリ")
+    parser.add_argument("--text_encoder2", type=str, help="Text Encoder 2 directory / テキストエンコーダ2のディレクトリ")
+    parser.add_argument("--text_encoder_dtype", type=str, default=None, help="data type for Text Encoder, default is float16")
+
     return parser
 
 
@@ -2453,8 +2453,26 @@ def read_config_from_file(args: argparse.Namespace, parser: argparse.ArgumentPar
     return args
 
 
+def hv_setup_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    """HunyuanVideo specific parser setup"""
+    # model settings
+    parser.add_argument("--dit_in_channels", type=int, default=16, help="input channels for DiT, default is 16, skyreels I2V is 32")
+    parser.add_argument(
+        "--vae_tiling",
+        action="store_true",
+        help="enable spatial tiling for VAE, default is False. If vae_spatial_tile_sample_min_size is set, this is automatically enabled."
+        " / VAEの空間タイリングを有効にする、デフォルトはFalse。vae_spatial_tile_sample_min_sizeが設定されている場合、自動的に有効になります。",
+    )
+    parser.add_argument("--vae_chunk_size", type=int, default=None, help="chunk size for CausalConv3d in VAE")
+    parser.add_argument(
+        "--vae_spatial_tile_sample_min_size", type=int, default=None, help="spatial tile sample min size for VAE, default 256"
+    )
+    return parser
+
+
 if __name__ == "__main__":
     parser = setup_parser()
+    parser = hv_setup_parser(parser)
 
     args = parser.parse_args()
     args = read_config_from_file(args, parser)
