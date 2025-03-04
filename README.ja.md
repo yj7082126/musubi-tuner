@@ -37,6 +37,10 @@
 
 ### 最近の更新
 
+- 2025/03/04
+    - Wan 2.1の推論をサポートしました。`wan_generate_video.py`を使用してください。詳細は[こちら](./docs/wan.md)を参照してください。
+        - `requirements.txt`が更新されました。`pip install -r requirements.txt`を実行してください。
+
 - 2025/02/26
     - SkyReels V1のI2Vモデルの学習をサポートしました。この機能は実験的なものです。
         - `hv_train_network.py`に以下のI2V学習用のオプションを追加しました。`--guidance_scale`はI2V学習時には1.0に設定してください。
@@ -56,10 +60,6 @@
 
 - 2025/02/22
     - SkyReels V1のT2VとI2Vモデルでの推論がサポートされました。詳細は[こちら](#SkyReels-V1での推論)を参照してください。ご助力いただいた sdbds 氏に感謝いたします。
-
-- 2025/01/20
-    - uv によるインストール手順を試験的に追加しました。PR [#51](https://github.com/kohya-ss/musubi-tuner/pull/51) bmaltais 氏に感謝いたします。ただ、設定等は詰められていないため、フィードバックを歓迎します。
-    - 高度な設定に、[TensorBoard形式のログの保存と参照](./docs/advanced_config.md#save-and-view-logs-in-tensorboard-format--tensorboard形式のログの保存と参照)を追加しました。    
 
 ### リリースについて
 
@@ -395,5 +395,7 @@ sdbds氏によるWindows対応のSageAttentionのwheelが https://github.com/sdb
 ## ライセンス
 
 `hunyuan_model`ディレクトリ以下のコードは、[HunyuanVideo](https://github.com/Tencent/HunyuanVideo)のコードを一部改変して使用しているため、そちらのライセンスに従います。
+
+`wan`ディレクトリ以下のコードは、[Wan2.1](https://github.com/Wan-Video/Wan2.1)のコードを一部改変して使用しています。ライセンスはApache License 2.0です。
 
 他のコードはApache License 2.0に従います。一部Diffusersのコードをコピー、改変して使用しています。
