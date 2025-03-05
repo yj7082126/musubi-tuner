@@ -260,7 +260,7 @@ def setup_parser_common() -> argparse.ArgumentParser:
     return parser
 
 
-def setup_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
+def hv_setup_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     parser.add_argument(
         "--vae_tiling",
         action="store_true",
@@ -275,7 +275,7 @@ def setup_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
 
 if __name__ == "__main__":
     parser = setup_parser_common()
-    parser = setup_parser(parser)
+    parser = hv_setup_parser(parser)
 
     args = parser.parse_args()
     main(args)

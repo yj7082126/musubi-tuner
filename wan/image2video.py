@@ -8,6 +8,7 @@ import os
 import random
 import sys
 
+import cv2
 import numpy as np
 import torch
 import torchvision.transforms.functional as TF
@@ -177,31 +178,30 @@ class WanI2V:
                 - W: Frame width from size)
         """
         max_area = size[0] * size[1]
+
+        # save original image as numpy array
+        img_cv2 = np.array(img)  # PIL to numpy
+        img_cv2 = cv2.cvtColor(img_cv2, cv2.COLOR_BGR2RGB)
+
         img = TF.to_tensor(img).sub_(0.5).div_(0.5).to(self.device)  # -1 to 1
 
-        F = frame_num
+        F = frame_num  # number of frames
         h, w = img.shape[1:]
         aspect_ratio = h / w
         lat_h = round(np.sqrt(max_area * aspect_ratio) // self.vae_stride[1] // self.patch_size[1] * self.patch_size[1])
         lat_w = round(np.sqrt(max_area / aspect_ratio) // self.vae_stride[2] // self.patch_size[2] * self.patch_size[2])
         h = lat_h * self.vae_stride[1]
         w = lat_w * self.vae_stride[2]
+        lat_f = (F - 1) // self.vae_stride[0] + 1  # size of latent frames
+        max_seq_len = lat_f * lat_h * lat_w // (self.patch_size[1] * self.patch_size[2])
 
-        max_seq_len = ((F - 1) // self.vae_stride[0] + 1) * lat_h * lat_w // (self.patch_size[1] * self.patch_size[2])
-        # max_seq_len = int(math.ceil(max_seq_len / self.sp_size)) * self.sp_size
-
+        # set seed
         seed = seed if seed >= 0 else random.randint(0, sys.maxsize)
         seed_g = torch.Generator(device=self.device)
         seed_g.manual_seed(seed)
-        # noise = torch.randn(16, 21, lat_h, lat_w, dtype=torch.float32, generator=seed_g, device=self.device)
-        lat_f = (F - 1) // self.vae_stride[0] + 1
-        noise = torch.randn(16, lat_f, lat_h, lat_w, dtype=torch.float32, generator=seed_g, device=self.device)
 
-        msk = torch.ones(1, 81, lat_h, lat_w, device=self.device)
-        msk[:, 1:] = 0
-        msk = torch.concat([torch.repeat_interleave(msk[:, 0:1], repeats=4, dim=1), msk[:, 1:]], dim=1)
-        msk = msk.view(1, msk.shape[1] // 4, 4, lat_h, lat_w)
-        msk = msk.transpose(1, 2)[0]
+        # Generate noise for the required number of frames only
+        noise = torch.randn(16, lat_f, lat_h, lat_w, dtype=torch.float32, generator=seed_g, device=self.device)
 
         if n_prompt == "":
             n_prompt = self.sample_neg_prompt
@@ -240,23 +240,32 @@ class WanI2V:
         del self.clip
         clean_memory_on_device(self.device)
 
-        # y should be encoded with 81 frames, and trim to lat_f frames. encoding F frames causes invalid results.
+        # y should be encoded with 81 frames, and trim to lat_f frames? encoding F frames causes invalid results?
         logger.info(f"Encoding image to latent space")
         vae.to_device(self.device)
+
+        # resize image for the first frame. INTER_AREA is the best for downsampling
+        interpolation = cv2.INTER_AREA if h < img_cv2.shape[0] else cv2.INTER_CUBIC
+        img_resized = cv2.resize(img_cv2, (w, h), interpolation=interpolation)
+        img_resized = cv2.cvtColor(img_resized, cv2.COLOR_BGR2RGB)
+        img_resized = TF.to_tensor(img_resized).sub_(0.5).div_(0.5).to(self.device)  # -1 to 1, CHW
+        img_resized = img_resized.unsqueeze(1)  # CFHW
+
+        # Create mask for the required number of frames
+        msk = torch.ones(1, F, lat_h, lat_w, device=self.device)
+        msk[:, 1:] = 0
+        msk = torch.concat([torch.repeat_interleave(msk[:, 0:1], repeats=4, dim=1), msk[:, 1:]], dim=1)
+        msk = msk.view(1, msk.shape[1] // 4, 4, lat_h, lat_w)
+        msk = msk.transpose(1, 2)[0]
+
         with accelerator.autocast(), torch.no_grad():
-            y = vae.encode(
-                [
-                    torch.concat(
-                        [
-                            torch.nn.functional.interpolate(img[None].cpu(), size=(h, w), mode="bicubic").transpose(0, 1),
-                            torch.zeros(3, 80, h, w),
-                        ],
-                        dim=1,
-                    ).to(self.device)
-                ]
-            )[0]
+            # Zero padding for the required number of frames only
+            padding_frames = F - 1  # The first frame is the input image
+            img_resized = torch.concat([img_resized, torch.zeros(3, padding_frames, h, w, device=self.device)], dim=1)
+            y = vae.encode([img_resized])[0]
+
+        y = y[:, :lat_f]  # may be not needed
         y = torch.concat([msk, y])
-        y = y[:, :lat_f]
         logger.info(f"Encoding complete")
 
         vae.to_device("cpu")

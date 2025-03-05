@@ -176,6 +176,9 @@ class ItemInfo:
 # We use simple if-else approach to support multiple architectures.
 # Maybe we can use a plugin system in the future.
 
+# the keys of the dict are `<content_type>_FxHxW_<dtype>` for latents
+# and `<content_type>_<dtype>` for other tensors
+
 
 def save_latent_cache(item_info: ItemInfo, latent: torch.Tensor):
     """HunyuanVideo architecture only"""
@@ -188,7 +191,9 @@ def save_latent_cache(item_info: ItemInfo, latent: torch.Tensor):
     save_latent_cache_common(item_info, sd, ARCHITECTURE_HUNYUAN_VIDEO_FULL)
 
 
-def save_latent_cache_wan(item_info: ItemInfo, latent: torch.Tensor, clip_embed: Optional[torch.Tensor]):
+def save_latent_cache_wan(
+    item_info: ItemInfo, latent: torch.Tensor, clip_embed: Optional[torch.Tensor], image_latent: Optional[torch.Tensor]
+):
     """Wan architecture only"""
     assert latent.dim() == 4, "latent should be 4D tensor (frame, channel, height, width)"
 
@@ -198,6 +203,9 @@ def save_latent_cache_wan(item_info: ItemInfo, latent: torch.Tensor, clip_embed:
 
     if clip_embed is not None:
         sd[f"clip_{dtype_str}"] = clip_embed.detach().cpu()
+
+    if image_latent is not None:
+        sd[f"latents_image_{F}x{H}x{W}_{dtype_str}"] = image_latent.detach().cpu()
 
     save_latent_cache_common(item_info, sd, ARCHITECTURE_WAN_FULL)
 
@@ -290,11 +298,21 @@ def save_text_encoder_output_cache_common(item_info: ItemInfo, sd: dict[str, tor
 
 class BucketSelector:
     RESOLUTION_STEPS_HUNYUAN = 16
+    RESOLUTION_STEPS_WAN = 16
 
-    def __init__(self, resolution: Tuple[int, int], enable_bucket: bool = True, no_upscale: bool = False):
+    def __init__(
+        self, resolution: Tuple[int, int], enable_bucket: bool = True, no_upscale: bool = False, architecture: str = "no_default"
+    ):
         self.resolution = resolution
         self.bucket_area = resolution[0] * resolution[1]
-        self.reso_steps = BucketSelector.RESOLUTION_STEPS_HUNYUAN
+        self.architecture = architecture
+
+        if self.architecture == ARCHITECTURE_HUNYUAN_VIDEO:
+            self.reso_steps = BucketSelector.RESOLUTION_STEPS_HUNYUAN
+        elif self.architecture == ARCHITECTURE_WAN:
+            self.reso_steps = BucketSelector.RESOLUTION_STEPS_WAN
+        else:
+            raise ValueError(f"Invalid architecture: {self.architecture}")
 
         if not enable_bucket:
             # only define one bucket
@@ -404,40 +422,24 @@ class BucketBatchManager:
         start = batch_idx * self.batch_size
         end = min(start + self.batch_size, len(bucket))
 
-        latents = []
-        llm_embeds = []
-        llm_masks = []
-        clip_l_embeds = []
+        batch_tensor_data = {}
         for item_info in bucket[start:end]:
-            sd = load_file(item_info.latent_cache_path)
-            latent = None
+            sd_latent = load_file(item_info.latent_cache_path)
+            sd_te = load_file(item_info.text_encoder_output_cache_path)
+            sd = {**sd_latent, **sd_te}
+
             for key in sd.keys():
-                if key.startswith("latents_"):
-                    latent = sd[key]
-                    break
-            latents.append(latent)
+                content_key = key.rsplit("_", 1)[0]  # remove dtype
+                if content_key.startswith("latents_"):
+                    content_key = content_key.rsplit("_", 1)[0]  # remove FxHxW
+                if content_key not in batch_tensor_data:
+                    batch_tensor_data[content_key] = []
+                batch_tensor_data[content_key].append(sd[key])
 
-            sd = load_file(item_info.text_encoder_output_cache_path)
-            llm_embed = llm_mask = clip_l_embed = None
-            for key in sd.keys():
-                if key.startswith("llm_mask"):
-                    llm_mask = sd[key]
-                elif key.startswith("llm_"):
-                    llm_embed = sd[key]
-                elif key.startswith("clipL_mask"):
-                    pass
-                elif key.startswith("clipL_"):
-                    clip_l_embed = sd[key]
-            llm_embeds.append(llm_embed)
-            llm_masks.append(llm_mask)
-            clip_l_embeds.append(clip_l_embed)
+        for key in batch_tensor_data.keys():
+            batch_tensor_data[key] = torch.stack(batch_tensor_data[key])
 
-        latents = torch.stack(latents)
-        llm_embeds = torch.stack(llm_embeds)
-        llm_masks = torch.stack(llm_masks)
-        clip_l_embeds = torch.stack(clip_l_embeds)
-
-        return latents, llm_embeds, llm_masks, clip_l_embeds
+        return batch_tensor_data
 
 
 class ContentDatasource:
@@ -988,7 +990,7 @@ class ImageDataset(BaseDataset):
         return len(self.datasource) if self.datasource.is_indexable() else None
 
     def retrieve_latent_cache_batches(self, num_workers: int):
-        buckset_selector = BucketSelector(self.resolution, self.enable_bucket, self.bucket_no_upscale)
+        buckset_selector = BucketSelector(self.resolution, self.enable_bucket, self.bucket_no_upscale, self.architecture)
         executor = ThreadPoolExecutor(max_workers=num_workers)
 
         batches: dict[tuple[int, int], list[ItemInfo]] = {}  # (width, height) -> [ItemInfo]
@@ -1065,7 +1067,7 @@ class ImageDataset(BaseDataset):
         return self._default_retrieve_text_encoder_output_cache_batches(self.datasource, self.batch_size, num_workers)
 
     def prepare_for_training(self):
-        bucket_selector = BucketSelector(self.resolution, self.enable_bucket, self.bucket_no_upscale)
+        bucket_selector = BucketSelector(self.resolution, self.enable_bucket, self.bucket_no_upscale, self.architecture)
 
         # glob cache files
         latent_cache_files = glob.glob(os.path.join(self.cache_directory, f"*_{self.architecture}.safetensors"))
@@ -1173,7 +1175,7 @@ class VideoDataset(BaseDataset):
         return metadata
 
     def retrieve_latent_cache_batches(self, num_workers: int):
-        buckset_selector = BucketSelector(self.resolution)
+        buckset_selector = BucketSelector(self.resolution, architecture=self.architecture)
         self.datasource.set_bucket_selector(buckset_selector)
 
         executor = ThreadPoolExecutor(max_workers=num_workers)
@@ -1290,7 +1292,7 @@ class VideoDataset(BaseDataset):
         return self._default_retrieve_text_encoder_output_cache_batches(self.datasource, self.batch_size, num_workers)
 
     def prepare_for_training(self):
-        bucket_selector = BucketSelector(self.resolution, self.enable_bucket, self.bucket_no_upscale)
+        bucket_selector = BucketSelector(self.resolution, self.enable_bucket, self.bucket_no_upscale, self.architecture)
 
         # glob cache files
         latent_cache_files = glob.glob(os.path.join(self.cache_directory, f"*_{self.architecture}.safetensors"))

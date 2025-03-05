@@ -40,14 +40,37 @@ def encode_and_save_batch(vae: WanVAE, clip: Optional[CLIPModel], batch: list[It
 
     # print(f"encode batch: {contents.shape}")
     with torch.no_grad():
-        latent = vae.encode(contents).latent_dist.sample()
+        latent = vae.encode(contents)  # list of Tensor[C, F, H, W]
+        latent = torch.stack(latent, dim=0)  # B, C, F, H, W
 
         if clip is not None:
             # extract first frame of contents
             images = contents[:, :, 0, :, :]  # B, C, H, W, non contiguous view is fine
             clip_context = clip.visual(images)
+
+            # encode image latent for I2V
+            B, _, F, lat_h, lat_w = latent.shape
+
+            # Create mask for the required number of frames
+            msk = torch.ones(1, F, lat_h, lat_w, device=vae.device)
+            msk[:, 1:] = 0
+            msk = torch.concat([torch.repeat_interleave(msk[:, 0:1], repeats=4, dim=1), msk[:, 1:]], dim=1)
+            msk = msk.view(1, msk.shape[1] // 4, 4, lat_h, lat_w)
+            msk = msk.transpose(1, 2)  # 1, F, 4, H, W -> 1, 4, F, H, W
+            msk = msk.repeat(B, 1, 1, 1, 1)  # B, 4, F, H, W
+
+            # Zero padding for the required number of frames only
+            padding_frames = F - 1  # The first frame is the input image
+            images_resized = torch.concat([images, torch.zeros(B, 3, padding_frames, h, w, device=vae.device)], dim=1)
+            y = vae.encode(images_resized)
+            y = torch.stack(y, dim=0)  # B, C, F, H, W
+
+            y = y[:, :F]  # may be not needed
+            y = torch.concat([msk, y], dim=1)  # B, 4 + C, F, H, W
+
         else:
             clip_context = None
+            y = None
 
     # # debug: decode and save
     # with torch.no_grad():
@@ -63,9 +86,12 @@ def encode_and_save_batch(vae: WanVAE, clip: Optional[CLIPModel], batch: list[It
     #             img = Image.fromarray(images[b, f])
     #             img.save(f"./logs/decode_{fln}_{b}_{f:03d}.jpg")
 
-    for item, l in zip(batch, latent):
+    for i, item in enumerate(batch):
+        l = latent[i]
+        cctx = clip_context[i] if clip is not None else None
+        y_i = y[i] if clip is not None else None
         # print(f"save latent cache: {item.latent_cache_path}, latent shape: {l.shape}")
-        save_latent_cache_wan(item, l, clip_context)
+        save_latent_cache_wan(item, l, cctx, y_i)
 
 
 def main(args):
@@ -107,7 +133,7 @@ def main(args):
     cache_latents.encode_datasets(datasets, encode, args)
 
 
-def setup_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
+def wan_setup_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     parser.add_argument("--vae_cache_cpu", action="store_true", help="cache features in VAE on CPU")
     parser.add_argument(
         "--clip",
@@ -120,7 +146,7 @@ def setup_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
 
 if __name__ == "__main__":
     parser = cache_latents.setup_parser_common()
-    parser = setup_parser(parser)
+    parser = wan_setup_parser(parser)
 
     args = parser.parse_args()
     main(args)
