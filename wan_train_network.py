@@ -311,7 +311,7 @@ class WanNetworkTrainer(NetworkTrainer):
         return video
 
     def load_vae(self, args: argparse.Namespace, vae_dtype: torch.dtype, vae_path: str):
-        vae_path = args.vae if args.vae is not None else os.path.join(args.ckpt_dir, cfg.vae_checkpoint)
+        vae_path = args.vae
 
         logger.info(f"Loading VAE model from {vae_path}")
         cache_device = torch.device("cpu") if args.vae_cache_cpu else None
@@ -344,6 +344,12 @@ class WanNetworkTrainer(NetworkTrainer):
         )
         logger.info(f"Loading DiT model from {dit_path}, device={loading_device}, dtype={dit_weight_dtype}")
         sd = load_safetensors(dit_path, loading_device, disable_mmap=True, dtype=dit_weight_dtype)
+
+        # remove "model.diffusion_model." prefix: 1.3B model has this prefix
+        for key in list(sd.keys()):
+            if key.startswith("model.diffusion_model."):
+                sd[key[22:]] = sd.pop(key)
+
         info = model.load_state_dict(sd, strict=True, assign=True)
         logger.info(f"Loaded DiT model from {dit_path}, info={info}")
         return model
@@ -429,9 +435,9 @@ if __name__ == "__main__":
     parser = wan_setup_parser(parser)
 
     args = parser.parse_args()
-    args = read_config_from_file(args, parser)
+    args = hv_train_network.read_config_from_file(args, parser)
 
-    args.dit_dtype = torch.bfloat16  # Wan2.1 only supports bfloat16
+    args.dit_dtype = "bfloat16"  # Wan2.1 only supports bfloat16
 
     trainer = WanNetworkTrainer()
     trainer.train(args)

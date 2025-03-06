@@ -715,6 +715,9 @@ class WanVAE:
     def train(self, mode: bool = True):
         self.model.train(mode)
 
+    def requires_grad_(self, requires_grad: bool = True):
+        self.model.requires_grad_(requires_grad)
+
     def to(self, device_or_dtype: Union[torch.device, torch.dtype, str], dtype: Optional[torch.dtype] = None):
         """
         Add nn.Module.to() support for device and dtype.

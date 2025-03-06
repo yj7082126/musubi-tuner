@@ -1446,7 +1446,7 @@ class NetworkTrainer:
                 accelerator.print(f"merging module: {weight_path} with multiplier {multiplier}")
 
                 weights_sd = load_file(weight_path)
-                module = network_module.create_network_from_weights_hunyuan_video(
+                module = network_module.create_arch_network_from_weights(
                     multiplier, weights_sd, unet=transformer, for_inference=True
                 )
                 module.merge_to(None, transformer, weights_sd, weight_dtype, "cpu")
@@ -1463,10 +1463,11 @@ class NetworkTrainer:
         if args.dim_from_weights:
             logger.info(f"Loading network from weights: {args.dim_from_weights}")
             weights_sd = load_file(args.dim_from_weights)
-            network, _ = network_module.create_network_from_weights_hunyuan_video(1, weights_sd, unet=transformer)
+            network, _ = network_module.create_arch_network_from_weights(1, weights_sd, unet=transformer)
         else:
-            if hasattr(network_module, "create_network_hunyuan_video"):
-                network = network_module.create_network_hunyuan_video(
+            # We use the name create_arch_network for compatibility with LyCORIS
+            if hasattr(network_module, "create_arch_network"):
+                network = network_module.create_arch_network(
                     1.0,
                     args.network_dim,
                     args.network_alpha,
@@ -1477,6 +1478,7 @@ class NetworkTrainer:
                     **net_kwargs,
                 )
             else:
+                # LyCORIS compatibility
                 network = network_module.create_network(
                     1.0,
                     args.network_dim,
