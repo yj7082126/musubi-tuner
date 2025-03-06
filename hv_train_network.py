@@ -2150,7 +2150,7 @@ def setup_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--dynamo_backend",
         type=str,
-        default=None,
+        default="NO",
         choices=[e.value for e in DynamoBackend],
         help="dynamo backend type (default is None) / dynamoのbackendの種類（デフォルトは None）",
     )
