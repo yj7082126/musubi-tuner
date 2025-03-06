@@ -235,7 +235,8 @@ class WanI2V:
 
         self.clip.model.to(self.device)
         logger.info(f"Encoding image to CLIP context")
-        with accelerator.autocast(), torch.no_grad():
+        # use torch.amp.autocast istead of accelerator.autocast, becuase CLIP dtype is not bfloat16
+        with torch.amp.autocast(device_type=self.device.type, dtype=torch.float16), torch.no_grad():
             clip_context = self.clip.visual([img[:, None, :, :]])
         logger.info(f"Encoding complete")
 

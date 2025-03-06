@@ -66,13 +66,16 @@ def prepare_cache_files_and_paths(datasets: list[BaseDataset]):
     return all_cache_files_for_dataset, all_cache_paths_for_dataset
 
 
-def encode_for_text_encoder(
+def process_text_encoder_batches(
+    num_workers: Optional[int],
+    skip_existing: bool,
+    batch_size: int,
     datasets: list[BaseDataset],
     all_cache_files_for_dataset: list[set],
     all_cache_paths_for_dataset: list[set],
     encode: callable,
 ):
-    num_workers = args.num_workers if args.num_workers is not None else max(1, os.cpu_count() - 1)
+    num_workers = num_workers if num_workers is not None else max(1, os.cpu_count() - 1)
     for i, dataset in enumerate(datasets):
         logger.info(f"Encoding dataset [{i}]")
         all_cache_files = all_cache_files_for_dataset[i]
@@ -82,7 +85,7 @@ def encode_for_text_encoder(
             all_cache_paths.update([os.path.normpath(item.text_encoder_output_cache_path) for item in batch])
 
             # skip existing cache files
-            if args.skip_existing:
+            if skip_existing:
                 filtered_batch = [
                     item for item in batch if not os.path.normpath(item.text_encoder_output_cache_path) in all_cache_files
                 ]
@@ -91,7 +94,7 @@ def encode_for_text_encoder(
                     continue
                 batch = filtered_batch
 
-            bs = args.batch_size if args.batch_size is not None else len(batch)
+            bs = batch_size if batch_size is not None else len(batch)
             for i in range(0, len(batch), bs):
                 encode(batch[i : i + bs])
 
@@ -144,7 +147,15 @@ def main(args):
     def encode_for_text_encoder_1(batch: list[ItemInfo]):
         encode_and_save_batch(text_encoder_1, batch, is_llm=True, accelerator=accelerator)
 
-    encode_for_text_encoder(datasets, all_cache_files_for_dataset, all_cache_paths_for_dataset, encode_for_text_encoder_1)
+    process_text_encoder_batches(
+        args.num_workers,
+        args.skip_existing,
+        args.batch_size,
+        datasets,
+        all_cache_files_for_dataset,
+        all_cache_paths_for_dataset,
+        encode_for_text_encoder_1,
+    )
     del text_encoder_1
 
     # Load Text Encoder 2
@@ -158,7 +169,15 @@ def main(args):
     def encode_for_text_encoder_2(batch: list[ItemInfo]):
         encode_and_save_batch(text_encoder_2, batch, is_llm=False, accelerator=None)
 
-    encode_for_text_encoder(datasets, all_cache_files_for_dataset, all_cache_paths_for_dataset, encode_for_text_encoder_2)
+    process_text_encoder_batches(
+        args.num_workers,
+        args.skip_existing,
+        args.batch_size,
+        datasets,
+        all_cache_files_for_dataset,
+        all_cache_paths_for_dataset,
+        encode_for_text_encoder_2,
+    )
     del text_encoder_2
 
     # remove cache files not in dataset

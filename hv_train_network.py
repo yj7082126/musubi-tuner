@@ -888,7 +888,7 @@ class NetworkTrainer:
             with torch.no_grad(), accelerator.autocast():
                 for sample_parameter in sample_parameters:
                     self.sample_image_inference(
-                        self, accelerator, args, transformer, dit_dtype, vae, save_dir, sample_parameter, epoch, steps
+                        accelerator, args, transformer, dit_dtype, vae, save_dir, sample_parameter, epoch, steps
                     )
                     clean_memory_on_device(accelerator.device)
         else:
@@ -902,7 +902,7 @@ class NetworkTrainer:
                 with distributed_state.split_between_processes(per_process_params) as sample_parameter_lists:
                     for sample_parameter in sample_parameter_lists[0]:
                         self.sample_image_inference(
-                            self, accelerator, args, transformer, dit_dtype, vae, save_dir, sample_parameter, epoch, steps
+                            accelerator, args, transformer, dit_dtype, vae, save_dir, sample_parameter, epoch, steps
                         )
                         clean_memory_on_device(accelerator.device)
 
@@ -1794,7 +1794,7 @@ class NetworkTrainer:
         # For --sample_at_first
         if should_sample_images(args, global_step, epoch=0):
             optimizer_eval_fn()
-            sample_images(accelerator, args, 0, global_step, vae, transformer, sample_parameters, dit_dtype)
+            self.sample_images(accelerator, args, 0, global_step, vae, transformer, sample_parameters, dit_dtype)
             optimizer_train_fn()
         if len(accelerator.trackers) > 0:
             # log empty object to commit the sample images to wandb
@@ -1887,7 +1887,7 @@ class NetworkTrainer:
                     if should_sampling or should_saving:
                         optimizer_eval_fn()
                         if should_sampling:
-                            sample_images(accelerator, args, None, global_step, vae, transformer, sample_parameters, dit_dtype)
+                            self.sample_images(accelerator, args, None, global_step, vae, transformer, sample_parameters, dit_dtype)
 
                         if should_saving:
                             accelerator.wait_for_everyone()
@@ -1944,7 +1944,7 @@ class NetworkTrainer:
                     if args.save_state:
                         train_utils.save_and_remove_state_on_epoch_end(args, accelerator, epoch + 1)
 
-            sample_images(accelerator, args, epoch + 1, global_step, vae, transformer, sample_parameters, dit_dtype)
+            self.sample_images(accelerator, args, epoch + 1, global_step, vae, transformer, sample_parameters, dit_dtype)
             optimizer_train_fn()
 
             # end of epoch

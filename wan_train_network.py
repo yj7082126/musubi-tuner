@@ -142,7 +142,7 @@ class WanNetworkTrainer(NetworkTrainer):
             clip.model.to(device)
 
             logger.info(f"Encoding image to CLIP context")
-            with accelerator.autocast(), torch.no_grad():
+            with torch.amp.autocast(device_type=device.type, dtype=torch.float16), torch.no_grad():
                 for image_path in sample_prompts_image_embs:
                     logger.info(f"Encoding image: {image_path}")
                     img = Image.open(image_path).convert("RGB")

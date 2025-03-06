@@ -58,9 +58,10 @@ def main(args):
     datasets = train_dataset_group.datasets
 
     # define accelerator for fp8 inference
+    config = wan_t2v_14B.t2v_14B  # all Wan2.1 models have the same config for t5
     accelerator = None
     if args.fp8_t5:
-        accelerator = accelerate.Accelerator(mixed_precision="bf16" if wan_t2v_14B["t5_dtype"] == torch.bfloat16 else "fp16")
+        accelerator = accelerate.Accelerator(mixed_precision="bf16" if config.t5_dtype == torch.bfloat16 else "fp16")
 
     # prepare cache files and paths: all_cache_files_for_dataset = exisiting cache files, all_cache_paths_for_dataset = all cache paths in the dataset
     all_cache_files_for_dataset, all_cache_paths_for_dataset = cache_text_encoder_outputs.prepare_cache_files_and_paths(datasets)
@@ -68,7 +69,7 @@ def main(args):
     # Load T5
     logger.info(f"Loading T5: {args.t5}")
     text_encoder = T5EncoderModel(
-        text_len=wan_t2v_14B.text_len, dtype=wan_t2v_14B.t5_dtype, device=device, weight_path=args.t5, fp8=args.fp8_t5
+        text_len=config.text_len, dtype=config.t5_dtype, device=device, weight_path=args.t5, fp8=args.fp8_t5
     )
 
     # Encode with T5
@@ -77,8 +78,14 @@ def main(args):
     def encode_for_text_encoder(batch: list[ItemInfo]):
         encode_and_save_batch(text_encoder, batch, device, accelerator)
 
-    cache_text_encoder_outputs.encode_for_text_encoder(
-        datasets, all_cache_files_for_dataset, all_cache_paths_for_dataset, encode_for_text_encoder
+    cache_text_encoder_outputs.process_text_encoder_batches(
+        args.num_workers,
+        args.skip_existing,
+        args.batch_size,
+        datasets,
+        all_cache_files_for_dataset,
+        all_cache_paths_for_dataset,
+        encode_for_text_encoder,
     )
     del text_encoder
 

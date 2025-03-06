@@ -39,38 +39,44 @@ def encode_and_save_batch(vae: WanVAE, clip: Optional[CLIPModel], batch: list[It
         raise ValueError(f"Image or video size too small: {item.item_key} and {len(batch) - 1} more, size: {item.original_size}")
 
     # print(f"encode batch: {contents.shape}")
-    with torch.no_grad():
+    with torch.amp.autocast(device_type=vae.device.type, dtype=vae.dtype), torch.no_grad():
         latent = vae.encode(contents)  # list of Tensor[C, F, H, W]
-        latent = torch.stack(latent, dim=0)  # B, C, F, H, W
+    latent = torch.stack(latent, dim=0)  # B, C, F, H, W
+    latent = latent.to(vae.dtype)  # convert to bfloat16, we are not sure if this is correct
 
-        if clip is not None:
-            # extract first frame of contents
-            images = contents[:, :, 0, :, :]  # B, C, H, W, non contiguous view is fine
+    if clip is not None:
+        # extract first frame of contents
+        images = contents[:, :, 0:1, :, :]  # B, C, F, H, W, non contiguous view is fine
+
+        with torch.amp.autocast(device_type=clip.device.type, dtype=torch.float16), torch.no_grad():
             clip_context = clip.visual(images)
+        clip_context = clip_context.to(torch.float16)  # convert to fp16
 
-            # encode image latent for I2V
-            B, _, F, lat_h, lat_w = latent.shape
+        # encode image latent for I2V
+        B, _, _, lat_h, lat_w = latent.shape
+        F = contents.shape[2]
 
-            # Create mask for the required number of frames
-            msk = torch.ones(1, F, lat_h, lat_w, device=vae.device)
-            msk[:, 1:] = 0
-            msk = torch.concat([torch.repeat_interleave(msk[:, 0:1], repeats=4, dim=1), msk[:, 1:]], dim=1)
-            msk = msk.view(1, msk.shape[1] // 4, 4, lat_h, lat_w)
-            msk = msk.transpose(1, 2)  # 1, F, 4, H, W -> 1, 4, F, H, W
-            msk = msk.repeat(B, 1, 1, 1, 1)  # B, 4, F, H, W
+        # Create mask for the required number of frames
+        msk = torch.ones(1, F, lat_h, lat_w, dtype=vae.dtype, device=vae.device)
+        msk[:, 1:] = 0
+        msk = torch.concat([torch.repeat_interleave(msk[:, 0:1], repeats=4, dim=1), msk[:, 1:]], dim=1)
+        msk = msk.view(1, msk.shape[1] // 4, 4, lat_h, lat_w)
+        msk = msk.transpose(1, 2)  # 1, F, 4, H, W -> 1, 4, F, H, W
+        msk = msk.repeat(B, 1, 1, 1, 1)  # B, 4, F, H, W
 
-            # Zero padding for the required number of frames only
-            padding_frames = F - 1  # The first frame is the input image
-            images_resized = torch.concat([images, torch.zeros(B, 3, padding_frames, h, w, device=vae.device)], dim=1)
-            y = vae.encode(images_resized)
-            y = torch.stack(y, dim=0)  # B, C, F, H, W
+        # Zero padding for the required number of frames only
+        padding_frames = F - 1  # The first frame is the input image
+        images_resized = torch.concat([images, torch.zeros(B, 3, padding_frames, h, w, device=vae.device)], dim=2)
+        y = vae.encode(images_resized)
+        y = torch.stack(y, dim=0)  # B, C, F, H, W
 
-            y = y[:, :F]  # may be not needed
-            y = torch.concat([msk, y], dim=1)  # B, 4 + C, F, H, W
+        y = y[:, :F]  # may be not needed
+        y = y.to(vae.dtype)  # convert to bfloat16
+        y = torch.concat([msk, y], dim=1)  # B, 4 + C, F, H, W
 
-        else:
-            clip_context = None
-            y = None
+    else:
+        clip_context = None
+        y = None
 
     # # debug: decode and save
     # with torch.no_grad():

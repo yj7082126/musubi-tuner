@@ -177,7 +177,7 @@ class ItemInfo:
 # Maybe we can use a plugin system in the future.
 
 # the keys of the dict are `<content_type>_FxHxW_<dtype>` for latents
-# and `<content_type>_<dtype>` for other tensors
+# and `<content_type>_<dtype|mask>` for other tensors
 
 
 def save_latent_cache(item_info: ItemInfo, latent: torch.Tensor):
@@ -429,9 +429,13 @@ class BucketBatchManager:
             sd = {**sd_latent, **sd_te}
 
             for key in sd.keys():
-                content_key = key.rsplit("_", 1)[0]  # remove dtype
-                if content_key.startswith("latents_"):
-                    content_key = content_key.rsplit("_", 1)[0]  # remove FxHxW
+                # TODO refactor this
+                if key.endswith("_mask"):
+                    content_key = key
+                else:
+                    content_key = key.rsplit("_", 1)[0]  # remove dtype
+                    if content_key.startswith("latents_"):
+                        content_key = content_key.rsplit("_", 1)[0]  # remove FxHxW
                 if content_key not in batch_tensor_data:
                     batch_tensor_data[content_key] = []
                 batch_tensor_data[content_key].append(sd[key])
@@ -959,9 +963,18 @@ class ImageDataset(BaseDataset):
         image_jsonl_file: Optional[str] = None,
         cache_directory: Optional[str] = None,
         debug_dataset: bool = False,
+        architecture: str = "no_default",
     ):
         super(ImageDataset, self).__init__(
-            resolution, caption_extension, batch_size, num_repeats, enable_bucket, bucket_no_upscale, cache_directory, debug_dataset
+            resolution,
+            caption_extension,
+            batch_size,
+            num_repeats,
+            enable_bucket,
+            bucket_no_upscale,
+            cache_directory,
+            debug_dataset,
+            architecture,
         )
         self.image_directory = image_directory
         self.image_jsonl_file = image_jsonl_file
@@ -1133,9 +1146,18 @@ class VideoDataset(BaseDataset):
         video_jsonl_file: Optional[str] = None,
         cache_directory: Optional[str] = None,
         debug_dataset: bool = False,
+        architecture: str = "no_default",
     ):
         super(VideoDataset, self).__init__(
-            resolution, caption_extension, batch_size, num_repeats, enable_bucket, bucket_no_upscale, cache_directory, debug_dataset
+            resolution,
+            caption_extension,
+            batch_size,
+            num_repeats,
+            enable_bucket,
+            bucket_no_upscale,
+            cache_directory,
+            debug_dataset,
+            architecture,
         )
         self.video_directory = video_directory
         self.video_jsonl_file = video_jsonl_file
