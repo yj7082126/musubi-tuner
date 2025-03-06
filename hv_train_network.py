@@ -966,23 +966,16 @@ class NetworkTrainer:
         if self.i2v_training:
             logger.info(f"image path: {image_path}")
 
-        # Prepare scheduler for each prompt
-        scheduler = FlowMatchDiscreteScheduler(shift=discrete_flow_shift, reverse=True, solver="euler")
-
-        # Number of inference steps for sampling
-        scheduler.set_timesteps(sample_steps, device=device)
-        timesteps = scheduler.timesteps
-
         # inference: architecture dependent
         video = self.do_inference(
             accelerator,
             args,
             sample_parameter,
-            timesteps,
             vae,
             dit_dtype,
             transformer,
-            scheduler,
+            discrete_flow_shift,
+            sample_steps,
             width,
             height,
             frame_count,
@@ -1103,11 +1096,11 @@ class NetworkTrainer:
         accelerator,
         args,
         sample_parameter,
-        timesteps,
         vae,
         dit_dtype,
         transformer,
-        scheduler,
+        discrete_flow_shift,
+        sample_steps,
         width,
         height,
         frame_count,
@@ -1119,6 +1112,13 @@ class NetworkTrainer:
     ):
         """architecture dependent inference"""
         device = accelerator.device
+
+        # Prepare scheduler for each prompt
+        scheduler = FlowMatchDiscreteScheduler(shift=discrete_flow_shift, reverse=True, solver="euler")
+
+        # Number of inference steps for sampling
+        scheduler.set_timesteps(sample_steps, device=device)
+        timesteps = scheduler.timesteps
 
         # Calculate latent video length based on VAE version
         if "884" in VAE_VER:
@@ -1241,7 +1241,7 @@ class NetworkTrainer:
 
         return video
 
-    def load_vae(self, vae_dtype: torch.dtype, vae_path: str):
+    def load_vae(self, args: argparse.Namespace, vae_dtype: torch.dtype, vae_path: str):
         vae, _, s_ratio, t_ratio = load_vae(vae_dtype=vae_dtype, device="cpu", vae_path=vae_path)
 
         if args.vae_chunk_size is not None:
@@ -1281,7 +1281,7 @@ class NetworkTrainer:
         self,
         args: argparse.Namespace,
         accelerator: Accelerator,
-        transformer,
+        transformer_arg,
         latents: torch.Tensor,
         batch: dict[str, torch.Tensor],
         noise: torch.Tensor,
@@ -1289,6 +1289,7 @@ class NetworkTrainer:
         timesteps: torch.Tensor,
         network_dtype: torch.dtype,
     ):
+        transformer: HYVideoDiffusionTransformer = transformer_arg
         bsz = latents.shape[0]
 
         # I2V training
@@ -1397,7 +1398,7 @@ class NetworkTrainer:
             sample_parameters = self.process_sample_prompts(args, accelerator, args.sample_prompts)
 
             # Load VAE model for sampling images: VAE is loaded to cpu to save gpu memory
-            vae = self.load_vae(vae_dtype=vae_dtype, vae_path=args.vae)
+            vae = self.load_vae(args, vae_dtype=vae_dtype, vae_path=args.vae)
             vae.requires_grad_(False)
             vae.eval()
 
@@ -2244,7 +2245,9 @@ def setup_parser_common() -> argparse.ArgumentParser:
     )
 
     # parser.add_argument("--flow_shift", type=float, default=7.0, help="Shift factor for flow matching schedulers")
-    parser.add_argument("--guidance_scale", type=float, default=1.0, help="Embeded classifier free guidance scale.")
+    parser.add_argument(
+        "--guidance_scale", type=float, default=1.0, help="Embeded classifier free guidance scale (HunyuanVideo only)."
+    )
     parser.add_argument(
         "--timestep_sampling",
         choices=["sigma", "uniform", "sigmoid", "shift"],

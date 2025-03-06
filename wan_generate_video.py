@@ -37,7 +37,9 @@ def parse_args():
     parser.add_argument("--task", type=str, default="t2v-14B", choices=list(WAN_CONFIGS.keys()), help="The task to run.")
     # parser.add_argument("--use_prompt_extend", action="store_true", default=False, help="Whether to use prompt extend.")
     # prompt extend is not supported
-    parser.add_argument("--sample_solver", type=str, default="unipc", choices=["unipc", "dpm++"], help="The solver used to sample.")
+    parser.add_argument(
+        "--sample_solver", type=str, default="unipc", choices=["unipc", "dpm++", "vanilla"], help="The solver used to sample."
+    )
 
     parser.add_argument("--dit", type=str, default=None, help="DiT checkpoint path")
     parser.add_argument("--vae", type=str, default=None, help="VAE checkpoint path")

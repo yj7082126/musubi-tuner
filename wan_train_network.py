@@ -57,9 +57,13 @@ from hv_train_network import (
 import logging
 
 from utils import huggingface_utils, model_utils, train_utils, sai_model_spec
+from utils.safetensors_utils import load_safetensors
 from wan.configs import WAN_CONFIGS
 from wan.modules.clip import CLIPModel
+from wan.modules.model import WanModel
 from wan.modules.t5 import T5EncoderModel
+from wan.modules.vae import WanVAE
+from wan.utils.fm_solvers_unipc import FlowUniPCMultistepScheduler
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -173,11 +177,11 @@ class WanNetworkTrainer(NetworkTrainer):
         accelerator,
         args,
         sample_parameter,
-        timesteps,
         vae,
         dit_dtype,
         transformer,
-        scheduler,
+        discrete_flow_shift,
+        sample_steps,
         width,
         height,
         frame_count,
@@ -211,7 +215,7 @@ class WanNetworkTrainer(NetworkTrainer):
         latents = torch.cat(latents, dim=2)
 
         if self.i2v_training:
-            # Move VAE to the appropriate device for sampling
+            # Move VAE to the appropriate device for sampling: consider to cache image latents in CPU in advance
             vae.to(device)
             vae.eval()
 
@@ -221,7 +225,7 @@ class WanNetworkTrainer(NetworkTrainer):
             image = image / 127.5 - 1  # -1 to 1
 
             # Create mask for the required number of frames
-            msk = torch.ones(1, latent_video_length, lat_h, lat_w, device=self.device)
+            msk = torch.ones(1, latent_video_length, lat_h, lat_w, device=device)
             msk[:, 1:] = 0
             msk = torch.concat([torch.repeat_interleave(msk[:, 0:1], repeats=4, dim=1), msk[:, 1:]], dim=1)
             msk = msk.view(1, msk.shape[1] // 4, 4, lat_h, lat_w)
@@ -241,88 +245,77 @@ class WanNetworkTrainer(NetworkTrainer):
         else:
             image_latents = None
 
-        """
-        －－－－－－－－－－－－－－－－－－－－－－－－－－
-        俺様用しおり
-        　 ∧＿∧ 　　
-        　（　´∀｀）＜　今日はここまで書いた
-        －－－－－－－－－－－－－－－－－－－－－－－－－－
-        """
+        scheduler = FlowUniPCMultistepScheduler(num_train_timesteps=self.num_train_timesteps, shift=1, use_dynamic_shifting=False)
+        scheduler.set_timesteps(sample_steps, device=device, shift=discrete_flow_shift)
+        timesteps = scheduler.timesteps
 
-        # Guidance scale
-        guidance_expand = torch.tensor([guidance_scale * 1000.0], dtype=torch.float32, device=device).to(dit_dtype)
+        # Generate noise for the required number of frames only
+        noise = torch.randn(16, latent_video_length, lat_h, lat_w, dtype=torch.float32, generator=generator, device=device).to(
+            "cpu"
+        )
 
-        # Get rotary positional embeddings
-        freqs_cos, freqs_sin = get_rotary_pos_embed_by_shape(transformer, latents.shape[2:])
-        freqs_cos = freqs_cos.to(device=device, dtype=dit_dtype)
-        freqs_sin = freqs_sin.to(device=device, dtype=dit_dtype)
+        # prepare the model input
+        max_seq_len = latent_video_length * lat_h * lat_w // (self.patch_size[1] * self.patch_size[2])
+        arg_c = {"context": context, "seq_len": max_seq_len}
+        arg_null = {"context": context_null, "seq_len": max_seq_len}
+
+        if self.i2v_training:
+            # I2V training
+            arg_c["clip_fea"] = sample_parameter["clip_embeds"].to(device=device, dtype=dit_dtype)
+            arg_c["y"] = image_latents
+            arg_null["clip_fea"] = arg_c["clip_fea"]
+            arg_null["y"] = image_latents
 
         # Wrap the inner loop with tqdm to track progress over timesteps
         prompt_idx = sample_parameter.get("enum", 0)
+        latent = noise
         with torch.no_grad():
             for i, t in enumerate(tqdm(timesteps, desc=f"Sampling timesteps for prompt {prompt_idx+1}")):
-                latents_input = scheduler.scale_model_input(latents, t)
+                latent_model_input = [latent.to(device=device)]
+                timestep = t.unsqueeze(0)
+
+                with accelerator.autocast():
+                    noise_pred_cond = self.model(latent_model_input, t=timestep, **arg_c)[0].to("cpu")
+                    if do_classifier_free_guidance:
+                        noise_pred_uncond = self.model(latent_model_input, t=timestep, **arg_null)[0].to("cpu")
+                    else:
+                        noise_pred_uncond = None
 
                 if do_classifier_free_guidance:
-                    latents_input = torch.cat([latents_input, latents_input], dim=0)  # 2, C, F, H, W
+                    noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
+                else:
+                    noise_pred = noise_pred_cond
 
-                if image_latents is not None:
-                    latents_image_input = (
-                        image_latents if not do_classifier_free_guidance else torch.cat([image_latents, image_latents], dim=0)
-                    )
-                    latents_input = torch.cat([latents_input, latents_image_input], dim=1)  # 1 or 2, C*2, F, H, W
-
-                noise_pred = transformer(
-                    latents_input,
-                    t.repeat(latents.shape[0]).to(device=device, dtype=dit_dtype),
-                    text_states=prompt_embeds,
-                    text_mask=prompt_mask,
-                    text_states_2=prompt_embeds_2,
-                    freqs_cos=freqs_cos,
-                    freqs_sin=freqs_sin,
-                    guidance=guidance_expand,
-                    return_dict=True,
-                )["x"]
-
-                # perform classifier free guidance
-                if do_classifier_free_guidance:
-                    noise_pred_uncond, noise_pred_cond = noise_pred.chunk(2)
-                    noise_pred = noise_pred_uncond + cfg_scale * (noise_pred_cond - noise_pred_uncond)
-
-                # Compute the previous noisy sample x_t -> x_t-1
-                latents = scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+                temp_x0 = scheduler.step(noise_pred.unsqueeze(0), t, latent.unsqueeze(0), return_dict=False, generator=generator)[0]
+                latent = temp_x0.squeeze(0)
 
         # Move VAE to the appropriate device for sampling
         vae.to(device)
         vae.eval()
 
         # Decode latents to video
-        if hasattr(vae.config, "shift_factor") and vae.config.shift_factor:
-            latents = latents / vae.config.scaling_factor + vae.config.shift_factor
-        else:
-            latents = latents / vae.config.scaling_factor
+        logger.info(f"Decoding video from latents: {latent.shape}")
+        latent = latent.unsqueeze(0)  # add batch dim
 
-        latents = latents.to(device=device, dtype=vae.dtype)
-        with torch.no_grad():
-            video = vae.decode(latents, return_dict=False)[0]
-        video = (video / 2 + 0.5).clamp(0, 1)
-        video = video.cpu().float()
+        with torch.autocast(device_type=device.type, dtype=vae.dtype), torch.no_grad():
+            video = vae.decode(latent)[0]
+        del latent
+
+        logger.info(f"Decoding complete")
+        video = video.to(torch.float32).cpu()
+        video = (video / 2 + 0.5).clamp(0, 1)  # -1 to 1 -> 0 to 1
+
+        vae.to("cpu")
+        clean_memory_on_device(device)
 
         return video
 
-    def load_vae(self, vae_dtype: torch.dtype, vae_path: str):
-        vae, _, s_ratio, t_ratio = load_vae(vae_dtype=vae_dtype, device="cpu", vae_path=vae_path)
+    def load_vae(self, args: argparse.Namespace, vae_dtype: torch.dtype, vae_path: str):
+        vae_path = args.vae if args.vae is not None else os.path.join(args.ckpt_dir, cfg.vae_checkpoint)
 
-        if args.vae_chunk_size is not None:
-            vae.set_chunk_size_for_causal_conv_3d(args.vae_chunk_size)
-            logger.info(f"Set chunk_size to {args.vae_chunk_size} for CausalConv3d in VAE")
-        if args.vae_spatial_tile_sample_min_size is not None:
-            vae.enable_spatial_tiling(True)
-            vae.tile_sample_min_size = args.vae_spatial_tile_sample_min_size
-            vae.tile_latent_min_size = args.vae_spatial_tile_sample_min_size // 8
-        elif args.vae_tiling:
-            vae.enable_spatial_tiling(True)
-
+        logger.info(f"Loading VAE model from {vae_path}")
+        cache_device = torch.device("cpu") if args.vae_cache_cpu else None
+        vae = WanVAE(vae_path=vae_path, device="cpu", dtype=vae_dtype, cache_device=cache_device)
         return vae
 
     def load_transformer(
@@ -334,16 +327,28 @@ class WanNetworkTrainer(NetworkTrainer):
         loading_device: str,
         dit_weight_dtype: torch.dtype,
     ):
-        transformer = load_transformer(dit_path, attn_mode, split_attn, loading_device, dit_weight_dtype, args.dit_in_channels)
-
-        if args.img_in_txt_in_offloading:
-            logger.info("Enable offloading img_in and txt_in to CPU")
-            transformer.enable_img_in_txt_in_offloading()
-
-        return transformer
+        logger.info(f"Creating WanModel")
+        model = WanModel(
+            model_type="i2v" if self.i2v_training else "t2v",
+            dim=self.config.dim,
+            eps=self.config.eps,
+            ffn_dim=self.config.ffn_dim,
+            freq_dim=self.config.freq_dim,
+            in_dim=36 if self.i2v_training else 16,  # 36 for I2V, 16 for T2V
+            num_heads=self.config.num_heads,
+            num_layers=self.config.num_layers,
+            out_dim=16,
+            text_len=512,
+            attn_mode=attn_mode,
+            split_attn=split_attn,
+        )
+        logger.info(f"Loading DiT model from {dit_path}, device={loading_device}, dtype={dit_weight_dtype}")
+        sd = load_safetensors(dit_path, loading_device, disable_mmap=True, dtype=dit_weight_dtype)
+        info = model.load_state_dict(sd, strict=True, assign=True)
+        logger.info(f"Loaded DiT model from {dit_path}, info={info}")
+        return model
 
     def scale_shift_latents(self, latents):
-        latents = latents * vae_module.SCALING_FACTOR
         return latents
 
     def call_dit(
@@ -358,44 +363,41 @@ class WanNetworkTrainer(NetworkTrainer):
         timesteps: torch.Tensor,
         network_dtype: torch.dtype,
     ):
-        bsz = latents.shape[0]
+        model: WanModel = transformer
 
         # I2V training
         if self.i2v_training:
-            image_latents = torch.zeros_like(latents)
-            image_latents[:, :, :1, :, :] = latents[:, :, :1, :, :]
-            noisy_model_input = torch.cat([noisy_model_input, image_latents], dim=1)  # concat along channel dim
+            image_latents = batch["y"]
+            clip_fea = batch["clip_fea"]
+            image_latents = image_latents.to(device=accelerator.device, dtype=network_dtype)
+            clip_fea = clip_fea.to(device=accelerator.device, dtype=network_dtype)
+        else:
+            image_latents = None
 
-        # ensure guidance_scale in args is float
-        guidance_vec = torch.full((bsz,), float(args.guidance_scale), device=accelerator.device)  # , dtype=dit_dtype)
+        context = batch["t5_embeds"].to(device=accelerator.device, dtype=network_dtype)
 
         # ensure the hidden state will require grad
         if args.gradient_checkpointing:
             noisy_model_input.requires_grad_(True)
-            guidance_vec.requires_grad_(True)
-
-        pos_emb_shape = latents.shape[1:]
-        if pos_emb_shape not in self.pos_embed_cache:
-            freqs_cos, freqs_sin = get_rotary_pos_embed_by_shape(transformer, latents.shape[2:])
-            # freqs_cos = freqs_cos.to(device=accelerator.device, dtype=dit_dtype)
-            # freqs_sin = freqs_sin.to(device=accelerator.device, dtype=dit_dtype)
-            self.pos_embed_cache[pos_emb_shape] = (freqs_cos, freqs_sin)
-        else:
-            freqs_cos, freqs_sin = self.pos_embed_cache[pos_emb_shape]
+            context.requires_grad_(True)
+            if image_latents is not None:
+                image_latents.requires_grad_(True)
+            if clip_fea is not None:
+                clip_fea.requires_grad_(True)
 
         # call DiT
+        lat_f, lat_h, lat_w = latents.shape[1:4]
+        seq_len = lat_f * lat_h * lat_w // (self.config.patch_size[0] * self.config.patch_size[1] * self.config.patch_size[2])
         latents = latents.to(device=accelerator.device, dtype=network_dtype)
         noisy_model_input = noisy_model_input.to(device=accelerator.device, dtype=network_dtype)
         with accelerator.autocast():
-            model_pred = transformer(
+            model_pred = model(
                 noisy_model_input,
-                timesteps,
-                text_states=batch["llm"],
-                text_mask=batch["llm_mask"],
-                text_states_2=batch["clipL"],
-                freqs_cos=freqs_cos,
-                freqs_sin=freqs_sin,
-                guidance=guidance_vec,
+                t=timesteps,
+                context=context,
+                clip_fea=clip_fea,
+                seq_len=seq_len,
+                y=image_latents,
                 return_dict=False,
             )
 

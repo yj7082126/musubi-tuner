@@ -1,6 +1,7 @@
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
 import logging
 import os
+from typing import Optional, Union
 
 import torch
 import torch.nn as nn
@@ -707,6 +708,30 @@ class WanVAE:
     def to_device(self, device):
         self.device = device
         self.model.to(device)
+
+    def eval(self):
+        self.model.eval()
+
+    def train(self, mode: bool = True):
+        self.model.train(mode)
+
+    def to(self, device_or_dtype: Union[torch.device, torch.dtype, str], dtype: Optional[torch.dtype] = None):
+        """
+        Add nn.Module.to() support for device and dtype.
+        """
+        if isinstance(device_or_dtype, str):
+            self.model.to(device_or_dtype)
+            self.device = torch.device(device_or_dtype)
+        elif isinstance(device_or_dtype, torch.device):
+            self.model.to(device_or_dtype)
+            self.device = device_or_dtype
+        else:
+            self.model.to(dtype=device_or_dtype)
+            self.dtype = device_or_dtype
+
+        if dtype is not None:
+            self.model.to(dtype=dtype)
+            self.dtype = dtype
 
     def encode(self, videos):
         """

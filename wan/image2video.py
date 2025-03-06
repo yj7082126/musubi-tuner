@@ -7,6 +7,7 @@ import logging
 import os
 import random
 import sys
+from typing import Union
 
 import cv2
 import numpy as np
@@ -14,6 +15,7 @@ import torch
 import torchvision.transforms.functional as TF
 from tqdm import tqdm
 from accelerate import Accelerator, init_empty_weights
+from modules.scheduling_flow_match_discrete import FlowMatchDiscreteScheduler
 from utils.safetensors_utils import load_safetensors
 
 # from .distributed.fsdp import shard_model
@@ -327,6 +329,23 @@ class WanI2V:
                 )
                 sampling_sigmas = get_sampling_sigmas(sampling_steps, shift)
                 timesteps, _ = retrieve_timesteps(sample_scheduler, device=self.device, sigmas=sampling_sigmas)
+            elif sample_solver == "vanilla":
+                sample_scheduler = FlowMatchDiscreteScheduler(num_train_timesteps=self.num_train_timesteps, shift=shift)
+                sample_scheduler.set_timesteps(sampling_steps, device=self.device)
+                timesteps = sample_scheduler.timesteps
+
+                org_step = sample_scheduler.step
+
+                def step_wrapper(
+                    model_output: torch.Tensor,
+                    timestep: Union[int, torch.Tensor],
+                    sample: torch.Tensor,
+                    return_dict: bool = True,
+                    generator=None,
+                ):
+                    return org_step(model_output, timestep, sample, return_dict=return_dict)
+
+                sample_scheduler.step = step_wrapper
             else:
                 raise NotImplementedError("Unsupported solver.")
 
