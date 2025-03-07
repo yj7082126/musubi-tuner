@@ -72,8 +72,17 @@ A line starting with `#` is a comment.
 * `--f` specifies the number of frames. The default is 1, which generates a still image.
 * `--d` specifies the seed. The default is random.
 * `--s` specifies the number of steps in generation. The default is 20.
-* `--g` specifies the guidance scale. The default is 6.0, which is the default value during inference of HunyuanVideo.
+* `--g` specifies the guidance scale. The default is 6.0, which is the default value during inference of HunyuanVideo. Specify 1.0 for SkyReels V1 models. Ignore this option for Wan2.1 models.
 * `--fs` specifies the discrete flow shift. The default is 14.5, which corresponds to the number of steps 20. In the HunyuanVideo paper, 7.0 is recommended for 50 steps, and 17.0 is recommended for less than 20 steps (e.g. 10).
+
+If you train I2V models, you can use the additional options below. 
+
+* `--i path/to/image.png`: the image path for image2video inference.
+
+If you train the model with classifier free guidance, you can use the additional options below.
+
+*`--n negative prompt...`: the negative prompt for the classifier free guidance.
+*`--l 6.0`: the classifier free guidance scale. Should be set to 6.0 for SkyReels V1 models. 5.0 is the default value for Wan2.1 (if omitted).
 
 <details>
 <summary>日本語</summary>
@@ -87,4 +96,13 @@ A line starting with `#` is a comment.
 * `--s` 生成におけるステップ数を指定します。省略時は20です。
 * `--g` guidance scaleを指定します。省略時は6.0で、HunyuanVideoの推論時のデフォルト値です。
 * `--fs` discrete flow shiftを指定します。省略時は14.5で、ステップ数20の場合に対応した値です。HunyuanVideoの論文では、ステップ数50の場合は7.0、ステップ数20未満（10など）で17.0が推奨されています。
+
+I2Vモデルを学習する場合、以下の追加オプションを使用できます。
+
+* `--i path/to/image.png`: image2video推論用の画像パス。
+
+classifier free guidance（ネガティブプロンプト）を必要とするモデルを学習する場合、以下の追加オプションを使用できます。
+
+*`--n negative prompt...`: classifier free guidance用のネガティブプロンプト。
+*`--l 6.0`: classifier free guidance scale。SkyReels V1モデルの場合は6.0に設定してください。Wan2.1の場合はデフォルト値が5.0です（省略時）。
 </details>

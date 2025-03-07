@@ -2,10 +2,8 @@
 import math
 
 import torch
-import torch.cuda.amp as amp
 import torch.nn as nn
-from diffusers.configuration_utils import ConfigMixin, register_to_config
-from diffusers.models.modeling_utils import ModelMixin
+from torch.utils.checkpoint import checkpoint
 
 from .attention import flash_attention
 from utils.device_utils import clean_memory_on_device
@@ -310,7 +308,10 @@ class WanI2VCrossAttention(WanSelfAttention):
         # output
         x = x.flatten(2)
         img_x = img_x.flatten(2)
-        x += img_x
+        if self.training:
+            x = x + img_x  # avoid inplace
+        else:
+            x += img_x
         del img_x
 
         x = self.o(x)
@@ -358,16 +359,15 @@ class WanAttentionBlock(nn.Module):
         # modulation
         self.modulation = nn.Parameter(torch.randn(1, 6, dim) / dim**0.5)
 
-    def forward(
-        self,
-        x,
-        e,
-        seq_lens,
-        grid_sizes,
-        freqs,
-        context,
-        context_lens,
-    ):
+        self.gradient_checkpointing = False
+
+    def enable_gradient_checkpointing(self):
+        self.gradient_checkpointing = True
+
+    def disable_gradient_checkpointing(self):
+        self.gradient_checkpointing = False
+
+    def _forward(self, x, e, seq_lens, grid_sizes, freqs, context, context_lens):
         r"""
         Args:
             x(Tensor): Shape [B, L, C]
@@ -401,12 +401,18 @@ class WanAttentionBlock(nn.Module):
         #     return x
         # x = cross_attn_ffn(x, context, context_lens, e)
 
-        x += self.cross_attn(self.norm3(x), context, context_lens)
+        # x += self.cross_attn(self.norm3(x), context, context_lens) # backward error
+        x = x + self.cross_attn(self.norm3(x), context, context_lens)
         del context
         y = self.ffn(self.norm2(x).float() * (1 + e[4]) + e[3])
         x = x + y.to(torch.float32) * e[5]
         del y
         return x
+
+    def forward(self, x, e, seq_lens, grid_sizes, freqs, context, context_lens):
+        if self.training and self.gradient_checkpointing:
+            return checkpoint(self._forward, x, e, seq_lens, grid_sizes, freqs, context, context_lens, use_reentrant=False)
+        return self._forward(x, e, seq_lens, grid_sizes, freqs, context, context_lens)
 
 
 class Head(nn.Module):
@@ -582,9 +588,35 @@ class WanModel(nn.Module):  # ModelMixin, ConfigMixin):
         # initialize weights
         self.init_weights()
 
+        self.gradient_checkpointing = False
+
         # offloading
         self.blocks_to_swap = None
         self.offloader = None
+
+    @property
+    def dtype(self):
+        return next(self.parameters()).dtype
+
+    @property
+    def device(self):
+        return next(self.parameters()).device
+
+    def enable_gradient_checkpointing(self):
+        self.gradient_checkpointing = True
+
+        for block in self.blocks:
+            block.enable_gradient_checkpointing()
+
+        print(f"WanModel: Gradient checkpointing enabled.")
+
+    def disable_gradient_checkpointing(self):
+        self.gradient_checkpointing = False
+
+        for block in self.blocks:
+            block.disable_gradient_checkpointing()
+
+        print(f"WanModel: Gradient checkpointing disabled.")
 
     def enable_block_swap(self, blocks_to_swap: int, device: torch.device, supports_backward: bool):
         self.blocks_to_swap = blocks_to_swap
@@ -687,9 +719,9 @@ class WanModel(nn.Module):  # ModelMixin, ConfigMixin):
 
         # context
         context_lens = None
-        context = self.text_embedding(
-            torch.stack([torch.cat([u, u.new_zeros(self.text_len - u.size(0), u.size(1))]) for u in context])
-        )
+        if type(context) is list:
+            context = torch.stack([torch.cat([u, u.new_zeros(self.text_len - u.size(0), u.size(1))]) for u in context])
+        context = self.text_embedding(context)
 
         if clip_fea is not None:
             context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
@@ -700,7 +732,9 @@ class WanModel(nn.Module):  # ModelMixin, ConfigMixin):
         # arguments
         kwargs = dict(e=e0, seq_lens=seq_lens, grid_sizes=grid_sizes, freqs=freqs_list, context=context, context_lens=context_lens)
 
-        clean_memory_on_device(device)
+        if self.blocks_to_swap:
+            clean_memory_on_device(device)
+
         # print(f"x: {x.shape}, e: {e0.shape}, context: {context.shape}, seq_lens: {seq_lens}")
         for block_idx, block in enumerate(self.blocks):
             if self.blocks_to_swap:

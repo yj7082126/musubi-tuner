@@ -1,25 +1,24 @@
 > 📝 Click on the language section to expand / 言語をクリックして展開
 
-# Inference with WAN2.1 / Wan2.1の推論
+# Wan 2.1
 
 ## Overview / 概要
 
-This is an unofficial inference script for [Wan2.1](https://github.com/Wan-Video/Wan2.1). The features are as follows.
+This is an unofficial training and inference script for [Wan2.1](https://github.com/Wan-Video/Wan2.1). The features are as follows.
 
-- fp8 support and memory reduction by block swap: Inference of a 720x1280x81frames video is possible with 24GB VRAM
-    
-- Flash attention can be executed without installation (using PyTorch's scaled dot product attention)
+- fp8 support and memory reduction by block swap: Inference of a 720x1280x81frames videos with 24GB VRAM, training with 720x1280 images with 24GB VRAM
+- Inference without installing Flash attention (using PyTorch's scaled dot product attention)
 - Supports xformers and Sage attention
 
 This feature is experimental.
 
 <details>
 <summary>日本語</summary>
-[Wan2.1](https://github.com/Wan-Video/Wan2.1) の非公式推論スクリプトを提供しています。
+[Wan2.1](https://github.com/Wan-Video/Wan2.1) の非公式の学習および推論スクリプトです。
 
 以下の特徴があります。
 
-- fp8対応およびblock swapによる省メモリ化：720x1280x81framesの動画を24GB VRAMで推論可能
+- fp8対応およびblock swapによる省メモリ化：720x1280x81framesの動画を24GB VRAMで推論可能、720x1280の画像での学習が24GB VRAMで可能
 - Flash attentionのインストールなしでの実行（PyTorchのscaled dot product attentionを使用）
 - xformersおよびSage attention対応
 
@@ -49,6 +48,121 @@ T2VやI2V、解像度、モデルサイズなどにより適切な重みを選�
 
 （repackaged版の重みを提供してくださっているComfy-Orgに感謝いたします。）
 </details>
+
+## Pre-caching / 事前キャッシュ
+
+### Latent Pre-caching
+
+Latent pre-caching is almost the same as in HunyuanVideo. Create the cache using the following command:
+
+```bash
+python wan_cache_latents.py --dataset_config path/to/toml --vae path/to/wan_2.1_vae.safetensors
+```
+
+If you train I2V models, add `--clip path/to/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth` to specify the CLIP model. If not specified, the training will raise an error.
+
+If you're running low on VRAM, specify `--vae_cache_cpu` to use the CPU for the VAE internal cache, which will reduce VRAM usage somewhat.
+
+<details>
+<summary>日本語</summary>
+latentの事前キャッシングはHunyuanVideoとほぼ同じです。上のコマンド例を使用してキャッシュを作成してください。
+
+I2Vモデルを学習する場合は、`--clip path/to/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth` を追加してCLIPモデルを指定してください。指定しないと学習時にエラーが発生します。
+
+VRAMが不足している場合は、`--vae_cache_cpu` を指定するとVAEの内部キャッシュにCPUを使うことで、使用VRAMを多少削減できます。
+</details>
+
+### Text Encoder Output Pre-caching
+
+Text encoder output pre-caching is also almost the same as in HunyuanVideo. Create the cache using the following command:
+
+```bash
+python wan_cache_text_encoder_outputs.py --dataset_config path/to/toml  --t5 path/to/models_t5_umt5-xxl-enc-bf16.pth --batch_size 16 
+```
+
+Adjust `--batch_size` according to your available VRAM.
+
+For systems with limited VRAM (less than ~16GB), use `--fp8_t5` to run the T5 in fp8 mode.
+
+<details>
+<summary>日本語</summary>
+テキストエンコーダ出力の事前キャッシングもHunyuanVideoとほぼ同じです。上のコマンド例を使用してキャッシュを作成してください。
+
+使用可能なVRAMに合わせて `--batch_size` を調整してください。
+
+VRAMが限られているシステム（約16GB未満）の場合は、T5をfp8モードで実行するために `--fp8_t5` を使用してください。
+</details>
+
+## Training / 学習
+
+### Training
+
+Start training using the following command (input as a single line):
+
+```bash
+accelerate launch --num_cpu_threads_per_process 1 --mixed_precision bf16 wan_train_network.py 
+    --task t2v-1.3B 
+    --dit path/to/wan2.1_xxx_bf16.safetensors 
+    --dataset_config path/to/toml --sdpa --mixed_precision bf16 --fp8_base 
+    --optimizer_type adamw8bit --learning_rate 2e-4 --gradient_checkpointing 
+    --max_data_loader_n_workers 2 --persistent_data_loader_workers 
+    --network_module networks.lora_wan --network_dim 32 
+    --timestep_sampling shift --discrete_flow_shift 3.0 
+    --max_train_epochs 16 --save_every_n_epochs 1 --seed 42
+    --output_dir path/to/output_dir --output_name name-of-lora
+```
+The above is an example. The appropriate values for `timestep_sampling` and `discrete_flow_shift` need to be determined by experimentation.
+
+For additional options, use `python wan_train_network.py --help` (note that many options are unverified).
+
+`--task` is one of `t2v-1.3B`, `t2v-14B`, `i2v-14B` and `t2i-14B`. Specify the DiT weights for the task with `--dit`.
+
+Don't forget to specify `--network_module networks.lora_wan`.
+
+Other options are mostly the same as `hv_train_network.py`.
+
+Use `convert_lora.py` for converting the LoRA weights after training, as in HunyuanVideo.
+
+<details>
+<summary>日本語</summary>
+`timestep_sampling`や`discrete_flow_shift`は一例です。どのような値が適切かは実験が必要です。
+
+その他のオプションについては `python wan_train_network.py --help` を使用してください（多くのオプションは未検証です）。
+
+`--task` には `t2v-1.3B`, `t2v-14B`, `i2v-14B`, `t2i-14B` のいずれかを指定します。`--dit`に、taskに応じたDiTの重みを指定してください。
+
+ `--network_module` に `networks.lora_wan` を指定することを忘れないでください。
+
+その他のオプションは、ほぼ`hv_train_network.py`と同様です。
+
+学習後のLoRAの重みの変換は、HunyuanVideoと同様に`convert_lora.py`を使用してください。
+</details>
+
+### Command line options for training with sampling / サンプル画像生成に関連する学習時のコマンドラインオプション
+
+Example of command line options for training with sampling / 記述例:  
+
+```bash
+--vae path/to/wan_2.1_vae.safetensors 
+--t5 path/to/models_t5_umt5-xxl-enc-bf16.pth 
+--sample_prompts /path/to/prompt_file.txt 
+--sample_every_n_epochs 1 --sample_every_n_steps 1000 -- sample_at_first
+```
+Each option is the same as when generating images or as HunyuanVideo. Please refer to [here](/docs/sampling_during_training.md) for details.
+
+If you train I2V models, add `--clip path/to/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth` to specify the CLIP model. 
+
+You can specify the initial image and negative prompts in the prompt file. Please refer to [here](/docs/sampling_during_training.md#prompt-file--プロンプトファイル).
+
+<details>
+<summary>日本語</summary>
+各オプションは推論時、およびHunyuanVideoの場合と同様です。[こちら](/docs/sampling_during_training.md)を参照してください。
+
+I2Vモデルを学習する場合は、`--clip path/to/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth` を追加してCLIPモデルを指定してください。
+
+プロンプトファイルで、初期画像やネガティブプロンプト等を指定できます。[こちら](/docs/sampling_during_training.md#prompt-file--プロンプトファイル)を参照してください。
+</details>
+
 
 ## Inference / 推論
 
