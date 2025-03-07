@@ -26,7 +26,7 @@ Example of command line options for training with sampling / 記述例:
 --text_encoder1 path/to/ckpts/text_encoder 
 --text_encoder2 path/to/ckpts/text_encoder_2 
 --sample_prompts /path/to/prompt_file.txt 
---sample_every_n_epochs 1 --sample_every_n_steps 1000 -- sample_at_first
+--sample_every_n_epochs 1 --sample_every_n_steps 1000 --sample_at_first
 ```
 
 `--vae`, `--vae_chunk_size`, `--vae_spatial_tile_sample_min_size`, `--text_encoder1`, `--text_encoder2` are the same as when generating images, so please refer to [here](/README.md#inference) for details. `--fp8_llm` can also be specified.
