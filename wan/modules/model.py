@@ -700,6 +700,7 @@ class WanModel(nn.Module):  # ModelMixin, ConfigMixin):
 
         freqs_list = []
         for fhw in grid_sizes:
+            fhw = tuple(fhw.tolist())
             if fhw not in self.freqs_fhw:
                 c = self.dim // self.num_heads // 2
                 self.freqs_fhw[fhw] = calculate_freqs_i(fhw, c, self.freqs)
