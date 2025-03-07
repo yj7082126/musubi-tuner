@@ -708,6 +708,16 @@ class WanVAE:
     def to_device(self, device):
         self.device = device
         self.model.to(device)
+        self.mean = self.mean.to(device)
+        self.std = self.std.to(device)
+        self.scale = [t.to(device) for t in self.scale]
+
+    def to_dtype(self, dtype):
+        self.dtype = dtype
+        self.model.to(dtype=dtype)
+        self.mean = self.mean.to(dtype)
+        self.std = self.std.to(dtype)
+        self.scale = [t.to(dtype) for t in self.scale]
 
     def eval(self):
         self.model.eval()
@@ -722,19 +732,13 @@ class WanVAE:
         """
         Add nn.Module.to() support for device and dtype.
         """
-        if isinstance(device_or_dtype, str):
-            self.model.to(device_or_dtype)
-            self.device = torch.device(device_or_dtype)
-        elif isinstance(device_or_dtype, torch.device):
-            self.model.to(device_or_dtype)
-            self.device = device_or_dtype
+        if isinstance(device_or_dtype, str) or isinstance(device_or_dtype, torch.device):
+            self.to_device(device_or_dtype)
         else:
-            self.model.to(dtype=device_or_dtype)
-            self.dtype = device_or_dtype
+            self.to_dtype(device_or_dtype)
 
         if dtype is not None:
-            self.model.to(dtype=dtype)
-            self.dtype = dtype
+            self.to_dtype(dtype)
 
     def encode(self, videos):
         """

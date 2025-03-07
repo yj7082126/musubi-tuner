@@ -913,9 +913,7 @@ class NetworkTrainer:
         transformer.switch_block_swap_for_training()
         clean_memory_on_device(accelerator.device)
 
-    def sample_image_inference(
-        self, accelerator, args, transformer: HYVideoDiffusionTransformer, dit_dtype, vae, save_dir, sample_parameter, epoch, steps
-    ):
+    def sample_image_inference(self, accelerator, args, transformer, dit_dtype, vae, save_dir, sample_parameter, epoch, steps):
         """architecture independent sample images"""
         sample_steps = sample_parameter.get("sample_steps", 20)
         width = sample_parameter.get("width", 256)  # make smaller for faster and memory saving inference
@@ -925,7 +923,7 @@ class NetworkTrainer:
         discrete_flow_shift = sample_parameter.get("discrete_flow_shift", 14.5)
         seed = sample_parameter.get("seed")
         prompt: str = sample_parameter.get("prompt", "")
-        cfg_scale = sample_parameter.get("cfg_scale", 1.0)
+        cfg_scale = sample_parameter.get("cfg_scale", None)  # None for architecture default
         negative_prompt = sample_parameter.get("negative_prompt", None)
 
         if self.i2v_training:
@@ -1112,6 +1110,9 @@ class NetworkTrainer:
     ):
         """architecture dependent inference"""
         device = accelerator.device
+        if cfg_scale is None:
+            cfg_scale = 1.0
+        do_classifier_free_guidance = do_classifier_free_guidance and cfg_scale != 1.0
 
         # Prepare scheduler for each prompt
         scheduler = FlowMatchDiscreteScheduler(shift=discrete_flow_shift, reverse=True, solver="euler")
@@ -1671,7 +1672,7 @@ class NetworkTrainer:
             "ss_optimizer": optimizer_name + (f"({optimizer_args})" if len(optimizer_args) > 0 else ""),
             "ss_max_grad_norm": args.max_grad_norm,
             "ss_fp8_base": bool(args.fp8_base),
-            "ss_fp8_llm": bool(args.fp8_llm),
+            # "ss_fp8_llm": bool(args.fp8_llm), # remove this because this is only for HuanyuanVideo TODO set architecure dependent metadata
             "ss_full_fp16": bool(args.full_fp16),
             "ss_full_bf16": bool(args.full_bf16),
             "ss_weighting_scheme": args.weighting_scheme,
@@ -1700,7 +1701,8 @@ class NetworkTrainer:
         # model name and hash
         # calculate hash takes time, so we omit it for now
         if args.dit is not None:
-            logger.info(f"calculate hash for DiT model: {args.dit}")
+            # logger.info(f"calculate hash for DiT model: {args.dit}")
+            logger.info(f"set DiT model name for metadata: {args.dit}")
             sd_model_name = args.dit
             if os.path.exists(sd_model_name):
                 # metadata["ss_sd_model_hash"] = model_utils.model_hash(sd_model_name)
@@ -1709,7 +1711,8 @@ class NetworkTrainer:
             metadata["ss_sd_model_name"] = sd_model_name
 
         if args.vae is not None:
-            logger.info(f"calculate hash for VAE model: {args.vae}")
+            # logger.info(f"calculate hash for VAE model: {args.vae}")
+            logger.info(f"set VAE model name for metadata: {args.vae}")
             vae_name = args.vae
             if os.path.exists(vae_name):
                 # metadata["ss_vae_hash"] = model_utils.model_hash(vae_name)
@@ -1771,6 +1774,7 @@ class NetworkTrainer:
 
             sai_metadata = sai_model_spec.build_metadata(
                 None,
+                self.architecture,
                 time.time(),
                 title,
                 None,

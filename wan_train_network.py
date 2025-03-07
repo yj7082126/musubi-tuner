@@ -1,62 +1,21 @@
-import ast
-import asyncio
-from datetime import timedelta
-import gc
-import importlib
 import argparse
-import math
-import os
-import pathlib
-import re
-import sys
-import random
-import time
-import json
-from multiprocessing import Value
-from typing import Any, Dict, List, Optional
-import accelerate
-import numpy as np
-from packaging.version import Version
 from PIL import Image
 
-import huggingface_hub
-import toml
 
 import torch
 import torchvision.transforms.functional as TF
 from tqdm import tqdm
-from accelerate.utils import set_seed
-from accelerate import Accelerator, InitProcessGroupKwargs, DistributedDataParallelKwargs, PartialState
-from safetensors.torch import load_file
-import transformers
-from diffusers.optimization import (
-    SchedulerType as DiffusersSchedulerType,
-    TYPE_TO_SCHEDULER_FUNCTION as DIFFUSERS_TYPE_TO_SCHEDULER_FUNCTION,
-)
-from transformers.optimization import SchedulerType, TYPE_TO_SCHEDULER_FUNCTION
+from accelerate import Accelerator, init_empty_weights
 
-from dataset import config_utils
 from dataset.image_video_dataset import ARCHITECTURE_WAN, ARCHITECTURE_WAN_FULL
-from hunyuan_model.models import load_transformer, get_rotary_pos_embed_by_shape, HYVideoDiffusionTransformer
-import hunyuan_model.text_encoder as text_encoder_module
-from hunyuan_model.vae import load_vae, VAE_VER
-import hunyuan_model.vae as vae_module
-import hv_train_network
-from modules.scheduling_flow_match_discrete import FlowMatchDiscreteScheduler
-import networks.lora as lora_module
-from dataset.config_utils import BlueprintGenerator, ConfigSanitizer
-from hv_generate_video import save_images_grid, save_videos_grid, resize_image_to_bucket, encode_to_latents
-from hv_train_network import (
-    NetworkTrainer,
-    load_prompts,
-    clean_memory_on_device,
-    compute_density_for_timestep_sampling,
-    compute_loss_weighting_for_sd3,
-)
+from hv_generate_video import resize_image_to_bucket
+from hv_train_network import NetworkTrainer, load_prompts, clean_memory_on_device, setup_parser_common, read_config_from_file
 
 import logging
 
-from utils import huggingface_utils, model_utils, train_utils, sai_model_spec
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
 from utils.safetensors_utils import load_safetensors
 from wan.configs import WAN_CONFIGS
 from wan.modules.clip import CLIPModel
@@ -64,9 +23,6 @@ from wan.modules.model import WanModel
 from wan.modules.t5 import T5EncoderModel
 from wan.modules.vae import WanVAE
 from wan.utils.fm_solvers_unipc import FlowUniPCMultistepScheduler
-
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
 
 
 class WanNetworkTrainer(NetworkTrainer):
@@ -110,7 +66,9 @@ class WanNetworkTrainer(NetworkTrainer):
             sample_prompts_te_outputs = {}  # (prompt) -> (embeds, mask)
             with accelerator.autocast(), torch.no_grad():
                 for prompt_dict in prompts:
-                    for p in [prompt_dict.get("prompt", ""), prompt_dict.get("negative_prompt", self.config["sample_neg_prompt"])]:
+                    if "negative_prompt" not in prompt_dict:
+                        prompt_dict["negative_prompt"] = self.config["sample_neg_prompt"]
+                    for p in [prompt_dict.get("prompt", ""), prompt_dict.get("negative_prompt", None)]:
                         if p is None:
                             continue
                         if p not in sample_prompts_te_outputs:
@@ -192,7 +150,11 @@ class WanNetworkTrainer(NetworkTrainer):
         image_path=None,
     ):
         """architecture dependent inference"""
+        model: WanModel = transformer
         device = accelerator.device
+        if cfg_scale is None:
+            cfg_scale = 5.0
+        do_classifier_free_guidance = do_classifier_free_guidance and cfg_scale != 1.0
 
         # Calculate latent video length based on VAE version
         latent_video_length = (frame_count - 1) // self.config["vae_stride"][0] + 1
@@ -201,6 +163,8 @@ class WanNetworkTrainer(NetworkTrainer):
         context = sample_parameter["t5_embeds"].to(device=device, dtype=dit_dtype)
         if do_classifier_free_guidance:
             context_null = sample_parameter["negative_t5_embeds"].to(device=device, dtype=dit_dtype)
+        else:
+            context_null = None
 
         num_channels_latents = 16  # model.in_dim
         vae_scale_factor = self.config["vae_stride"][1]
@@ -245,7 +209,8 @@ class WanNetworkTrainer(NetworkTrainer):
         else:
             image_latents = None
 
-        scheduler = FlowUniPCMultistepScheduler(num_train_timesteps=self.num_train_timesteps, shift=1, use_dynamic_shifting=False)
+        # use the default value for num_train_timesteps (1000)
+        scheduler = FlowUniPCMultistepScheduler(shift=1, use_dynamic_shifting=False)
         scheduler.set_timesteps(sample_steps, device=device, shift=discrete_flow_shift)
         timesteps = scheduler.timesteps
 
@@ -255,9 +220,9 @@ class WanNetworkTrainer(NetworkTrainer):
         )
 
         # prepare the model input
-        max_seq_len = latent_video_length * lat_h * lat_w // (self.patch_size[1] * self.patch_size[2])
-        arg_c = {"context": context, "seq_len": max_seq_len}
-        arg_null = {"context": context_null, "seq_len": max_seq_len}
+        max_seq_len = latent_video_length * lat_h * lat_w // (self.config.patch_size[1] * self.config.patch_size[2])
+        arg_c = {"context": [context], "seq_len": max_seq_len}
+        arg_null = {"context": [context_null], "seq_len": max_seq_len}
 
         if self.i2v_training:
             # I2V training
@@ -275,14 +240,14 @@ class WanNetworkTrainer(NetworkTrainer):
                 timestep = t.unsqueeze(0)
 
                 with accelerator.autocast():
-                    noise_pred_cond = self.model(latent_model_input, t=timestep, **arg_c)[0].to("cpu")
+                    noise_pred_cond = model(latent_model_input, t=timestep, **arg_c)[0].to("cpu")
                     if do_classifier_free_guidance:
-                        noise_pred_uncond = self.model(latent_model_input, t=timestep, **arg_null)[0].to("cpu")
+                        noise_pred_uncond = model(latent_model_input, t=timestep, **arg_null)[0].to("cpu")
                     else:
                         noise_pred_uncond = None
 
                 if do_classifier_free_guidance:
-                    noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_cond - noise_pred_uncond)
+                    noise_pred = noise_pred_uncond + cfg_scale * (noise_pred_cond - noise_pred_uncond)
                 else:
                     noise_pred = noise_pred_cond
 
@@ -296,9 +261,16 @@ class WanNetworkTrainer(NetworkTrainer):
         # Decode latents to video
         logger.info(f"Decoding video from latents: {latent.shape}")
         latent = latent.unsqueeze(0)  # add batch dim
+        latent = latent.to(device=device)
 
-        with torch.autocast(device_type=device.type, dtype=vae.dtype), torch.no_grad():
-            video = vae.decode(latent)[0]
+        print("vae device", vae.device)
+        print("vae dtype", vae.dtype)
+        print("latent device", latent.device)
+        print("latent dtype", latent.dtype)
+        print(f"latent shape: {latent.shape}")
+        with torch.amp.autocast(device_type=device.type, dtype=vae.dtype), torch.no_grad():
+            video = vae.decode(latent)[0]  # vae returns list
+        video = video.unsqueeze(0)  # add batch dim
         del latent
 
         logger.info(f"Decoding complete")
@@ -327,21 +299,24 @@ class WanNetworkTrainer(NetworkTrainer):
         loading_device: str,
         dit_weight_dtype: torch.dtype,
     ):
-        logger.info(f"Creating WanModel")
-        model = WanModel(
-            model_type="i2v" if self.i2v_training else "t2v",
-            dim=self.config.dim,
-            eps=self.config.eps,
-            ffn_dim=self.config.ffn_dim,
-            freq_dim=self.config.freq_dim,
-            in_dim=36 if self.i2v_training else 16,  # 36 for I2V, 16 for T2V
-            num_heads=self.config.num_heads,
-            num_layers=self.config.num_layers,
-            out_dim=16,
-            text_len=512,
-            attn_mode=attn_mode,
-            split_attn=split_attn,
-        )
+        with init_empty_weights():
+            logger.info(f"Creating WanModel")
+            model = WanModel(
+                model_type="i2v" if self.i2v_training else "t2v",
+                dim=self.config.dim,
+                eps=self.config.eps,
+                ffn_dim=self.config.ffn_dim,
+                freq_dim=self.config.freq_dim,
+                in_dim=36 if self.i2v_training else 16,  # 36 for I2V, 16 for T2V
+                num_heads=self.config.num_heads,
+                num_layers=self.config.num_layers,
+                out_dim=16,
+                text_len=512,
+                attn_mode=attn_mode,
+                split_attn=split_attn,
+            )
+            model.to(dit_weight_dtype)
+
         logger.info(f"Loading DiT model from {dit_path}, device={loading_device}, dtype={dit_weight_dtype}")
         sd = load_safetensors(dit_path, loading_device, disable_mmap=True, dtype=dit_weight_dtype)
 
@@ -373,14 +348,15 @@ class WanNetworkTrainer(NetworkTrainer):
 
         # I2V training
         if self.i2v_training:
-            image_latents = batch["y"]
-            clip_fea = batch["clip_fea"]
+            image_latents = batch["latents_image"]
+            clip_fea = batch["clip"]
             image_latents = image_latents.to(device=accelerator.device, dtype=network_dtype)
             clip_fea = clip_fea.to(device=accelerator.device, dtype=network_dtype)
         else:
             image_latents = None
+            clip_fea = None
 
-        context = batch["t5_embeds"].to(device=accelerator.device, dtype=network_dtype)
+        context = batch["t5"].to(device=accelerator.device, dtype=network_dtype)
 
         # ensure the hidden state will require grad
         if args.gradient_checkpointing:
@@ -392,20 +368,13 @@ class WanNetworkTrainer(NetworkTrainer):
                 clip_fea.requires_grad_(True)
 
         # call DiT
-        lat_f, lat_h, lat_w = latents.shape[1:4]
+        lat_f, lat_h, lat_w = latents.shape[2:5]
         seq_len = lat_f * lat_h * lat_w // (self.config.patch_size[0] * self.config.patch_size[1] * self.config.patch_size[2])
         latents = latents.to(device=accelerator.device, dtype=network_dtype)
         noisy_model_input = noisy_model_input.to(device=accelerator.device, dtype=network_dtype)
         with accelerator.autocast():
-            model_pred = model(
-                noisy_model_input,
-                t=timesteps,
-                context=context,
-                clip_fea=clip_fea,
-                seq_len=seq_len,
-                y=image_latents,
-                return_dict=False,
-            )
+            model_pred = model(noisy_model_input, t=timesteps, context=context, clip_fea=clip_fea, seq_len=seq_len, y=image_latents)
+        model_pred = torch.stack(model_pred, dim=0)  # list to tensor
 
         # flow matching loss
         target = noise - latents
@@ -431,13 +400,15 @@ def wan_setup_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser
 
 
 if __name__ == "__main__":
-    parser = hv_train_network.setup_parser_common()
+    parser = setup_parser_common()
     parser = wan_setup_parser(parser)
 
     args = parser.parse_args()
-    args = hv_train_network.read_config_from_file(args, parser)
+    args = read_config_from_file(args, parser)
 
     args.dit_dtype = "bfloat16"  # Wan2.1 only supports bfloat16
+    if args.vae_dtype is None:
+        args.vae_dtype = "bfloat16"  # make bfloat16 as default for VAE
 
     trainer = WanNetworkTrainer()
     trainer.train(args)

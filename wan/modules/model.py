@@ -2,10 +2,8 @@
 import math
 
 import torch
-import torch.cuda.amp as amp
 import torch.nn as nn
-from diffusers.configuration_utils import ConfigMixin, register_to_config
-from diffusers.models.modeling_utils import ModelMixin
+from torch.utils.checkpoint import checkpoint
 
 from .attention import flash_attention
 from utils.device_utils import clean_memory_on_device
@@ -358,16 +356,15 @@ class WanAttentionBlock(nn.Module):
         # modulation
         self.modulation = nn.Parameter(torch.randn(1, 6, dim) / dim**0.5)
 
-    def forward(
-        self,
-        x,
-        e,
-        seq_lens,
-        grid_sizes,
-        freqs,
-        context,
-        context_lens,
-    ):
+        self.gradient_checkpointing = False
+
+    def enable_gradient_checkpointing(self):
+        self.gradient_checkpointing = True
+
+    def disable_gradient_checkpointing(self):
+        self.gradient_checkpointing = False
+
+    def _forward(self, x, e, seq_lens, grid_sizes, freqs, context, context_lens):
         r"""
         Args:
             x(Tensor): Shape [B, L, C]
@@ -407,6 +404,11 @@ class WanAttentionBlock(nn.Module):
         x = x + y.to(torch.float32) * e[5]
         del y
         return x
+
+    def forward(self, x, e, seq_lens, grid_sizes, freqs, context, context_lens):
+        if self.training and self.gradient_checkpointing:
+            return checkpoint(self._forward, x, e, seq_lens, grid_sizes, freqs, context, context_lens, use_reentrant=False)
+        return self._forward(x, e, seq_lens, grid_sizes, freqs, context, context_lens)
 
 
 class Head(nn.Module):
@@ -582,9 +584,35 @@ class WanModel(nn.Module):  # ModelMixin, ConfigMixin):
         # initialize weights
         self.init_weights()
 
+        self.gradient_checkpointing = False
+
         # offloading
         self.blocks_to_swap = None
         self.offloader = None
+
+    @property
+    def dtype(self):
+        return next(self.parameters()).dtype
+
+    @property
+    def device(self):
+        return next(self.parameters()).device
+
+    def enable_gradient_checkpointing(self):
+        self.gradient_checkpointing = True
+
+        for block in self.blocks:
+            block.enable_gradient_checkpointing()
+
+        print(f"WanModel: Gradient checkpointing enabled.")
+
+    def disable_gradient_checkpointing(self):
+        self.gradient_checkpointing = False
+
+        for block in self.blocks:
+            block.disable_gradient_checkpointing()
+
+        print(f"WanModel: Gradient checkpointing disabled.")
 
     def enable_block_swap(self, blocks_to_swap: int, device: torch.device, supports_backward: bool):
         self.blocks_to_swap = blocks_to_swap

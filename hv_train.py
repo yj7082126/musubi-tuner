@@ -804,7 +804,9 @@ class FineTuningTrainer:
             raise ValueError(
                 f"either --sdpa, --flash-attn, --sage-attn or --xformers must be specified / --sdpa, --flash-attn, --sage-attn, --xformersのいずれかを指定してください"
             )
-        transformer = load_transformer(args.dit, attn_mode, args.split_attn, loading_device, None, in_channels=args.dit_in_channels)  # load as is
+        transformer = load_transformer(
+            args.dit, attn_mode, args.split_attn, loading_device, None, in_channels=args.dit_in_channels
+        )  # load as is
 
         if blocks_to_swap > 0:
             logger.info(f"enable swap {blocks_to_swap} blocks to CPU from device: {accelerator.device}")
@@ -819,12 +821,10 @@ class FineTuningTrainer:
 
         # prepare optimizer, data loader etc.
         accelerator.print("prepare optimizer, data loader etc.")
-        
+
         transformer.requires_grad_(False)
         if accelerator.is_main_process:
-            accelerator.print(
-                f"Trainable modules '{args.trainable_modules}'."
-            )
+            accelerator.print(f"Trainable modules '{args.trainable_modules}'.")
         for name, param in transformer.named_parameters():
             for trainable_module_name in args.trainable_modules:
                 if trainable_module_name in name:
@@ -833,7 +833,9 @@ class FineTuningTrainer:
 
         total_params = list(transformer.parameters())
         trainable_params = list(filter(lambda p: p.requires_grad, transformer.parameters()))
-        logger.info(f"number of trainable parameters: {sum(p.numel() for p in trainable_params) / 1e6} M, total paramters: {sum(p.numel() for p in total_params) / 1e6} M")
+        logger.info(
+            f"number of trainable parameters: {sum(p.numel() for p in trainable_params) / 1e6} M, total paramters: {sum(p.numel() for p in total_params) / 1e6} M"
+        )
         optimizer_name, optimizer_args, optimizer, optimizer_train_fn, optimizer_eval_fn = self.get_optimizer(
             args, trainable_params
         )
@@ -974,6 +976,7 @@ class FineTuningTrainer:
 
             sai_metadata = sai_model_spec.build_metadata(
                 None,
+                ARCHITECTURE_HUNYUAN_VIDEO,
                 time.time(),
                 title,
                 None,
@@ -1046,7 +1049,9 @@ class FineTuningTrainer:
 
                     pos_emb_shape = latents.shape[1:]
                     if pos_emb_shape not in pos_embed_cache:
-                        freqs_cos, freqs_sin = get_rotary_pos_embed_by_shape(accelerator.unwrap_model(transformer), latents.shape[2:])
+                        freqs_cos, freqs_sin = get_rotary_pos_embed_by_shape(
+                            accelerator.unwrap_model(transformer), latents.shape[2:]
+                        )
                         # freqs_cos = freqs_cos.to(device=accelerator.device, dtype=dit_dtype)
                         # freqs_sin = freqs_sin.to(device=accelerator.device, dtype=dit_dtype)
                         pos_embed_cache[pos_emb_shape] = (freqs_cos, freqs_sin)
@@ -1280,12 +1285,7 @@ def setup_parser() -> argparse.ArgumentParser:
         choices=["no", "fp16", "bf16"],
         help="use mixed precision / 混合精度を使う場合、その精度",
     )
-    parser.add_argument(
-        "--trainable_modules",
-        nargs='+', 
-        default=".",
-        help='Enter a list of trainable modules'
-    )
+    parser.add_argument("--trainable_modules", nargs="+", default=".", help="Enter a list of trainable modules")
 
     parser.add_argument(
         "--logging_dir",

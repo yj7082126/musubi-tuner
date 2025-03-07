@@ -1,13 +1,7 @@
 # LoRA module for Wan2.1
 
 import ast
-import math
-import os
-import re
-from typing import Dict, List, Optional, Type, Union
-from diffusers import AutoencoderKL
-from transformers import CLIPTextModel
-import numpy as np
+from typing import Dict, List, Optional
 import torch
 import torch.nn as nn
 
@@ -16,13 +10,13 @@ import logging
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-import lora
+import networks.lora as lora
 
 
 WAN_TARGET_REPLACE_MODULES = ["WanAttentionBlock"]
 
 
-def create_arch_network_hunyuan_video(
+def create_arch_network(
     multiplier: float,
     network_dim: Optional[int],
     network_alpha: Optional[float],
@@ -40,7 +34,7 @@ def create_arch_network_hunyuan_video(
         exclude_patterns = ast.literal_eval(exclude_patterns)
 
     # exclude if 'img_mod', 'txt_mod' or 'modulation' in the name
-    exclude_patterns.append(r".*(img_mod|txt_mod|modulation).*")
+    exclude_patterns.append(r".*(patch_embedding|text_embedding|time_embedding|time_projection|norm|head).*")
 
     kwargs["exclude_patterns"] = exclude_patterns
 
