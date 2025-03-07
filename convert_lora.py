@@ -16,6 +16,7 @@ def convert_from_diffusers(prefix, weights_sd):
     # convert from diffusers(?) to default LoRA
     # Diffusers format: {"diffusion_model.module.name.lora_A.weight": weight, "diffusion_model.module.name.lora_B.weight": weight, ...}
     # default LoRA format: {"prefix_module_name.lora_down.weight": weight, "prefix_module_name.lora_up.weight": weight, ...}
+
     # note: Diffusers has no alpha, so alpha is set to rank
     new_weights_sd = {}
     lora_dims = {}
@@ -66,6 +67,10 @@ def convert_to_diffusers(prefix, weights_sd):
             module_name = module_name.replace("img.", "img_")  # fix img
             module_name = module_name.replace("txt.", "txt_")  # fix txt
             module_name = module_name.replace("attn.", "attn_")  # fix attn
+
+            # Wan2.1 lora name to module name: ugly but works
+            module_name = module_name.replace("cross.attn.", "cross_attn.")  # fix cross attn
+            module_name = module_name.replace("self.attn.", "self_attn.")  # fix self attn
 
             diffusers_prefix = "diffusion_model"
             if "lora_down" in key:
