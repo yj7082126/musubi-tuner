@@ -22,7 +22,7 @@ def convert_from_diffusers(prefix, weights_sd):
     lora_dims = {}
     for key, weight in weights_sd.items():
         diffusers_prefix, key_body = key.split(".", 1)
-        if diffusers_prefix != "diffusion_model" and diffusers_prefix !="transformer":
+        if diffusers_prefix != "diffusion_model" and diffusers_prefix != "transformer":
             logger.warning(f"unexpected key: {key} in diffusers format")
             continue
 
@@ -59,18 +59,19 @@ def convert_to_diffusers(prefix, weights_sd):
 
             lora_name = key.split(".", 1)[0]  # before first dot
 
-            # HunyuanVideo lora name to module name: ugly but works
             module_name = lora_name[len(prefix) :]  # remove "lora_unet_"
             module_name = module_name.replace("_", ".")  # replace "_" with "."
-            module_name = module_name.replace("double.blocks.", "double_blocks.")  # fix double blocks
-            module_name = module_name.replace("single.blocks.", "single_blocks.")  # fix single blocks
-            module_name = module_name.replace("img.", "img_")  # fix img
-            module_name = module_name.replace("txt.", "txt_")  # fix txt
-            module_name = module_name.replace("attn.", "attn_")  # fix attn
-
-            # Wan2.1 lora name to module name: ugly but works
-            module_name = module_name.replace("cross.attn.", "cross_attn.")  # fix cross attn
-            module_name = module_name.replace("self.attn.", "self_attn.")  # fix self attn
+            if ".cross.attn." in module_name or ".self.attn." in module_name:
+                # Wan2.1 lora name to module name: ugly but works
+                module_name = module_name.replace("cross.attn", "cross_attn")  # fix cross attn
+                module_name = module_name.replace("self.attn", "self_attn")  # fix self attn
+            else:
+                # HunyuanVideo lora name to module name: ugly but works
+                module_name = module_name.replace("double.blocks.", "double_blocks.")  # fix double blocks
+                module_name = module_name.replace("single.blocks.", "single_blocks.")  # fix single blocks
+                module_name = module_name.replace("img.", "img_")  # fix img
+                module_name = module_name.replace("txt.", "txt_")  # fix txt
+                module_name = module_name.replace("attn.", "attn_")  # fix attn
 
             diffusers_prefix = "diffusion_model"
             if "lora_down" in key:
