@@ -308,7 +308,10 @@ class WanI2VCrossAttention(WanSelfAttention):
         # output
         x = x.flatten(2)
         img_x = img_x.flatten(2)
-        x += img_x
+        if self.training:
+            x = x + img_x  # avoid inplace
+        else:
+            x += img_x
         del img_x
 
         x = self.o(x)
@@ -398,7 +401,8 @@ class WanAttentionBlock(nn.Module):
         #     return x
         # x = cross_attn_ffn(x, context, context_lens, e)
 
-        x += self.cross_attn(self.norm3(x), context, context_lens)
+        # x += self.cross_attn(self.norm3(x), context, context_lens) # backward error
+        x = x + self.cross_attn(self.norm3(x), context, context_lens)
         del context
         y = self.ffn(self.norm2(x).float() * (1 + e[4]) + e[3])
         x = x + y.to(torch.float32) * e[5]
@@ -715,9 +719,9 @@ class WanModel(nn.Module):  # ModelMixin, ConfigMixin):
 
         # context
         context_lens = None
-        context = self.text_embedding(
-            torch.stack([torch.cat([u, u.new_zeros(self.text_len - u.size(0), u.size(1))]) for u in context])
-        )
+        if type(context) is list:
+            context = torch.stack([torch.cat([u, u.new_zeros(self.text_len - u.size(0), u.size(1))]) for u in context])
+        context = self.text_embedding(context)
 
         if clip_fea is not None:
             context_clip = self.img_emb(clip_fea)  # bs x 257 x dim
@@ -728,7 +732,9 @@ class WanModel(nn.Module):  # ModelMixin, ConfigMixin):
         # arguments
         kwargs = dict(e=e0, seq_lens=seq_lens, grid_sizes=grid_sizes, freqs=freqs_list, context=context, context_lens=context_lens)
 
-        clean_memory_on_device(device)
+        if self.blocks_to_swap:
+            clean_memory_on_device(device)
+
         # print(f"x: {x.shape}, e: {e0.shape}, context: {context.shape}, seq_lens: {seq_lens}")
         for block_idx, block in enumerate(self.blocks):
             if self.blocks_to_swap:

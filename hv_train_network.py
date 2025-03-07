@@ -999,6 +999,7 @@ class NetworkTrainer:
 
         # Move models back to initial state
         vae.to("cpu")
+        clean_memory_on_device(device)
 
     # region model specific
 

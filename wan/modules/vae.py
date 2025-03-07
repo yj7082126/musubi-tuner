@@ -641,7 +641,7 @@ def _video_vae(pretrained_path=None, z_dim=None, device="cpu", **kwargs):
         sd = load_file(pretrained_path)
         model.load_state_dict(sd, strict=False, assign=True)
     else:
-        model.load_state_dict(torch.load(pretrained_path, map_location=device), assign=True)
+        model.load_state_dict(torch.load(pretrained_path, map_location=device, weights_only=True), assign=True)
 
     return model
 

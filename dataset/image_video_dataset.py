@@ -255,7 +255,7 @@ def save_text_encoder_output_cache_wan(item_info: ItemInfo, embed: torch.Tensor)
     sd = {}
     dtype_str = dtype_to_str(embed.dtype)
     text_encoder_type = "t5"
-    sd[f"{text_encoder_type}_{dtype_str}"] = embed.detach().cpu()
+    sd[f"varlen_{text_encoder_type}_{dtype_str}"] = embed.detach().cpu()
 
     save_text_encoder_output_cache_common(item_info, sd, ARCHITECTURE_WAN_FULL)
 
@@ -423,25 +423,37 @@ class BucketBatchManager:
         end = min(start + self.batch_size, len(bucket))
 
         batch_tensor_data = {}
+        varlen_keys = set()
         for item_info in bucket[start:end]:
             sd_latent = load_file(item_info.latent_cache_path)
             sd_te = load_file(item_info.text_encoder_output_cache_path)
             sd = {**sd_latent, **sd_te}
 
+            # TODO refactor this
             for key in sd.keys():
-                # TODO refactor this
-                if key.endswith("_mask"):
-                    content_key = key
+                is_varlen_key = key.startswith("varlen_")  # varlen keys are not stacked
+                content_key = key
+
+                if is_varlen_key:
+                    content_key = content_key.replace("varlen_", "")
+
+                if content_key.endswith("_mask"):
+                    pass
                 else:
-                    content_key = key.rsplit("_", 1)[0]  # remove dtype
+                    content_key = content_key.rsplit("_", 1)[0]  # remove dtype
                     if content_key.startswith("latents_"):
                         content_key = content_key.rsplit("_", 1)[0]  # remove FxHxW
+
                 if content_key not in batch_tensor_data:
                     batch_tensor_data[content_key] = []
                 batch_tensor_data[content_key].append(sd[key])
 
+                if is_varlen_key:
+                    varlen_keys.add(content_key)
+
         for key in batch_tensor_data.keys():
-            batch_tensor_data[key] = torch.stack(batch_tensor_data[key])
+            if key not in varlen_keys:
+                batch_tensor_data[key] = torch.stack(batch_tensor_data[key])
 
         return batch_tensor_data
 

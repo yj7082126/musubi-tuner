@@ -525,6 +525,8 @@ def main():
                 latents = load_file(latent_path)["latent"]
                 with safe_open(latent_path, framework="pt") as f:
                     metadata = f.metadata()
+                if metadata is None:
+                    metadata = {}
                 logger.info(f"Loaded metadata: {metadata}")
 
                 if "seeds" in metadata:
@@ -635,6 +637,12 @@ def main():
 
                 logger.info(f"Loading LoRA weights from {lora_weight} with multiplier {lora_multiplier}")
                 weights_sd = load_file(lora_weight)
+
+                # Filter to exclude keys that are part of single_blocks
+                if args.exclude_single_blocks:
+                    filtered_weights = {k: v for k, v in weights_sd.items() if "single_blocks" not in k}
+                    weights_sd = filtered_weights
+
                 if args.lycoris:
                     lycoris_net, _ = create_network_from_weights(
                         multiplier=lora_multiplier,
@@ -645,14 +653,8 @@ def main():
                         vae=None,
                         for_inference=True,
                     )
-
-                # Filter to exclude keys that are part of single_blocks
-                if args.exclude_single_blocks:
-                    filtered_weights = {k: v for k, v in weights_sd.items() if "single_blocks" not in k}
-                    weights_sd = filtered_weights
-
                 else:
-                    network = lora.create_network_from_weights_hunyuan_video(
+                    network = lora.create_arch_network_from_weights(
                         lora_multiplier, weights_sd, unet=transformer, for_inference=True
                     )
                 logger.info("Merging LoRA weights to DiT model")

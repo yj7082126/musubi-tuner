@@ -108,6 +108,9 @@ class WanNetworkTrainer(NetworkTrainer):
                     clip_context = clip.visual([img[:, None, :, :]])
                     sample_prompts_image_embs[image_path] = clip_context
 
+            del clip
+            clean_memory_on_device(device)
+
         # prepare sample parameters
         sample_parameters = []
         for prompt_dict in prompts:
@@ -189,20 +192,21 @@ class WanNetworkTrainer(NetworkTrainer):
             image = image / 127.5 - 1  # -1 to 1
 
             # Create mask for the required number of frames
-            msk = torch.ones(1, latent_video_length, lat_h, lat_w, device=device)
+            msk = torch.ones(1, frame_count, lat_h, lat_w, device=device)
             msk[:, 1:] = 0
             msk = torch.concat([torch.repeat_interleave(msk[:, 0:1], repeats=4, dim=1), msk[:, 1:]], dim=1)
             msk = msk.view(1, msk.shape[1] // 4, 4, lat_h, lat_w)
-            msk = msk.transpose(1, 2)[0]
+            msk = msk.transpose(1, 2)  # B, C, T, H, W
 
             with accelerator.autocast(), torch.no_grad():
                 # Zero padding for the required number of frames only
-                padding_frames = latent_video_length - 1  # The first frame is the input image
+                padding_frames = frame_count - 1  # The first frame is the input image
                 image = torch.concat([image, torch.zeros(3, padding_frames, height, width)], dim=1).to(device=device)
                 y = vae.encode([image])[0]
 
             y = y[:, :latent_video_length]  # may be not needed
-            image_latents = torch.concat([msk, y])
+            y = y.unsqueeze(0)  # add batch dim
+            image_latents = torch.concat([msk, y], dim=1)
 
             vae.to("cpu")
             clean_memory_on_device(device)
@@ -263,11 +267,6 @@ class WanNetworkTrainer(NetworkTrainer):
         latent = latent.unsqueeze(0)  # add batch dim
         latent = latent.to(device=device)
 
-        print("vae device", vae.device)
-        print("vae dtype", vae.dtype)
-        print("latent device", latent.device)
-        print("latent dtype", latent.dtype)
-        print(f"latent shape: {latent.shape}")
         with torch.amp.autocast(device_type=device.type, dtype=vae.dtype), torch.no_grad():
             video = vae.decode(latent)[0]  # vae returns list
         video = video.unsqueeze(0)  # add batch dim
@@ -356,12 +355,13 @@ class WanNetworkTrainer(NetworkTrainer):
             image_latents = None
             clip_fea = None
 
-        context = batch["t5"].to(device=accelerator.device, dtype=network_dtype)
+        context = [t.to(device=accelerator.device, dtype=network_dtype) for t in batch["t5"]]
 
         # ensure the hidden state will require grad
         if args.gradient_checkpointing:
             noisy_model_input.requires_grad_(True)
-            context.requires_grad_(True)
+            for t in context:
+                t.requires_grad_(True)
             if image_latents is not None:
                 image_latents.requires_grad_(True)
             if clip_fea is not None:

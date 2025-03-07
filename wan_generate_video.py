@@ -10,18 +10,20 @@ from safetensors.torch import load_file, save_file
 from safetensors import safe_open
 from PIL import Image
 
+from networks import lora_wan
+from utils.safetensors_utils import mem_eff_save_file
 from wan.configs import WAN_CONFIGS, SUPPORTED_SIZES
 import wan
 from wan.modules.vae import WanVAE
 
-# try:
-#     from lycoris.kohya import create_network_from_weights
-# except:
-#     pass
+try:
+    from lycoris.kohya import create_network_from_weights
+except:
+    pass
 
 from utils.model_utils import str_to_dtype
 from utils.device_utils import clean_memory_on_device
-from hv_generate_video import save_images_grid, save_videos_grid
+from hv_generate_video import save_images_grid, save_videos_grid, synchronize_device
 
 import logging
 
@@ -47,16 +49,15 @@ def parse_args():
     parser.add_argument("--vae_cache_cpu", action="store_true", help="cache features in VAE on CPU")
     parser.add_argument("--t5", type=str, default=None, help="text encoder (T5) checkpoint path")
     parser.add_argument("--clip", type=str, default=None, help="text encoder (CLIP) checkpoint path")
-    # # LoRA
-    # parser.add_argument("--lora_weight", type=str, nargs="*", required=False, default=None, help="LoRA weight path")
-    # parser.add_argument("--lora_multiplier", type=float, nargs="*", default=1.0, help="LoRA multiplier")
-    # parser.add_argument(
-    #     "--save_merged_model",
-    #     type=str,
-    #     default=None,
-    #     help="Save merged model to path. If specified, no inference will be performed.",
-    # )
-    # parser.add_argument("--exclude_single_blocks", action="store_true", help="Exclude single blocks when loading LoRA weights")
+    # LoRA
+    parser.add_argument("--lora_weight", type=str, nargs="*", required=False, default=None, help="LoRA weight path")
+    parser.add_argument("--lora_multiplier", type=float, nargs="*", default=1.0, help="LoRA multiplier")
+    parser.add_argument(
+        "--save_merged_model",
+        type=str,
+        default=None,
+        help="Save merged model to path. If specified, no inference will be performed.",
+    )
 
     # inference
     parser.add_argument("--prompt", type=str, required=True, help="prompt for generation")
@@ -121,7 +122,7 @@ def parse_args():
     )
     parser.add_argument("--no_metadata", action="store_true", help="do not save metadata")
     parser.add_argument("--latent_path", type=str, nargs="*", default=None, help="path to latent for decode. no inference")
-    # parser.add_argument("--lycoris", action="store_true", help="use lycoris for inference")
+    parser.add_argument("--lycoris", action="store_true", help="use lycoris for inference")
 
     args = parser.parse_args()
 
@@ -144,6 +145,8 @@ def check_inputs(args):
         logger.warning(f"Size {size} is not supported for task {args.task}. Supported sizes are {SUPPORTED_SIZES[args.task]}.")
     video_length = args.video_length
 
+    if height % 8 != 0 or width % 8 != 0:
+        raise ValueError(f"`height` and `width` have to be divisible by 8 but are {height} and {width}.")
     return height, width, video_length
 
 
@@ -239,6 +242,58 @@ def main():
 
         blocks_to_swap = args.blocks_to_swap if args.blocks_to_swap else 0
 
+        # load LoRA weights
+        merge_lora = None
+        if args.lora_weight is not None and len(args.lora_weight) > 0:
+
+            def merge_lora(transformer):
+                for i, lora_weight in enumerate(args.lora_weight):
+                    if args.lora_multiplier is not None and len(args.lora_multiplier) > i:
+                        lora_multiplier = args.lora_multiplier[i]
+                    else:
+                        lora_multiplier = 1.0
+
+                    logger.info(f"Loading LoRA weights from {lora_weight} with multiplier {lora_multiplier}")
+                    weights_sd = load_file(lora_weight)
+                    if args.lycoris:
+                        lycoris_net, _ = create_network_from_weights(
+                            multiplier=lora_multiplier,
+                            file=None,
+                            weights_sd=weights_sd,
+                            unet=transformer,
+                            text_encoder=None,
+                            vae=None,
+                            for_inference=True,
+                        )
+                    else:
+                        network = lora_wan.create_arch_network_from_weights(
+                            lora_multiplier, weights_sd, unet=transformer, for_inference=True
+                        )
+                    logger.info("Merging LoRA weights to DiT model")
+
+                    # try:
+                    #     network.apply_to(None, transformer, apply_text_encoder=False, apply_unet=True)
+                    #     info = network.load_state_dict(weights_sd, strict=True)
+                    #     logger.info(f"Loaded LoRA weights from {weights_file}: {info}")
+                    #     network.eval()
+                    #     network.to(device)
+                    # except Exception as e:
+                    if args.lycoris:
+                        lycoris_net.merge_to(None, transformer, weights_sd, dtype=None, device=device)
+                    else:
+                        network.merge_to(None, transformer, weights_sd, device=device, non_blocking=True)
+
+                    synchronize_device(device)
+
+                    logger.info("LoRA weights loaded")
+
+                # save model here before casting to dit_weight_dtype
+                if args.save_merged_model:
+                    logger.info(f"Saving merged model to {args.save_merged_model}")
+                    mem_eff_save_file(transformer.state_dict(), args.save_merged_model)  # save_file needs a lot of memory
+                    logger.info("Merged model saved")
+                    return
+
         # create pipeline
         if "t2v" in args.task or "t2i" in args.task:
             wan_t2v = wan.WanT2V(
@@ -255,6 +310,8 @@ def main():
             logging.info(f"Generating {'image' if 't2i' in args.task else 'video'} ...")
             latents = wan_t2v.generate(
                 accelerator,
+                merge_lora,
+                torch.bfloat16 if merge_lora is not None else None,
                 prompt,
                 size=size,
                 frame_num=video_length,
@@ -289,6 +346,8 @@ def main():
             logging.info(f"Generating video ...")
             latents = wan_i2v.generate(
                 accelerator,
+                merge_lora,
+                torch.bfloat16 if merge_lora is not None else None,
                 prompt,
                 img=image,
                 size=size,

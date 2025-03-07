@@ -7,7 +7,7 @@ import logging
 import os
 import random
 import sys
-from typing import Union
+from typing import Optional, Union
 
 import cv2
 import numpy as np
@@ -130,6 +130,8 @@ class WanI2V:
     def generate(
         self,
         accelerator: Accelerator,
+        merge_lora: Optional[callable],
+        dit_loading_dtype: Optional[torch.dtype],
         input_prompt,
         img,
         size=(1280, 720),
@@ -225,7 +227,7 @@ class WanI2V:
         # load CLIP model
         checkpoint_path = None if self.checkpoint_dir is None else os.path.join(self.checkpoint_dir, self.config.clip_checkpoint)
         tokenizer_path = None if self.checkpoint_dir is None else os.path.join(self.checkpoint_dir, self.config.clip_tokenizer)
-        self.clip = CLIPModel(
+        clip = CLIPModel(
             dtype=self.config.clip_dtype,
             device=self.device,
             checkpoint_path=checkpoint_path,
@@ -233,14 +235,14 @@ class WanI2V:
             weight_path=self.clip_path,
         )
 
-        self.clip.model.to(self.device)
+        clip.model.to(self.device)
         logger.info(f"Encoding image to CLIP context")
         # use torch.amp.autocast istead of accelerator.autocast, becuase CLIP dtype is not bfloat16
         with torch.amp.autocast(device_type=self.device.type, dtype=torch.float16), torch.no_grad():
-            clip_context = self.clip.visual([img[:, None, :, :]])
+            clip_context = clip.visual([img[:, None, :, :]])
         logger.info(f"Encoding complete")
 
-        del self.clip
+        del clip
         clean_memory_on_device(self.device)
 
         # y should be encoded with 81 frames, and trim to lat_f frames? encoding F frames causes invalid results?
@@ -275,6 +277,7 @@ class WanI2V:
         clean_memory_on_device(self.device)
 
         # load DiT model
+        dit_loading_dtype = dit_loading_dtype if dit_loading_dtype is not None else self.dit_dtype
         with init_empty_weights():
             # if self.checkpoint_dir is not None:
             #     logger.info(f"Creating WanModel from {self.checkpoint_dir}")
@@ -295,13 +298,22 @@ class WanI2V:
                 text_len=512,
                 attn_mode=self.dit_attn_mode,
             )
-            self.model.to(self.dit_dtype)
+            self.model.to(dit_loading_dtype)
 
-        loading_device = self.device if blocks_to_swap == 0 else "cpu"
-        logger.info(f"Loading DiT model from {self.dit_path}, device={loading_device}, dtype={self.dit_dtype}")
-        sd = load_safetensors(self.dit_path, loading_device, disable_mmap=True, dtype=self.dit_dtype)
+        # if LoRA is enabled, load the model on CPU with bfloat16
+        loading_device = self.device if (blocks_to_swap == 0 and merge_lora is None) else "cpu"
+        logger.info(f"Loading DiT model from {self.dit_path}, device={loading_device}, dtype={dit_loading_dtype }")
+        sd = load_safetensors(self.dit_path, loading_device, disable_mmap=True, dtype=dit_loading_dtype)
         info = self.model.load_state_dict(sd, strict=True, assign=True)
         logger.info(f"Loaded DiT model from {self.dit_path}, info={info}")
+
+        if merge_lora is not None:
+            # merge LoRA to the model, cast and move to the device
+            merge_lora(self.model)
+            if blocks_to_swap == 0:
+                self.model.to(self.device, self.dit_dtype)
+            else:
+                self.model.to(self.dit_dtype)
 
         if blocks_to_swap > 0:
             logger.info(f"Enable swap {blocks_to_swap} blocks to CPU from device: {self.device}")
