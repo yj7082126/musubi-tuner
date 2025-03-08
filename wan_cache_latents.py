@@ -67,10 +67,11 @@ def encode_and_save_batch(vae: WanVAE, clip: Optional[CLIPModel], batch: list[It
         # Zero padding for the required number of frames only
         padding_frames = F - 1  # The first frame is the input image
         images_resized = torch.concat([images, torch.zeros(B, 3, padding_frames, h, w, device=vae.device)], dim=2)
-        y = vae.encode(images_resized)
+        with torch.amp.autocast(device_type=vae.device.type, dtype=vae.dtype), torch.no_grad():
+            y = vae.encode(images_resized)
         y = torch.stack(y, dim=0)  # B, C, F, H, W
 
-        y = y[:, :F]  # may be not needed
+        y = y[:, :, :F]  # may be not needed
         y = y.to(vae.dtype)  # convert to bfloat16
         y = torch.concat([msk, y], dim=1)  # B, 4 + C, F, H, W
 
