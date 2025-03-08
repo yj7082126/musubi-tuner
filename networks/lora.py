@@ -296,7 +296,7 @@ class LoRAInfModule(LoRAModule):
         return self.default_forward(x)
 
 
-def create_network_hunyuan_video(
+def create_arch_network(
     multiplier: float,
     network_dim: Optional[int],
     network_alpha: Optional[float],
@@ -344,6 +344,7 @@ def create_network(
     neuron_dropout: Optional[float] = None,
     **kwargs,
 ):
+    """ architecture independent network creation """
     if network_dim is None:
         network_dim = 4  # default
     if network_alpha is None:
@@ -860,7 +861,7 @@ class LoRANetwork(torch.nn.Module):
         return keys_scaled, sum(norms) / len(norms), max(norms)
 
 
-def create_network_from_weights_hunyuan_video(
+def create_arch_network_from_weights(
     multiplier: float,
     weights_sd: Dict[str, torch.Tensor],
     text_encoders: Optional[List[nn.Module]] = None,

@@ -44,6 +44,9 @@ This repository provides scripts for training LoRA (Low-Rank Adaptation) models 
 
 ### Recent Updates
 
+- Mar 7, 2025
+    - Added support for Wan 2.1 LoRA training. Please use `wan_train_network.py`. For details, please refer to [here](./docs/wan.md).
+        
 - Mar 4, 2025
     - Added support for Wan 2.1 inference. Please use `wan_generate_video.py`. For details, please refer to [here](./docs/wan.md).
         - `requirements.txt` has been updated. Please run `pip install -r requirements.txt` again.
@@ -285,6 +288,8 @@ For sample image generation during training, refer to [this document](./docs/sam
 
 ### Merging LoRA Weights
 
+Note: Wan2.1 is not supported for merging LoRA weights.
+
 ```bash
 python merge_lora.py \
     --dit path/to/ckpts/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt \
@@ -404,6 +409,8 @@ uv run convert_lora.py --input path/to/musubi_lora.safetensors --output path/to/
 Specify the input and output file paths with `--input` and `--output`, respectively.
 
 Specify `other` for `--target`. Use `default` to convert from another format to the format of this repository.
+
+Wan2.1 is also supported. 
 
 ## Miscellaneous
 
