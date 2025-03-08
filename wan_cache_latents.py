@@ -71,7 +71,7 @@ def encode_and_save_batch(vae: WanVAE, clip: Optional[CLIPModel], batch: list[It
             y = vae.encode(images_resized)
         y = torch.stack(y, dim=0)  # B, C, F, H, W
 
-        y = y[:, :F]  # may be not needed
+        y = y[:, :, :F]  # may be not needed
         y = y.to(vae.dtype)  # convert to bfloat16
         y = torch.concat([msk, y], dim=1)  # B, 4 + C, F, H, W
 
