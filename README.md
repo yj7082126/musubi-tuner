@@ -48,6 +48,9 @@ For Wan2.1, please also refer to [Wan2.1 documentation](./docs/wan.md).
 
 ### Recent Updates
 
+- Mar 9, 2025
+    - Fixed `--t5` option is required for training even without sampling images for Wan2.1 training.
+
 - Mar 7, 2025
     - Added support for Wan 2.1 LoRA training. Please use `wan_train_network.py`. For details, please refer to [here](./docs/wan.md).
         

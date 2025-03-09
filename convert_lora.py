@@ -65,6 +65,8 @@ def convert_to_diffusers(prefix, weights_sd):
                 # Wan2.1 lora name to module name: ugly but works
                 module_name = module_name.replace("cross.attn", "cross_attn")  # fix cross attn
                 module_name = module_name.replace("self.attn", "self_attn")  # fix self attn
+                module_name = module_name.replace("k.img", "k_img")  # fix k img
+                module_name = module_name.replace("v.img", "v_img")  # fix v img
             else:
                 # HunyuanVideo lora name to module name: ugly but works
                 module_name = module_name.replace("double.blocks.", "double_blocks.")  # fix double blocks

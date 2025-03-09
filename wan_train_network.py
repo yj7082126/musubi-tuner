@@ -387,7 +387,7 @@ class WanNetworkTrainer(NetworkTrainer):
 def wan_setup_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     """Wan2.1 specific parser setup"""
     parser.add_argument("--task", type=str, default="t2v-14B", choices=list(WAN_CONFIGS.keys()), help="The task to run.")
-    parser.add_argument("--t5", type=str, default=None, required=True, help="text encoder (T5) checkpoint path")
+    parser.add_argument("--t5", type=str, default=None, help="text encoder (T5) checkpoint path")
     parser.add_argument("--fp8_t5", action="store_true", help="use fp8 for Text Encoder model")
     parser.add_argument(
         "--clip",
