@@ -8,6 +8,7 @@ from torch.utils.checkpoint import checkpoint
 from .attention import flash_attention
 from utils.device_utils import clean_memory_on_device
 from modules.custom_offloading_utils import ModelOffloader
+from modules.fp8_optimization_utils import apply_fp8_monkey_patch, optimize_state_dict_with_fp8
 
 __all__ = ["WanModel"]
 
@@ -601,6 +602,38 @@ class WanModel(nn.Module):  # ModelMixin, ConfigMixin):
     @property
     def device(self):
         return next(self.parameters()).device
+
+    def fp8_optimization(self, state_dict: dict[str, torch.Tensor], device: torch.device, move_to_device: bool) -> int:
+        """
+        Optimize the model state_dict with fp8.
+
+        Args:
+            state_dict (dict[str, torch.Tensor]):
+                The state_dict of the model.
+            device (torch.device):
+                The device to calculate the weight.
+            move_to_device (bool):
+                Whether to move the weight to the device after optimization.
+        """
+        TARGET_KEYS = ["blocks"]
+        EXCLUDE_KEYS = [
+            "norm",
+            "patch_embedding",
+            "text_embedding",
+            "time_embedding",
+            "time_projection",
+            "head",
+            "modulation",
+            "img_emb",
+        ]
+
+        # inplace optimization
+        state_dict = optimize_state_dict_with_fp8(state_dict, device, TARGET_KEYS, EXCLUDE_KEYS, move_to_device=move_to_device)
+
+        # apply monkey patching
+        apply_fp8_monkey_patch(self, state_dict)
+
+        return state_dict
 
     def enable_gradient_checkpointing(self):
         self.gradient_checkpointing = True

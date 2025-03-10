@@ -1,4 +1,5 @@
 import argparse
+from typing import Optional
 from PIL import Image
 
 
@@ -16,7 +17,7 @@ import logging
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-from utils.safetensors_utils import load_safetensors
+from utils.safetensors_utils import load_safetensors, MemoryEfficientSafeOpen
 from wan.configs import WAN_CONFIGS
 from wan.modules.clip import CLIPModel
 from wan.modules.model import WanModel
@@ -27,9 +28,7 @@ from wan.utils.fm_solvers_unipc import FlowUniPCMultistepScheduler
 
 class WanNetworkTrainer(NetworkTrainer):
     def __init__(self):
-        # super().__init__()
-        self.config = None
-        self._i2v_training = False
+        super().__init__()
 
     # region model specific
 
@@ -41,9 +40,27 @@ class WanNetworkTrainer(NetworkTrainer):
     def architecture_full_name(self) -> str:
         return ARCHITECTURE_WAN_FULL
 
-    def assert_model_specific_args(self, args):
+    def handle_model_specific_args(self, args):
         self.config = WAN_CONFIGS[args.task]
         self._i2v_training = "i2v" in args.task
+
+        # get dtype from model weights
+        with MemoryEfficientSafeOpen(args.dit) as f:
+            keys = set(f.keys())
+            key1 = "model.diffusion_model.blocks.0.cross_attn.k.weight"  # 1.3B
+            key2 = "blocks.0.cross_attn.k.weight"  # 14B
+            if key1 in keys:
+                self.dit_dtype = f.get_tensor(key1).dtype
+            elif key2 in keys:
+                self.dit_dtype = f.get_tensor(key2).dtype
+            else:
+                raise ValueError(f"Could not find the dtype in the model weights: {args.dit}")
+        logger.info(f"Detected DiT dtype: {self.dit_dtype}")
+
+        if args.fp8_scaled and self.dit_dtype.itemsize == 1:
+            raise ValueError(
+                "DiT weights is already in fp8 format, cannot scale to fp8. Please use fp16/bf16 weights / DiTの重みはすでにfp8形式です。fp8にスケーリングできません。fp16/bf16の重みを使用してください"
+            )
 
     @property
     def i2v_training(self) -> bool:
@@ -291,13 +308,19 @@ class WanNetworkTrainer(NetworkTrainer):
 
     def load_transformer(
         self,
+        accelerator: Accelerator,
         args: argparse.Namespace,
         dit_path: str,
         attn_mode: str,
         split_attn: bool,
         loading_device: str,
-        dit_weight_dtype: torch.dtype,
+        dit_weight_dtype: Optional[torch.dtype],
     ):
+        loading_device = torch.device(loading_device)
+
+        # dit_weight_dtype is None for fp8_scaled
+        assert (not args.fp8_scaled and dit_weight_dtype is not None) or (args.fp8_scaled and dit_weight_dtype is None)
+
         with init_empty_weights():
             logger.info(f"Creating WanModel")
             model = WanModel(
@@ -314,18 +337,35 @@ class WanNetworkTrainer(NetworkTrainer):
                 attn_mode=attn_mode,
                 split_attn=split_attn,
             )
-            model.to(dit_weight_dtype)
+            if dit_weight_dtype is not None:
+                model.to(dit_weight_dtype)
 
-        logger.info(f"Loading DiT model from {dit_path}, device={loading_device}, dtype={dit_weight_dtype}")
-        sd = load_safetensors(dit_path, loading_device, disable_mmap=True, dtype=dit_weight_dtype)
+        # if fp8_scaled, load model weights to CPU to reduce VRAM usage. Otherwise, load to the specified device (CPU for block swap or CUDA for others)
+        wan_loading_device = torch.device("cpu") if args.fp8_scaled else loading_device
+        logger.info(f"Loading DiT model from {dit_path}, device={wan_loading_device}, dtype={dit_weight_dtype}")
+
+        # load model weights with the specified dtype or as is
+        sd = load_safetensors(dit_path, wan_loading_device, disable_mmap=True, dtype=dit_weight_dtype)
 
         # remove "model.diffusion_model." prefix: 1.3B model has this prefix
         for key in list(sd.keys()):
             if key.startswith("model.diffusion_model."):
                 sd[key[22:]] = sd.pop(key)
 
+        if args.fp8_scaled:
+            # fp8 optimization: calculate on CUDA, move back to CPU if loading_device is CPU (block swap)
+            logger.info(f"Optimizing model weights to fp8. This may take a while.")
+            sd = model.fp8_optimization(sd, accelerator.device, move_to_device=loading_device.type == "cpu")
+
+            if loading_device.type != "cpu":
+                # make sure all the model weights are on the loading_device
+                logger.info(f"Moving weights to {loading_device}")
+                for key in sd.keys():
+                    sd[key] = sd[key].to(loading_device)
+
         info = model.load_state_dict(sd, strict=True, assign=True)
         logger.info(f"Loaded DiT model from {dit_path}, info={info}")
+
         return model
 
     def scale_shift_latents(self, latents):
@@ -387,6 +427,7 @@ class WanNetworkTrainer(NetworkTrainer):
 def wan_setup_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     """Wan2.1 specific parser setup"""
     parser.add_argument("--task", type=str, default="t2v-14B", choices=list(WAN_CONFIGS.keys()), help="The task to run.")
+    parser.add_argument("--fp8_scaled", action="store_true", help="use scaled fp8 for DiT / DiTにスケーリングされたfp8を使う")
     parser.add_argument("--t5", type=str, default=None, help="text encoder (T5) checkpoint path")
     parser.add_argument("--fp8_t5", action="store_true", help="use fp8 for Text Encoder model")
     parser.add_argument(
@@ -406,7 +447,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     args = read_config_from_file(args, parser)
 
-    args.dit_dtype = "bfloat16"  # Wan2.1 only supports bfloat16
+    args.dit_dtype = None  # automatically detected
     if args.vae_dtype is None:
         args.vae_dtype = "bfloat16"  # make bfloat16 as default for VAE
 
