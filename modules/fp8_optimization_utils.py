@@ -174,7 +174,7 @@ def optimize_state_dict_with_fp8(
     return state_dict
 
 
-def fp8_linear_forward_patch(self, x, original_forward):
+def fp8_linear_forward_patch(self, x):
     """
     Patched forward method for Linear layers with FP8 weights.
 
@@ -186,22 +186,17 @@ def fp8_linear_forward_patch(self, x, original_forward):
     Returns:
         torch.Tensor: Result of linear transformation
     """
-    # Check if we should use FP8 weights
-    if hasattr(self, "weight") and hasattr(self, "scale_weight"):
-        # Dequantize the weight
-        original_dtype = self.scale_weight.dtype
-        dequantized_weight = self.weight.to(original_dtype) * self.scale_weight
+    # Dequantize the weight
+    original_dtype = self.scale_weight.dtype
+    dequantized_weight = self.weight.to(original_dtype) * self.scale_weight
 
-        # Perform linear transformation
-        if self.bias is not None:
-            output = F.linear(x, dequantized_weight, self.bias)
-        else:
-            output = F.linear(x, dequantized_weight)
-
-        return output
+    # Perform linear transformation
+    if self.bias is not None:
+        output = F.linear(x, dequantized_weight, self.bias)
     else:
-        # Fall back to normal processing
-        return original_forward(x)
+        output = F.linear(x, dequantized_weight)
+
+    return output
 
 
 def apply_fp8_monkey_patch(model, optimized_state_dict):
@@ -237,15 +232,13 @@ def apply_fp8_monkey_patch(model, optimized_state_dict):
             # register the scale_weight as a buffer to load the state_dict
             module.register_buffer("scale_weight", torch.tensor(1.0, dtype=module.weight.dtype))
 
-            # Patch the forward method
-            original_forward = module.forward
-
             # Create a new forward method with the patched version
-            def new_forward(self, x, original_forward=original_forward):
-                return fp8_linear_forward_patch(self, x, original_forward)
+            def new_forward(self, x):
+                return fp8_linear_forward_patch(self, x)
 
             # Bind method to module
             module.forward = new_forward.__get__(module, type(module))
+
             patched_count += 1
 
     logger.info(f"Number of monkey-patched Linear layers: {patched_count}")

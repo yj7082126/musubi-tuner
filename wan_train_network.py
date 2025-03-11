@@ -20,7 +20,7 @@ logging.basicConfig(level=logging.INFO)
 from utils.safetensors_utils import load_safetensors, MemoryEfficientSafeOpen
 from wan.configs import WAN_CONFIGS
 from wan.modules.clip import CLIPModel
-from wan.modules.model import WanModel
+from wan.modules.model import WanModel, detect_wan_sd_dtype, load_wan_model
 from wan.modules.t5 import T5EncoderModel
 from wan.modules.vae import WanVAE
 from wan.utils.fm_solvers_unipc import FlowUniPCMultistepScheduler
@@ -44,18 +44,12 @@ class WanNetworkTrainer(NetworkTrainer):
         self.config = WAN_CONFIGS[args.task]
         self._i2v_training = "i2v" in args.task
 
-        # get dtype from model weights
-        with MemoryEfficientSafeOpen(args.dit) as f:
-            keys = set(f.keys())
-            key1 = "model.diffusion_model.blocks.0.cross_attn.k.weight"  # 1.3B
-            key2 = "blocks.0.cross_attn.k.weight"  # 14B
-            if key1 in keys:
-                self.dit_dtype = f.get_tensor(key1).dtype
-            elif key2 in keys:
-                self.dit_dtype = f.get_tensor(key2).dtype
-            else:
-                raise ValueError(f"Could not find the dtype in the model weights: {args.dit}")
-        logger.info(f"Detected DiT dtype: {self.dit_dtype}")
+        self.dit_dtype = detect_wan_sd_dtype(args.dit)
+
+        if self.dit_dtype == torch.float16:
+            assert args.mixed_precision in ["fp16", "no"], "DiT weights are in fp16, mixed precision must be fp16 or no"
+        elif self.dit_dtype == torch.bfloat16:
+            assert args.mixed_precision in ["bf16", "no"], "DiT weights are in bf16, mixed precision must be bf16 or no"
 
         if args.fp8_scaled and self.dit_dtype.itemsize == 1:
             raise ValueError(
@@ -316,56 +310,17 @@ class WanNetworkTrainer(NetworkTrainer):
         loading_device: str,
         dit_weight_dtype: Optional[torch.dtype],
     ):
-        loading_device = torch.device(loading_device)
-
-        # dit_weight_dtype is None for fp8_scaled
-        assert (not args.fp8_scaled and dit_weight_dtype is not None) or (args.fp8_scaled and dit_weight_dtype is None)
-
-        with init_empty_weights():
-            logger.info(f"Creating WanModel")
-            model = WanModel(
-                model_type="i2v" if self.i2v_training else "t2v",
-                dim=self.config.dim,
-                eps=self.config.eps,
-                ffn_dim=self.config.ffn_dim,
-                freq_dim=self.config.freq_dim,
-                in_dim=36 if self.i2v_training else 16,  # 36 for I2V, 16 for T2V
-                num_heads=self.config.num_heads,
-                num_layers=self.config.num_layers,
-                out_dim=16,
-                text_len=512,
-                attn_mode=attn_mode,
-                split_attn=split_attn,
-            )
-            if dit_weight_dtype is not None:
-                model.to(dit_weight_dtype)
-
-        # if fp8_scaled, load model weights to CPU to reduce VRAM usage. Otherwise, load to the specified device (CPU for block swap or CUDA for others)
-        wan_loading_device = torch.device("cpu") if args.fp8_scaled else loading_device
-        logger.info(f"Loading DiT model from {dit_path}, device={wan_loading_device}, dtype={dit_weight_dtype}")
-
-        # load model weights with the specified dtype or as is
-        sd = load_safetensors(dit_path, wan_loading_device, disable_mmap=True, dtype=dit_weight_dtype)
-
-        # remove "model.diffusion_model." prefix: 1.3B model has this prefix
-        for key in list(sd.keys()):
-            if key.startswith("model.diffusion_model."):
-                sd[key[22:]] = sd.pop(key)
-
-        if args.fp8_scaled:
-            # fp8 optimization: calculate on CUDA, move back to CPU if loading_device is CPU (block swap)
-            logger.info(f"Optimizing model weights to fp8. This may take a while.")
-            sd = model.fp8_optimization(sd, accelerator.device, move_to_device=loading_device.type == "cpu")
-
-            if loading_device.type != "cpu":
-                # make sure all the model weights are on the loading_device
-                logger.info(f"Moving weights to {loading_device}")
-                for key in sd.keys():
-                    sd[key] = sd[key].to(loading_device)
-
-        info = model.load_state_dict(sd, strict=True, assign=True)
-        logger.info(f"Loaded DiT model from {dit_path}, info={info}")
-
+        model = load_wan_model(
+            self.config,
+            self.i2v_training,
+            accelerator.device,
+            dit_path,
+            attn_mode,
+            split_attn,
+            loading_device,
+            dit_weight_dtype,
+            args.fp8_scaled,
+        )
         return model
 
     def scale_shift_latents(self, latents):
