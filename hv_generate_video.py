@@ -25,6 +25,7 @@ from hunyuan_model.text_encoder import TextEncoder
 from hunyuan_model.text_encoder import PROMPT_TEMPLATE
 from hunyuan_model.vae import load_vae
 from hunyuan_model.models import load_transformer, get_rotary_pos_embed
+from hunyuan_model.fp8_optimization import convert_fp8_linear
 from modules.scheduling_flow_match_discrete import FlowMatchDiscreteScheduler
 from networks import lora
 
@@ -479,6 +480,13 @@ def parse_args():
     parser.add_argument("--no_metadata", action="store_true", help="do not save metadata")
     parser.add_argument("--latent_path", type=str, nargs="*", default=None, help="path to latent for decode. no inference")
     parser.add_argument("--lycoris", action="store_true", help="use lycoris for inference")
+    parser.add_argument("--fp8_fast", action="store_true", help="Enable fast FP8 arthimetic(RTX 4XXX+)")
+    parser.add_argument("--compile", action="store_true", help="Enable torch.compile")
+    parser.add_argument(
+        "--compile_args", nargs=4, metavar=("BACKEND", "MODE", "DYNAMIC", "FULLGRAPH"),
+        default=["inductor", "max-autotune-no-cudagraphs", "False", "False"],
+        help="Torch.compile settings"
+    )
 
     args = parser.parse_args()
 
@@ -487,6 +495,9 @@ def parse_args():
     ), "latent_path is only supported for images or video output"
 
     # update dit_weight based on model_base if not exists
+
+    if args.fp8_fast and not args.fp8:
+        raise ValueError("--fp8_fast requires --fp8")
 
     return args
 
@@ -682,16 +693,46 @@ def main():
                 logger.info("Merged model saved")
                 return
 
+        logger.info(f"Casting model to {dit_weight_dtype}")
+        transformer.to(dtype=dit_weight_dtype)
+
+        if args.fp8_fast:
+            logger.info("Enabling FP8 acceleration")
+            params_to_keep = {"norm", "bias", "time_in", "vector_in", "guidance_in", "txt_in", "img_in"}
+            for name, param in transformer.named_parameters():
+                dtype_to_use = dit_dtype if any(keyword in name for keyword in params_to_keep) else dit_weight_dtype
+                param.to(dtype=dtype_to_use)
+            convert_fp8_linear(transformer, dit_dtype, params_to_keep=params_to_keep)
+
+        if args.compile:
+            compile_backend, compile_mode, compile_dynamic, compile_fullgraph = args.compile_args
+            logger.info(
+                f"Torch Compiling[Backend: {compile_backend}; Mode: {compile_mode}; Dynamic: {compile_dynamic}; Fullgraph: {compile_fullgraph}]"
+            )
+            torch._dynamo.config.cache_size_limit = 32
+            for i, block in enumerate(transformer.single_blocks):
+                compiled_block = torch.compile(
+                    block, backend=compile_backend, mode=compile_mode,
+                    dynamic=compile_dynamic.lower() in "true",
+                    fullgraph=compile_fullgraph.lower() in "true"
+                )
+                transformer.single_blocks[i] = compiled_block
+            for i, block in enumerate(transformer.double_blocks):
+                compiled_block = torch.compile(
+                    block, backend=compile_backend, mode=compile_mode,
+                    dynamic=compile_dynamic.lower() in "true",
+                    fullgraph=compile_fullgraph.lower() in "true"
+                )
+                transformer.double_blocks[i] = compiled_block
+
         if blocks_to_swap > 0:
-            logger.info(f"Casting model to {dit_weight_dtype}")
-            transformer.to(dtype=dit_weight_dtype)
             logger.info(f"Enable swap {blocks_to_swap} blocks to CPU from device: {device}")
             transformer.enable_block_swap(blocks_to_swap, device, supports_backward=False)
             transformer.move_to_device_except_swap_blocks(device)
             transformer.prepare_block_swap_before_forward()
         else:
-            logger.info(f"Moving and casting model to {device} and {dit_weight_dtype}")
-            transformer.to(device=device, dtype=dit_weight_dtype)
+            logger.info(f"Moving model to {device}")
+            transformer.to(device=device)
         if args.img_in_txt_in_offloading:
             logger.info("Enable offloading img_in and txt_in to CPU")
             transformer.enable_img_in_txt_in_offloading()
