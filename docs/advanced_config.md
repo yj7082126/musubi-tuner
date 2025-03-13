@@ -158,7 +158,7 @@ Specify the project name with `--log_tracker_name` when using wandb.
 wandbを使用する場合は、`--log_tracker_name`でプロジェクト名を指定してください。
 </details>
 
-## FP8 weight optimization for models / モデルのFP8の重みの最適化
+## FP8 weight optimization for models / モデルの重みのFP8への最適化
 
 The `--fp8_scaled` option is available to quantize the weights of the model to FP8 (E4M3) format with appropriate scaling. This reduces the VRAM usage while maintaining precision. Important weights are kept in FP16/BF16/FP32 format.
 
