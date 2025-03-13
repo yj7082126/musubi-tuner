@@ -42,6 +42,10 @@ Wan2.1については、[Wan2.1のドキュメント](./docs/wan.md)も参照し
 - 2025/03/13
     - HunyuanVideoの推論スクリプトで、RTX 40x0向けの高速化オプション`--fp8_fast`と、`torch.compile`を使用するオプション`--compile`が追加されました。[PR #137](https://github.com/kohya-ss/musubi-tuner/pull/137) Sarania 氏に感謝いたします。
         - 詳細は[推論](#推論)を参照してください。
+    - Wan2.1の学習、推論で、fp8量子化を行うオプションを`--fp8_scaled`を追加しました。[PR #141](https://github.com/kohya-ss/musubi-tuner/pull/141) 
+        - 単純なFP8へのキャストではなく、スケーリングを行うことで、VRAM使用量の削減と精度の維持を両立します。
+        - 詳細は[高度な設定](./docs/advanced_config.md#fp8-quantization)を参照してください。
+        - また`fp16`のモデルをWan2.1の学習と推論でサポートしました。
 
 - 2025/03/07
     - Wan 2.1の学習で、サンプル画像生成を行わない場合でも`--t5`オプションが必須になっていたのを修正しました。
