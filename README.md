@@ -51,6 +51,10 @@ For Wan2.1, please also refer to [Wan2.1 documentation](./docs/wan.md).
 - Mar 13, 2025
     - In the inference script for HunyuanVideo, the `--fp8_fast` option for RTX 40x0 and the `--compile` option to use `torch.compile` have been added. Thanks to Sarania for PR [#137](https://github.com/kohya-ss/musubi-tuner/pull/137).
         - See [Inference](#inference) for details.
+    - Added `--fp8_scaled` option for fp8 quantization in Wan2.1 training and inference. [PR #141](https://github.com/kohya-ss/musubi-tuner/pull/141) 
+        - This option quantizes the weights to FP8 with appropriate scaling, instead of simple casting to FP8. This reduces VRAM usage while maintaining precision.
+        - See [Advanced Configuration](./docs/advanced_config.md#fp8-quantization) for details.
+        - `fp16` models are now supported for Wan2.1 training and inference. 
 
 - Mar 9, 2025
     - Fixed `--t5` option is required for training even without sampling images for Wan2.1 training.
