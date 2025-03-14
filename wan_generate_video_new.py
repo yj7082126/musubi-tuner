@@ -104,7 +104,8 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument("--fp8", action="store_true", help="use fp8 for DiT model")
-    parser.add_argument("--fp8_scaled", action="store_true", help="use scaled fp8 for DiT")
+    parser.add_argument("--fp8_scaled", action="store_true", help="use scaled fp8 for DiT, only for fp8")
+    parser.add_argument("--fp8_fast", action="store_true", help="Enable fast FP8 arithmetic (RTX 4XXX+), only for fp8_scaled")
     parser.add_argument("--fp8_t5", action="store_true", help="use fp8 for Text Encoder model")
     parser.add_argument(
         "--device", type=str, default=None, help="device to use for inference. If None, use CUDA if available, otherwise use CPU"
@@ -340,17 +341,8 @@ def load_dit_model(
     if args.fp8_scaled or args.lora_weight is not None:
         loading_weight_dtype = dit_dtype  # load as-is
 
-    model = load_wan_model(
-        config,
-        is_i2v,
-        device,
-        args.dit,
-        args.attn_mode,
-        False,
-        loading_device,
-        loading_weight_dtype,
-        False,
-    )
+    # do not fp8 optimize because we will merge LoRA weights
+    model = load_wan_model(config, is_i2v, device, args.dit, args.attn_mode, False, loading_device, loading_weight_dtype, False)
 
     return model
 
@@ -417,7 +409,8 @@ def optimize_model(
 
         # if no blocks to swap, we can move the weights to GPU after optimization on GPU (omit redundant CPU->GPU copy)
         move_to_device = args.blocks_to_swap == 0  # if blocks_to_swap > 0, we will keep the model on CPU
-        state_dict = model.fp8_optimization(state_dict, device, move_to_device)
+        state_dict = model.fp8_optimization(state_dict, device, move_to_device, use_scaled_mm=args.fp8_fast)
+
         info = model.load_state_dict(state_dict, strict=True, assign=True)
         logger.info(f"Loaded FP8 optimized weights: {info}")
 
@@ -778,8 +771,7 @@ def generate(args: argparse.Namespace) -> torch.Tensor:
     Returns:
         torch.Tensor: generated latent
     """
-    device = args.device if args.device is not None else "cuda" if torch.cuda.is_available() else "cpu"
-    device = torch.device(device)
+    device = torch.device(args.device)
 
     cfg = WAN_CONFIGS[args.task]
 
@@ -859,6 +851,7 @@ def generate(args: argparse.Namespace) -> torch.Tensor:
     logger.info("Waiting for 5 seconds to finish block swap")
     time.sleep(5)
 
+    gc.collect()
     clean_memory_on_device(device)
 
     # save VAE model for decoding
@@ -881,8 +874,7 @@ def decode_latent(latent: torch.Tensor, args: argparse.Namespace, cfg) -> torch.
     Returns:
         torch.Tensor: decoded video or image
     """
-    device = args.device if args.device is not None else "cuda" if torch.cuda.is_available() else "cpu"
-    device = torch.device(device)
+    device = torch.device(args.device)
 
     # load VAE model or use the one from the generation
     vae_dtype = str_to_dtype(args.vae_dtype) if args.vae_dtype is not None else torch.bfloat16
@@ -976,6 +968,12 @@ def main():
     # check if latents are provided
     latents_mode = args.latent_path is not None and len(args.latent_path) > 0
 
+    # set device
+    device = args.device if args.device is not None else "cuda" if torch.cuda.is_available() else "cpu"
+    device = torch.device(device)
+    logger.info(f"Using device: {device}")
+    args.device = device
+
     if not latents_mode:
         # generation mode
         # setup arguments
@@ -989,6 +987,10 @@ def main():
 
         # generate latent
         latent = generate(args)
+
+        # make sure the model is freed from GPU memory
+        gc.collect()
+        clean_memory_on_device(args.device)
 
         # save latent and video
         if args.save_merged_model:
