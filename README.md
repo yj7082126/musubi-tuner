@@ -48,6 +48,11 @@ For Wan2.1, please also refer to [Wan2.1 documentation](./docs/wan.md).
 
 ### Recent Updates
 
+- Mar 15, 2025
+    - Fixed a bug where the weights were cast to bf16 even when using fp16 weights in Wan2.1 training. [PR #160](https://github.com/kohya-ss/musubi-tuner/pull/160)
+        - Also fixed a bug where black images were generated during sample image generation when using fp16 weights.
+        - If you encounter issues with fp16 training, please use bf16.
+
 - Mar 13, 2025
     - In the inference script for HunyuanVideo, the `--fp8_fast` option for RTX 40x0 and the `--compile` option to use `torch.compile` have been added. Thanks to Sarania for PR [#137](https://github.com/kohya-ss/musubi-tuner/pull/137).
         - See [Inference](#inference) for details.

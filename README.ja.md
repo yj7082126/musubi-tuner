@@ -39,6 +39,11 @@ Wan2.1については、[Wan2.1のドキュメント](./docs/wan.md)も参照し
 
 ### 最近の更新
 
+- 2025/03/15
+    - Wan2.1の学習で、fp16の重みを使用した場合でも重みがbf16にcastされていた不具合を修正しました。[PR #160]https://github.com/kohya-ss/musubi-tuner/pull/160)
+        - あわせてfp16の重みを使用するとサンプル画像生成で黒画像が生成される不具合を修正しました。
+        - fp16の学習で不具合が起きる場合にはbf16をお使いください。
+
 - 2025/03/13
     - HunyuanVideoの推論スクリプトで、RTX 40x0向けの高速化オプション`--fp8_fast`と、`torch.compile`を使用するオプション`--compile`が追加されました。[PR #137](https://github.com/kohya-ss/musubi-tuner/pull/137) Sarania 氏に感謝いたします。
         - 詳細は[推論](#推論)を参照してください。
@@ -56,26 +61,6 @@ Wan2.1については、[Wan2.1のドキュメント](./docs/wan.md)も参照し
 - 2025/03/04
     - Wan 2.1の推論をサポートしました。`wan_generate_video.py`を使用してください。詳細は[こちら](./docs/wan.md)を参照してください。
         - `requirements.txt`が更新されました。`pip install -r requirements.txt`を実行してください。
-
-- 2025/02/26
-    - SkyReels V1のI2Vモデルの学習をサポートしました。この機能は実験的なものです。
-        - `hv_train_network.py`に以下のI2V学習用のオプションを追加しました。`--guidance_scale`はI2V学習時には1.0に設定してください。
-        ```bash
-        --dit_in_channels 32  --guidance_scale 1.0
-        ```
-        - 学習動画の最初のフレームがI2Vモデルへの入力として使用されます。
-        - プロンプトファイルにオプションが追加されました。
-            - `--n negative prompt...`: classifier free guidanceのためのネガティブプロンプト。
-            - `--l 6.0`: classifier free guidanceスケール。SkyReels V1モデルの場合は6.0に設定してください。
-            - `--i path/to/image.png`: image2video推論用の画像パス。
-            - `--g 1.0`: （このオプションは既存です）埋め込みガイダンススケール。SkyReels V1モデルの場合は1.0に設定してください。
-          - `--n`、`--l`、`--g`はSkyReels V1 T2Vモデルでも使用できます。
-
-- 2025/02/24
-    - `hv_generate_video.py`に`--exclude_single_blocks`オプションが追加されました。指定すると、single blockのLoRAが適用されなくなります。PR [#69](https://github.com/kohya-ss/musubi-tuner/pull/69) maybleMyers 氏に感謝いたします。
-
-- 2025/02/22
-    - SkyReels V1のT2VとI2Vモデルでの推論がサポートされました。詳細は[こちら](#SkyReels-V1での推論)を参照してください。ご助力いただいた sdbds 氏に感謝いたします。
 
 ### リリースについて
 
