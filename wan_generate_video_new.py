@@ -494,7 +494,7 @@ def prepare_t2v_inputs(
     # encode prompt
     with torch.no_grad():
         if args.fp8_t5:
-            with accelerator.autocast():
+            with torch.amp.autocast(device_type=device.type, dtype=config.t5_dtype):
                 context = text_encoder([args.prompt], device)
                 context_null = text_encoder([n_prompt], device)
         else:
@@ -576,7 +576,7 @@ def prepare_i2v_inputs(
     # encode prompt
     with torch.no_grad():
         if args.fp8_t5:
-            with accelerator.autocast():
+            with torch.amp.autocast(device_type=device.type, dtype=config.t5_dtype):
                 context = text_encoder([args.prompt], device)
                 context_null = text_encoder([n_prompt], device)
         else:
