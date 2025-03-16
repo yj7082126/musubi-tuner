@@ -39,11 +39,14 @@ Wan2.1については、[Wan2.1のドキュメント](./docs/wan.md)も参照し
 
 ### 最近の更新
 
-- 2025/03/15
+- 2025/03/16
     - Wan2.1の学習で、fp16の重みを使用した場合でも重みがbf16にcastされていた不具合を修正しました。[PR #160]https://github.com/kohya-ss/musubi-tuner/pull/160)
         - あわせてfp16の重みを使用するとサンプル画像生成で黒画像が生成される不具合を修正しました。
         - fp16の学習で不具合が起きる場合にはbf16をお使いください。
-
+    - Wan2.1の推論スクリプトをリファクタリングしました。`--fp8_fast`と`--compile`オプションが追加されました。詳しくは[こちら](./docs/wan.md#inference--推論)を参照してください。PR [#153](https://github.com/kohya-ss/musubi-tuner/pull/153)
+        - 大幅に変更を行ったため、不具合があればお知らせください。
+    - 先日追加された`--fp8_scaled`オプションは、fp8での学習および推論の精度向上に効果があるようです。`--fp8_base`で学習している場合や、`--fp8`で推論している場合は、`--fp8_scaled`の追加をご検討ください。問題があればご連絡ください。
+    
 - 2025/03/13
     - HunyuanVideoの推論スクリプトで、RTX 40x0向けの高速化オプション`--fp8_fast`と、`torch.compile`を使用するオプション`--compile`が追加されました。[PR #137](https://github.com/kohya-ss/musubi-tuner/pull/137) Sarania 氏に感謝いたします。
         - 詳細は[推論](#推論)を参照してください。
