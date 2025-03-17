@@ -48,6 +48,9 @@ For Wan2.1, please also refer to [Wan2.1 documentation](./docs/wan.md).
 
 ### Recent Updates
 
+- Mar 17, 2025
+    - Fixed a bug where the LoRA weights were corrupted when using float8_e4m3fn weights in Wan2.1 training.
+
 - Mar 16, 2025
     - Fixed a bug where the weights were cast to bf16 even when using fp16 weights in Wan2.1 training. [PR #160](https://github.com/kohya-ss/musubi-tuner/pull/160)
         - Also fixed a bug where black images were generated during sample image generation when using fp16 weights.

@@ -57,6 +57,10 @@ class WanNetworkTrainer(NetworkTrainer):
                 "DiT weights is already in fp8 format, cannot scale to fp8. Please use fp16/bf16 weights / DiTの重みはすでにfp8形式です。fp8にスケーリングできません。fp16/bf16の重みを使用してください"
             )
 
+        # dit_dtype cannot be fp8, so we select the appropriate dtype
+        if self.dit_dtype.itemsize == 1:
+            self.dit_dtype = torch.float16 if args.mixed_precision == "fp16" else torch.bfloat16
+
         args.dit_dtype = model_utils.dtype_to_str(self.dit_dtype)
 
     @property
