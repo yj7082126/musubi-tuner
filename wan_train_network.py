@@ -194,7 +194,7 @@ class WanNetworkTrainer(NetworkTrainer):
         shape_or_frame = (1, num_channels_latents, 1, lat_h, lat_w)
         latents = []
         for _ in range(latent_video_length):
-            latents.append(torch.randn(shape_or_frame, generator=generator, device=device, dtype=dit_dtype))
+            latents.append(torch.randn(shape_or_frame, generator=generator, device=device, dtype=torch.float32))
         latents = torch.cat(latents, dim=2)
 
         if self.i2v_training:
