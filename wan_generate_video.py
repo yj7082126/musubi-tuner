@@ -1001,6 +1001,7 @@ def main():
         original_base_names = None
     else:
         # latents mode
+        cfg = WAN_CONFIGS[args.task]  # any task is fine
         original_base_names = []
         latents_list = []
         seeds = []
