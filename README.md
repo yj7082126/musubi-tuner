@@ -48,6 +48,9 @@ For Wan2.1, please also refer to [Wan2.1 documentation](./docs/wan.md).
 
 ### Recent Updates
 
+- Mar 18, 2025
+    - Updated SageAttention installation instructions to the latest version (no need to edit the source code). Thanks to fai-9 for PR [#165](https://github.com/kohya-ss/musubi-tuner/pull/165).
+
 - Mar 17, 2025
     - Fixed a bug where the LoRA weights were corrupted when using float8_e4m3fn weights in Wan2.1 training.
 
