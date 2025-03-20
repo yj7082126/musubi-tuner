@@ -735,22 +735,39 @@ def run_sampling(
     if use_cpu_offload:
         latent = latent.to("cpu")
 
-    for _, t in enumerate(tqdm(timesteps)):
+    # temporary implementation of dynamic cfg
+    enable_uncond_skip = True
+
+    num_timesteps = len(timesteps)
+    skip_until = num_timesteps // 4
+    skip_from = num_timesteps * 3 // 4
+    # skip_until = num_timesteps // 2
+    # skip_from = num_timesteps
+    # skip_until = 0
+    # skip_from = num_timesteps // 2
+
+    for i, t in enumerate(tqdm(timesteps)):
         # latent is on CPU if use_cpu_offload is True
         latent_model_input = [latent.to(device)]
         timestep = torch.stack([t]).to(device)
 
+        # skip = enable_uncond_skip and (i % 2) == 0  # and (i < skip_until or i >= skip_from)
+        skip = enable_uncond_skip and (i < skip_until or i >= skip_from)
+        print(f"Step {i}, skip: {skip}")
         with accelerator.autocast(), torch.no_grad():
             noise_pred_cond = model(latent_model_input, t=timestep, **arg_c)[0]
-            noise_pred_uncond = model(latent_model_input, t=timestep, **arg_null)[0]
-            del latent_model_input
-
             if use_cpu_offload:
                 noise_pred_cond = noise_pred_cond.to("cpu")
-                noise_pred_uncond = noise_pred_uncond.to("cpu")
 
-            # apply guidance
-            noise_pred = noise_pred_uncond + args.guidance_scale * (noise_pred_cond - noise_pred_uncond)
+            if not skip:
+                noise_pred_uncond = model(latent_model_input, t=timestep, **arg_null)[0]
+                if use_cpu_offload:
+                    noise_pred_uncond = noise_pred_uncond.to("cpu")
+
+                # apply guidance
+                noise_pred = noise_pred_uncond + args.guidance_scale * (noise_pred_cond - noise_pred_uncond)
+            else:
+                noise_pred = noise_pred_cond
 
             # step
             latent_input = latent.unsqueeze(0)
