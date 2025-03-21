@@ -39,6 +39,13 @@ Wan2.1については、[Wan2.1のドキュメント](./docs/wan.md)も参照し
 
 ### 最近の更新
 
+- 2025/03/21
+    - Wan2.1の推論時、CLIPに渡される画像が誤ってBGR形式になっていた不具合を修正しました。PR [#176](https://github.com/kohya-ss/musubi-tuner/pull/176) 
+    - Wan2.1の推論時に最後のフレームの画像を指定できるようになりました。PR [#177](https://github.com/kohya-ss/musubi-tuner/pull/177) この機能は実験的なものです。
+        - raindrop313氏の[ComfyUI-WanVideoStartEndFrames](https://github.com/raindrop313/ComfyUI-WanVideoStartEndFrames) の実装を参考にしました。raindrop313氏に感謝いたします。なお、実装を完全に再現したものではありませんので、何らかの問題があるかもしれません。
+        - `--end_image_path`に最後のフレームの画像を指定してください。あわせて `--trim_tail_frames`オプションも追加されています。
+        - 詳細は[こちら](./docs/wan.md#i2v-inference--i2v推論)を参照してください。
+    
 - 2025/03/18
     - SageAttentionのインストール方法が最新に更新されました（ソースコードの編集が不要となりました）。PR [#165](https://github.com/kohya-ss/musubi-tuner/pull/165) fai-9氏に感謝いたします。
 
