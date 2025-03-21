@@ -543,7 +543,6 @@ def prepare_i2v_inputs(
 
     # convert to numpy
     img_cv2 = np.array(img)  # PIL to numpy
-    img_cv2 = cv2.cvtColor(img_cv2, cv2.COLOR_BGR2RGB)
 
     # convert to tensor (-1 to 1)
     img_tensor = TF.to_tensor(img).sub_(0.5).div_(0.5).to(device)
@@ -608,7 +607,6 @@ def prepare_i2v_inputs(
     # resize image
     interpolation = cv2.INTER_AREA if h < img_cv2.shape[0] else cv2.INTER_CUBIC
     img_resized = cv2.resize(img_cv2, (w, h), interpolation=interpolation)
-    img_resized = cv2.cvtColor(img_resized, cv2.COLOR_BGR2RGB)
     img_resized = TF.to_tensor(img_resized).sub_(0.5).div_(0.5).to(device)  # -1 to 1, CHW
     img_resized = img_resized.unsqueeze(1)  # CFHW
 
