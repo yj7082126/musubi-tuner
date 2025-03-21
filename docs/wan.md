@@ -230,6 +230,8 @@ Specifying `--fp8` runs DiT in fp8 mode. fp8 can significantly reduce memory con
 
 `--compile` enables torch.compile. See [here](/README.md#inference) for details.
 
+`--trim_tail_frames` can be used to trim the tail frames when saving. The default is 0.
+
 Other options are same as `hv_generate_video.py` (some options are not supported, please check the help).
 
 <details>
@@ -258,6 +260,8 @@ Other options are same as `hv_generate_video.py` (some options are not supported
 
 `--compile`でtorch.compileを有効にします。詳細については[こちら](/README.md#inference)を参照してください。
 
+`--trim_tail_frames` で保存時に末尾のフレームをトリミングできます。デフォルトは0です。
+
 その他のオプションは `hv_generate_video.py` と同じです（一部のオプションはサポートされていないため、ヘルプを確認してください）。
 </details>
 
@@ -275,11 +279,16 @@ python wan_generate_video.py --fp8 --task i2v-14B --video_size 832 480 --video_l
 
 Add `--clip` to specify the CLIP model. `--image_path` is the path to the image to be used as the initial frame.
 
+`--end_image_path` can be used to specify the end image. This option is experimental. When this option is specified, the saved video will be slightly longer than the specified number of frames and will have noise, so it is recommended to specify `--trim_tail_frames 3` to trim the tail frames.
+
 Other options are same as T2V inference.
 
 <details>
 <summary>日本語</summary>
 `--clip` を追加してCLIPモデルを指定します。`--image_path` は初期フレームとして使用する画像のパスです。
+
+`--end_image_path` で終了画像を指定できます。このオプションは実験的なものです。このオプションを指定すると、保存される動画が指定フレーム数よりもやや多くなり、かつノイズが乗るため、`--trim_tail_frames 3` などを指定して末尾のフレームをトリミングすることをお勧めします。
+
 
 その他のオプションはT2V推論と同じです。
 </details>

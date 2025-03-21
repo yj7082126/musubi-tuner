@@ -48,6 +48,13 @@ For Wan2.1, please also refer to [Wan2.1 documentation](./docs/wan.md).
 
 ### Recent Updates
 
+- Mar 21, 2025
+    - Fixed a bug where the image passed to CLIP during Wan2.1 inference was incorrectly in BGR format. PR [#176](https://github.com/kohya-ss/musubi-tuner/pull/176) 
+    - Added the ability to specify the last frame image during Wan2.1 inference. PR [#177](https://github.com/kohya-ss/musubi-tuner/pull/177) This feature is experimental.
+        - This feature is based on the implementation by raindrop313 in [ComfyUI-WanVideoStartEndFrames](https://github.com/raindrop313/ComfyUI-WanVideoStartEndFrames). Many thanks to raindrop313. Note that this is not a complete reproduction of the implementation, so there may be issues.
+        - Specify the last frame image with `--end_image_path`. Also, the `--trim_tail_frames` option has been added.
+        - See [here](./docs/wan.md#i2v-inference--i2v推論) for details.
+
 - Mar 18, 2025
     - Updated SageAttention installation instructions to the latest version (no need to edit the source code). Thanks to fai-9 for PR [#165](https://github.com/kohya-ss/musubi-tuner/pull/165).
 
