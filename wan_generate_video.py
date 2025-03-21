@@ -94,6 +94,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--video_path", type=str, default=None, help="path to video for video2video inference")
     parser.add_argument("--image_path", type=str, default=None, help="path to image for image2video inference")
+    parser.add_argument("--end_image_path", type=str, default=None, help="path to end image for image2video inference")
+    parser.add_argument("--trim_tail_frames", type=int, default=0, help="trim tail N frames from the video before saving")
 
     # Flow Matching
     parser.add_argument(
@@ -543,10 +545,18 @@ def prepare_i2v_inputs(
 
     # convert to numpy
     img_cv2 = np.array(img)  # PIL to numpy
-    img_cv2 = cv2.cvtColor(img_cv2, cv2.COLOR_BGR2RGB)
 
     # convert to tensor (-1 to 1)
     img_tensor = TF.to_tensor(img).sub_(0.5).div_(0.5).to(device)
+
+    # end frame image
+    if args.end_image_path is not None:
+        end_img = Image.open(args.end_image_path).convert("RGB")
+        end_img_cv2 = np.array(end_img)  # PIL to numpy
+    else:
+        end_img = None
+        end_img_cv2 = None
+    has_end_image = end_img is not None
 
     # calculate latent dimensions: keep aspect ratio
     h, w = img_tensor.shape[1:]
@@ -556,7 +566,7 @@ def prepare_i2v_inputs(
     h = lat_h * config.vae_stride[1]
     w = lat_w * config.vae_stride[2]
     lat_f = (frames - 1) // config.vae_stride[0] + 1  # size of latent frames
-    max_seq_len = lat_f * lat_h * lat_w // (config.patch_size[1] * config.patch_size[2])
+    max_seq_len = (lat_f + (1 if has_end_image else 0)) * lat_h * lat_w // (config.patch_size[1] * config.patch_size[2])
 
     # set seed
     seed = args.seed if args.seed is not None else random.randint(0, 2**32 - 1)
@@ -564,7 +574,7 @@ def prepare_i2v_inputs(
     seed_g.manual_seed(seed)
 
     # generate noise
-    noise = torch.randn(16, lat_f, lat_h, lat_w, dtype=torch.float32, generator=seed_g, device=device)
+    noise = torch.randn(16, lat_f + (1 if has_end_image else 0), lat_h, lat_w, dtype=torch.float32, generator=seed_g, device=device)
 
     # configure negative prompt
     n_prompt = args.negative_prompt if args.negative_prompt else config.sample_neg_prompt
@@ -608,9 +618,14 @@ def prepare_i2v_inputs(
     # resize image
     interpolation = cv2.INTER_AREA if h < img_cv2.shape[0] else cv2.INTER_CUBIC
     img_resized = cv2.resize(img_cv2, (w, h), interpolation=interpolation)
-    img_resized = cv2.cvtColor(img_resized, cv2.COLOR_BGR2RGB)
     img_resized = TF.to_tensor(img_resized).sub_(0.5).div_(0.5).to(device)  # -1 to 1, CHW
     img_resized = img_resized.unsqueeze(1)  # CFHW
+
+    if has_end_image:
+        interpolation = cv2.INTER_AREA if h < end_img_cv2.shape[1] else cv2.INTER_CUBIC
+        end_img_resized = cv2.resize(end_img_cv2, (w, h), interpolation=interpolation)
+        end_img_resized = TF.to_tensor(end_img_resized).sub_(0.5).div_(0.5).to(device)  # -1 to 1, CHW
+        end_img_resized = end_img_resized.unsqueeze(1)  # CFHW
 
     # create mask for the first frame
     # msk = torch.ones(1, frames, lat_h, lat_w, device=device)
@@ -620,8 +635,10 @@ def prepare_i2v_inputs(
     # msk = msk.transpose(1, 2)[0]
 
     # rewrite to simpler version
-    msk = torch.zeros(4, lat_f, lat_h, lat_w, device=device)
+    msk = torch.zeros(4, lat_f + (1 if has_end_image else 0), lat_h, lat_w, device=device)
     msk[:, 0] = 1
+    if has_end_image:
+        msk[:, -1] = 1
 
     # encode image to latent space
     with accelerator.autocast(), torch.no_grad():
@@ -629,6 +646,10 @@ def prepare_i2v_inputs(
         padding_frames = frames - 1  # the first frame is image
         img_resized = torch.concat([img_resized, torch.zeros(3, padding_frames, h, w, device=device)], dim=1)
         y = vae.encode([img_resized])[0]
+
+        if has_end_image:
+            y_end = vae.encode([end_img_resized])[0]
+            y = torch.concat([y, y_end], dim=1)  # add end frame
 
     y = torch.concat([msk, y])
     logger.info(f"Encoding complete")
@@ -890,6 +911,10 @@ def decode_latent(latent: torch.Tensor, args: argparse.Namespace, cfg) -> torch.
 
     with torch.autocast(device_type=device.type, dtype=vae_dtype), torch.no_grad():
         videos = vae.decode(x0)
+
+    # some tail frames may be corrupted when end frame is used, we add an option to remove them
+    if args.trim_tail_frames:
+        videos[0] = videos[0][:, : -args.trim_tail_frames]
 
     logger.info(f"Decoding complete")
     video = videos[0]
