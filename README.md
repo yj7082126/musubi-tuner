@@ -48,6 +48,10 @@ For Wan2.1, please also refer to [Wan2.1 documentation](./docs/wan.md).
 
 ### Recent Updates
 
+- Mar 22, 2025
+    - Added an option to speed up inference by skipping CFG (classifier free guidance) at some steps during Wan2.1 inference. PR [#180](https://github.com/kohya-ss/musubi-tuner/pull/180) 
+        - Set with `--cfg_skip_mode` and `--cfg_apply_ratio`. See [here](./docs/wan.md#cfg-skip-mode--cfgスキップモード) for details.
+
 - Mar 21, 2025
     - Fixed a bug where the image passed to CLIP during Wan2.1 inference was incorrectly in BGR format. PR [#176](https://github.com/kohya-ss/musubi-tuner/pull/176) 
     - Added the ability to specify the last frame image during Wan2.1 inference. PR [#177](https://github.com/kohya-ss/musubi-tuner/pull/177) This feature is experimental.

@@ -96,6 +96,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--image_path", type=str, default=None, help="path to image for image2video inference")
     parser.add_argument("--end_image_path", type=str, default=None, help="path to end image for image2video inference")
     parser.add_argument("--trim_tail_frames", type=int, default=0, help="trim tail N frames from the video before saving")
+    parser.add_argument(
+        "--cfg_skip_mode",
+        type=str,
+        default="none",
+        choices=["early", "late", "middle", "early_late", "alternate", "none"],
+        help="CFG skip mode. each mode skips different parts of the CFG. "
+        " early: initial steps, late: later steps, middle: middle steps, early_late: both early and late, alternate: alternate, none: no skip (default)",
+    )
+    parser.add_argument(
+        "--cfg_apply_ratio",
+        type=float,
+        default=None,
+        help="The ratio of steps to apply CFG (0.0 to 1.0). Default is None (apply all steps).",
+    )
 
     # Flow Matching
     parser.add_argument(
@@ -756,22 +770,76 @@ def run_sampling(
     if use_cpu_offload:
         latent = latent.to("cpu")
 
-    for _, t in enumerate(tqdm(timesteps)):
+    # cfg skip
+    apply_cfg_array = []
+    num_timesteps = len(timesteps)
+
+    if args.cfg_skip_mode != "none" and args.cfg_apply_ratio is not None:
+        # Calculate thresholds based on cfg_apply_ratio
+        apply_steps = int(num_timesteps * args.cfg_apply_ratio)
+
+        if args.cfg_skip_mode == "early":
+            # Skip CFG in early steps, apply in late steps
+            start_index = num_timesteps - apply_steps
+            end_index = num_timesteps
+        elif args.cfg_skip_mode == "late":
+            # Skip CFG in late steps, apply in early steps
+            start_index = 0
+            end_index = apply_steps
+        elif args.cfg_skip_mode == "early_late":
+            # Skip CFG in early and late steps, apply in middle steps
+            start_index = (num_timesteps - apply_steps) // 2
+            end_index = start_index + apply_steps
+        elif args.cfg_skip_mode == "middle":
+            # Skip CFG in middle steps, apply in early and late steps
+            skip_steps = num_timesteps - apply_steps
+            middle_start = (num_timesteps - skip_steps) // 2
+            middle_end = middle_start + skip_steps
+
+        w = 0.0
+        for step_idx in range(num_timesteps):
+            if args.cfg_skip_mode == "alternate":
+                # accumulate w and apply CFG when w >= 1.0
+                w += args.cfg_apply_ratio
+                apply = w >= 1.0
+                if apply:
+                    w -= 1.0
+            elif args.cfg_skip_mode == "middle":
+                # Skip CFG in early and late steps, apply in middle steps
+                apply = step_idx < middle_start or step_idx >= middle_end
+            else:
+                # Apply CFG on some steps based on ratio
+                apply = step_idx >= start_index and step_idx < end_index
+
+            apply_cfg_array.append(apply)
+
+        pattern = ["A" if apply else "S" for apply in apply_cfg_array]
+        pattern = "".join(pattern)
+        logger.info(f"CFG skip mode: {args.cfg_skip_mode}, apply ratio: {args.cfg_apply_ratio}, pattern: {pattern}")
+    else:
+        # Apply CFG on all steps
+        apply_cfg_array = [True] * num_timesteps
+
+    for i, t in enumerate(tqdm(timesteps)):
         # latent is on CPU if use_cpu_offload is True
         latent_model_input = [latent.to(device)]
         timestep = torch.stack([t]).to(device)
 
         with accelerator.autocast(), torch.no_grad():
             noise_pred_cond = model(latent_model_input, t=timestep, **arg_c)[0]
-            noise_pred_uncond = model(latent_model_input, t=timestep, **arg_null)[0]
-            del latent_model_input
-
             if use_cpu_offload:
                 noise_pred_cond = noise_pred_cond.to("cpu")
-                noise_pred_uncond = noise_pred_uncond.to("cpu")
 
-            # apply guidance
-            noise_pred = noise_pred_uncond + args.guidance_scale * (noise_pred_cond - noise_pred_uncond)
+            apply_cfg = apply_cfg_array[i]  # apply CFG or not
+            if apply_cfg:
+                noise_pred_uncond = model(latent_model_input, t=timestep, **arg_null)[0]
+                if use_cpu_offload:
+                    noise_pred_uncond = noise_pred_uncond.to("cpu")
+
+                # apply guidance
+                noise_pred = noise_pred_uncond + args.guidance_scale * (noise_pred_cond - noise_pred_uncond)
+            else:
+                noise_pred = noise_pred_cond
 
             # step
             latent_input = latent.unsqueeze(0)
