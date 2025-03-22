@@ -50,6 +50,8 @@ For Wan2.1, please also refer to [Wan2.1 documentation](./docs/wan.md).
 
 - **[NEW] GitHub Discussions Enabled**: We've enabled GitHub Discussions for community Q&A, knowledge sharing, and technical information exchange. Please use Issues for bug reports and feature requests, and Discussions for questions and sharing experiences. [Join the conversation →](https://github.com/kohya-ss/musubi-tuner/discussions)
 
+- **[NEW] GitHub Discussions Enabled**: We've enabled GitHub Discussions for community Q&A, knowledge sharing, and technical information exchange. Please use Issues for bug reports and feature requests, and Discussions for questions and sharing experiences. [Join the conversation →](https://github.com/kohya-ss/musubi-tuner/discussions)
+
 - Mar 22, 2025
     - Added `full` to the frame extraction method for video datasets. This uses the entire video from start to finish. See [here](./dataset/dataset_config.md#frame_extraction-options) for details.
         - `full` is recommended when each video represents a single complete motion. The frame extraction methods other than `full` are recommended when the video contains repeated actions. 
