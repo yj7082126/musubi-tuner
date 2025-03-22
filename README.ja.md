@@ -40,6 +40,7 @@ Wan2.1については、[Wan2.1のドキュメント](./docs/wan.md)も参照し
 ### 最近の更新
 
 - 2025/03/22
+    - GitHub Discussionsを有効にしました。コミュニティのQ&A、知識共有、技術情報の交換などにご利用ください。バグ報告や機能リクエストにはIssuesを、質問や経験の共有にはDiscussionsをご利用ください。[Discussionはこちら](https://github.com/kohya-ss/musubi-tuner/discussions)
     - Wan2.1の推論時に、CFG (classifier free guidance) を一部のステップでスキップすることで、推論速度を向上させるオプションを追加しました。PR [#180](https://github.com/kohya-ss/musubi-tuner/pull/180) 
         - `--cfg_skip_mode`と`--cfg_apply_ratio`で設定します。詳細は[こちら](./docs/wan.md#cfg-skip-mode--cfgスキップモード)を参照してください。
 
