@@ -344,7 +344,7 @@ def load_dit_model(
         loading_weight_dtype = dit_dtype  # load as-is
 
     # do not fp8 optimize because we will merge LoRA weights
-    model = load_wan_model(config, is_i2v, device, args.dit, args.attn_mode, False, loading_device, loading_weight_dtype, False)
+    model = load_wan_model(config, device, args.dit, args.attn_mode, False, loading_device, loading_weight_dtype, False)
 
     return model
 
