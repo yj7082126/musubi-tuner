@@ -48,8 +48,12 @@ For Wan2.1, please also refer to [Wan2.1 documentation](./docs/wan.md).
 
 ### Recent Updates
 
+- **[NEW] GitHub Discussions Enabled**: We've enabled GitHub Discussions for community Q&A, knowledge sharing, and technical information exchange. Please use Issues for bug reports and feature requests, and Discussions for questions and sharing experiences. [Join the conversation →](https://github.com/kohya-ss/musubi-tuner/discussions)
+
 - Mar 22, 2025
-    - **[NEW] GitHub Discussions Enabled**: We've enabled GitHub Discussions for community Q&A, knowledge sharing, and technical information exchange. Please use Issues for bug reports and feature requests, and Discussions for questions and sharing experiences. [Join the conversation →](https://github.com/kohya-ss/musubi-tuner/discussions)
+    - Added `full` to the frame extraction method for video datasets. This uses the entire video from start to finish. See [here](./dataset/dataset_config.md#frame_extraction-options) for details.
+    - If a value other than "4\*N+1" is specified for `target_frames` in the video dataset, it will be automatically converted to "4\*N+1".
+    - Corrected some errors in the dataset configuration documentation.
     - Added an option to speed up inference by skipping CFG (classifier free guidance) at some steps during Wan2.1 inference. PR [#180](https://github.com/kohya-ss/musubi-tuner/pull/180) 
         - Set with `--cfg_skip_mode` and `--cfg_apply_ratio`. See [here](./docs/wan.md#cfg-skip-mode--cfgスキップモード) for details.
 
