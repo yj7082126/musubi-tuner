@@ -39,6 +39,10 @@ Wan2.1については、[Wan2.1のドキュメント](./docs/wan.md)も参照し
 
 ### 最近の更新
 
+- 2025/03/22
+    - Wan2.1の推論時に、CFG (classifier free guidance) を一部のステップでスキップすることで、推論速度を向上させるオプションを追加しました。PR [#180](https://github.com/kohya-ss/musubi-tuner/pull/180) 
+        - `--cfg_skip_mode`と`--cfg_apply_ratio`で設定します。詳細は[こちら](./docs/wan.md#cfg-skip-mode--cfgスキップモード)を参照してください。
+
 - 2025/03/21
     - Wan2.1の推論時、CLIPに渡される画像が誤ってBGR形式になっていた不具合を修正しました。PR [#176](https://github.com/kohya-ss/musubi-tuner/pull/176) 
     - Wan2.1の推論時に最後のフレームの画像を指定できるようになりました。PR [#177](https://github.com/kohya-ss/musubi-tuner/pull/177) この機能は実験的なものです。
