@@ -337,6 +337,43 @@ ratioに0.5を指定することで、デノイジングのループが最大25%
 適切な設定は不明ですが、モードは`late`または`early_late`、ratioは0.3~0.5程度から試してみると良いかもしれません。
 </details>
 
+#### Skip Layer Guidance
+
+Skip Layer Guidance is a feature that uses the output of a model with some blocks skipped as the unconditional output of classifier free guidance. It was originally proposed in [SD 3.5](https://github.com/comfyanonymous/ComfyUI/pull/5404) and first applied in Wan2GP in [this PR](https://github.com/deepbeepmeep/Wan2GP/pull/61). It may improve the quality of generated videos.
+
+The implementation of SD 3.5 is [here](https://github.com/Stability-AI/sd3.5/blob/main/sd3_impls.py), and the implementation of Wan2GP (the PR mentioned above) has some different specifications. This inference script allows you to choose between the two methods.
+
+*The SD3.5 method applies slg output in addition to cond and uncond (slows down the speed). The Wan2GP method uses only cond and slg output.*
+
+The following arguments are available:
+
+- `--slg_mode`: Specifies the SLG mode. `original` for SD 3.5 method, `uncond` for Wan2GP method. Default is None (no SLG).
+- `--slg_layers`: Specifies the indices of the blocks (layers) to skip in SLG, separated by commas. Example: `--slg_layers 4,5,6`. Default is empty (no skip). If this option is not specified, `--slg_mode` is ignored.
+- `--slg_scale`: Specifies the scale of SLG when `original`. Default is 3.0.
+- `--slg_start`: Specifies the start step of SLG application in inference steps from 0.0 to 1.0. Default is 0.0 (applied from the beginning).
+- `--slg_end`: Specifies the end step of SLG application in inference steps from 0.0 to 1.0. Default is 0.3 (applied up to 30% from the beginning).
+
+Appropriate settings are unknown, but you may want to try `original` mode with a scale of around 3.0 and a start ratio of 0.0 and an end ratio of 0.5, with layers 4, 5, and 6 skipped.
+
+<details>
+<summary>日本語</summary>
+Skip Layer Guidanceは、一部のblockをスキップしたモデル出力をclassifier free guidanceのunconditional出力に使用する機能です。元々は[SD 3.5](https://github.com/comfyanonymous/ComfyUI/pull/5404)で提案されたもので、Wan2.1には[Wan2GPのこちらのPR](https://github.com/deepbeepmeep/Wan2GP/pull/61)で初めて適用されました。生成動画の品質が向上する可能性があります。
+
+SD 3.5の実装は[こちら](https://github.com/Stability-AI/sd3.5/blob/main/sd3_impls.py)で、Wan2GPの実装（前述のPR）は一部仕様が異なります。この推論スクリプトでは両者の方式を選択できるようになっています。
+
+※SD3.5方式はcondとuncondに加えてslg outputを適用します（速度が低下します）。Wan2GP方式はcondとslg outputのみを使用します。
+
+以下の引数があります。
+
+- `--slg_mode`：SLGのモードを指定します。`original`でSD 3.5の方式、`uncond`でWan2GPの方式です。デフォルトはNoneで、SLGを使用しません。
+- `--slg_layers`：SLGでスキップするblock (layer)のインデクスをカンマ区切りで指定します。例：`--slg_layers 4,5,6`。デフォルトは空（スキップしない）です。このオプションを指定しないと`--slg_mode`は無視されます。
+- `--slg_scale`：`original`のときのSLGのスケールを指定します。デフォルトは3.0です。
+- `--slg_start`：推論ステップのSLG適用開始ステップを0.0から1.0の割合で指定します。デフォルトは0.0です（最初から適用）。
+- `--slg_end`：推論ステップのSLG適用終了ステップを0.0から1.0の割合で指定します。デフォルトは0.3です（最初から30%まで適用）。
+
+適切な設定は不明ですが、`original`モードでスケールを3.0程度、開始割合を0.0、終了割合を0.5程度に設定し、4, 5, 6のlayerをスキップする設定から始めると良いかもしれません。
+</details>
+
 ### I2V Inference / I2V推論
 
 The following is an example of I2V inference (input as a single line):
