@@ -213,7 +213,7 @@ uvでインストールした場合は、`uv run python cache_latents.py ...`の
 
 VRAMが足りない場合は、`--vae_spatial_tile_sample_min_size`を128程度に減らし、`--batch_size`を小さくしてください。
 
-`--debug_mode image` を指定するとデータセットの画像とキャプションが新規ウィンドウに表示されます。`--debug_mode console`でコンソールに表示されます（`ascii-magic`が必要）。
+`--debug_mode image` を指定するとデータセットの画像とキャプションが新規ウィンドウに表示されます。`--debug_mode console`でコンソールに表示されます（`ascii-magic`が必要）。`--debug_mode video`で、キャッシュディレクトリに画像または動画が保存されます（確認後、削除してください）。`--debug_mode`指定時は、実際のキャッシュ処理は行われません。
 
 デフォルトではデータセットに含まれないキャッシュファイルは自動的に削除されます。`--keep_cache`を指定すると、キャッシュファイルを残すことができます。
 
