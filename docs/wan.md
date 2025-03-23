@@ -234,6 +234,16 @@ Specifying `--fp8` runs DiT in fp8 mode. fp8 can significantly reduce memory con
 
 `--cfg_skip_mode` specifies the mode for skipping CFG in different steps. The default is `none` (all steps).`--cfg_apply_ratio` specifies the ratio of steps where CFG is applied. See below for details.
 
+`--include_patterns` and `--exclude_patterns` can be used to specify which LoRA modules to apply or exclude during training. If not specified, all modules are applied by default. These options accept regular expressions. 
+
+`--include_patterns` specifies the modules to be applied, and `--exclude_patterns` specifies the modules to be excluded. The regular expression is matched against the LoRA key name, and include takes precedence.
+
+The key name to be searched is in sd-scripts format (`lora_unet_<module_name with dot replaced by _>`). For example, `lora_unet_blocks_9_cross_attn_k`.
+
+For example, if you specify `--exclude_patterns "blocks_[23]\d_"`, it will exclude modules containing `blocks_20` to `blocks_39`. If you specify `--include_patterns "cross_attn" --exclude_patterns "blocks_(0|1|2|3|4)_"`, it will apply LoRA to modules containing `cross_attn` and not containing `blocks_0` to `blocks_4`.
+
+If you specify multiple LoRA weights, please specify them with multiple arguments. For example: `--include_patterns "cross_attn" ".*" --exclude_patterns "dummy_do_not_exclude" "blocks_(0|1|2|3|4)"`. `".*"` is a regex that matches everything. `dummy_do_not_exclude` is a dummy regex that does not match anything.
+
 Other options are same as `hv_generate_video.py` (some options are not supported, please check the help).
 
 <details>
@@ -265,6 +275,15 @@ Other options are same as `hv_generate_video.py` (some options are not supported
 `--trim_tail_frames` で保存時に末尾のフレームをトリミングできます。デフォルトは0です。
 
 `--cfg_skip_mode` は異なるステップでCFGをスキップするモードを指定します。デフォルトは `none`（全ステップ）。`--cfg_apply_ratio` はCFGが適用されるステップの割合を指定します。詳細は後述します。
+
+LoRAのどのモジュールを適用するかを、`--include_patterns`と`--exclude_patterns`で指定できます（未指定時・デフォルトは全モジュール適用されます
+）。これらのオプションには、正規表現を指定します。`--include_patterns`は適用するモジュール、`--exclude_patterns`は適用しないモジュールを指定します。正規表現がLoRAのキー名に含まれるかどうかで判断され、includeが優先されます。
+
+検索対象となるキー名は sd-scripts 形式（`lora_unet_<モジュール名のドットを_に置換したもの>`）です。例：`lora_unet_blocks_9_cross_attn_k`
+
+たとえば `--exclude_patterns "blocks_[23]\d_"`のみを指定すると、`blocks_20`から`blocks_39`を含むモジュールが除外されます。`--include_patterns "cross_attn" --exclude_patterns "blocks_(0|1|2|3|4)_"`のようにincludeとexcludeを指定すると、`cross_attn`を含むモジュールで、かつ`blocks_0`から`blocks_4`を含まないモジュールにLoRAが適用されます。
+
+複数のLoRAの重みを指定する場合は、複数個の引数で指定してください。例：`--include_patterns "cross_attn" ".*" --exclude_patterns "dummy_do_not_exclude" "blocks_(0|1|2|3|4)"` `".*"`は全てにマッチする正規表現です。`dummy_do_not_exclude`は何にもマッチしないダミーの正規表現です。
 
 その他のオプションは `hv_generate_video.py` と同じです（一部のオプションはサポートされていないため、ヘルプを確認してください）。
 </details>
