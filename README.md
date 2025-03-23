@@ -51,6 +51,7 @@ For Wan2.1, please also refer to [Wan2.1 documentation](./docs/wan.md).
 - **[NEW] GitHub Discussions Enabled**: We've enabled GitHub Discussions for community Q&A, knowledge sharing, and technical information exchange. Please use Issues for bug reports and feature requests, and Discussions for questions and sharing experiences. [Join the conversation →](https://github.com/kohya-ss/musubi-tuner/discussions)
 
 - Mar 23, 2025
+    - Added an option to use Skip Layer Guidance during Wan2.1 inference. PR [#186](https://github.com/kohya-ss/musubi-tuner/pull/186) See [here](./docs/wan.md#skip-layer-guidance) for details.
     - Added the ability to specify the target modules for LoRA application during Wan2.1 inference using regular expressions. PR [#185](https://github.com/kohya-ss/musubi-tuner/pull/185) 
         - See [here](./docs/wan.md#t2v-inference--t2v推論) for details.
 
