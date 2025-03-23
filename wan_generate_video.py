@@ -3,6 +3,7 @@ from datetime import datetime
 import gc
 import random
 import os
+import re
 import time
 import math
 from typing import Tuple, Optional, List, Union, Any
@@ -65,6 +66,8 @@ def parse_args() -> argparse.Namespace:
     # LoRA
     parser.add_argument("--lora_weight", type=str, nargs="*", required=False, default=None, help="LoRA weight path")
     parser.add_argument("--lora_multiplier", type=float, nargs="*", default=1.0, help="LoRA multiplier")
+    parser.add_argument("--include_patterns", type=str, nargs="*", default=None, help="LoRA module include patterns")
+    parser.add_argument("--exclude_patterns", type=str, nargs="*", default=None, help="LoRA module exclude patterns")
     parser.add_argument(
         "--save_merged_model",
         type=str,
@@ -404,6 +407,31 @@ def merge_lora_weights(model: WanModel, args: argparse.Namespace, device: torch.
 
         logger.info(f"Loading LoRA weights from {lora_weight} with multiplier {lora_multiplier}")
         weights_sd = load_file(lora_weight)
+
+        # apply include/exclude patterns
+        original_key_count = len(weights_sd.keys())
+        if args.include_patterns is not None and len(args.include_patterns) > i:
+            include_pattern = args.include_patterns[i]
+            regex_include = re.compile(include_pattern)
+            weights_sd = {k: v for k, v in weights_sd.items() if regex_include.search(k)}
+            logger.info(
+                f"Filtered keys with include pattern {include_pattern}: {original_key_count} -> {len(weights_sd.keys())}"
+            )
+        if args.exclude_patterns is not None and len(args.exclude_patterns) > i:
+            original_key_count_ex = len(weights_sd.keys())
+            exclude_pattern = args.exclude_patterns[i]
+            regex_exclude = re.compile(exclude_pattern)
+            weights_sd = {k: v for k, v in weights_sd.items() if not regex_exclude.search(k)}
+            logger.info(
+                f"Filtered keys with exclude pattern {exclude_pattern}: {original_key_count_ex} -> {len(weights_sd.keys())}"
+            )
+        if len(weights_sd) != original_key_count:
+            remaining_keys = list(set([k.split(".", 1)[0] for k in weights_sd.keys()]))
+            remaining_keys.sort()
+            logger.info(f"Remaining LoRA modules after filtering: {remaining_keys}")
+            if len(weights_sd) == 0:
+                logger.warning(f"No keys left after filtering.")
+
         if args.lycoris:
             lycoris_net, _ = create_network_from_weights(
                 multiplier=lora_multiplier,

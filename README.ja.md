@@ -41,6 +41,9 @@ Wan2.1については、[Wan2.1のドキュメント](./docs/wan.md)も参照し
 
 - GitHub Discussionsを有効にしました。コミュニティのQ&A、知識共有、技術情報の交換などにご利用ください。バグ報告や機能リクエストにはIssuesを、質問や経験の共有にはDiscussionsをご利用ください。[Discussionはこちら](https://github.com/kohya-ss/musubi-tuner/discussions)
 
+- 2025/03/23
+    - Wan2.1の推論時にLoRAの適用対象モジュールを正規表現で指定できるようになりました。PR [#185](https://github.com/kohya-ss/musubi-tuner/pull/185) 詳細は[こちら](./docs/wan.md#t2v-inference--t2v推論)を参照してください。
+
 - 2025/03/22
     - 動画データセットの抽出方法に `full` を追加しました。それぞれの動画の最初から最後までを用います。詳細は[こちら](./dataset/dataset_config.md#frame_extraction-options)を参照してください。
         - `full`はそれぞれの動画がひとつの完結したモーションの場合にお勧めします。`full`以外の抽出方法は、動画が特定の動作を繰り返している場合にお勧めします。
