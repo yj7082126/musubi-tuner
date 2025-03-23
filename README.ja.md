@@ -42,6 +42,7 @@ Wan2.1については、[Wan2.1のドキュメント](./docs/wan.md)も参照し
 - GitHub Discussionsを有効にしました。コミュニティのQ&A、知識共有、技術情報の交換などにご利用ください。バグ報告や機能リクエストにはIssuesを、質問や経験の共有にはDiscussionsをご利用ください。[Discussionはこちら](https://github.com/kohya-ss/musubi-tuner/discussions)
 
 - 2025/03/23
+    - latentのキャッシュ時に、実際に学習に使われる画像、動画データをファイルとして保存する `--debug_mode video` オプションを追加しました。PR [#187](https://github.com/kohya-ss/musubi-tuner/pull/187) 詳細は[こちら](#latentの事前キャッシュ)を参照してください。HunyuanVideo、Wan2.1の両方で使用可能です。
     - Wan2.1の推論時にSkip Layer Guidanceを有効化するオプションを追加しました。PR [#186](https://github.com/kohya-ss/musubi-tuner/pull/186) 詳細は[こちら](./docs/wan.md#skip-layer-guidance)を参照してください。
     - Wan2.1の推論時にLoRAの適用対象モジュールを正規表現で指定できるようになりました。PR [#185](https://github.com/kohya-ss/musubi-tuner/pull/185) 詳細は[こちら](./docs/wan.md#t2v-inference--t2v推論)を参照してください。
 
@@ -213,7 +214,11 @@ uvでインストールした場合は、`uv run python cache_latents.py ...`の
 
 VRAMが足りない場合は、`--vae_spatial_tile_sample_min_size`を128程度に減らし、`--batch_size`を小さくしてください。
 
-`--debug_mode image` を指定するとデータセットの画像とキャプションが新規ウィンドウに表示されます。`--debug_mode console`でコンソールに表示されます（`ascii-magic`が必要）。`--debug_mode video`で、キャッシュディレクトリに画像または動画が保存されます（確認後、削除してください）。`--debug_mode`指定時は、実際のキャッシュ処理は行われません。
+`--debug_mode image` を指定するとデータセットの画像とキャプションが新規ウィンドウに表示されます。`--debug_mode console`でコンソールに表示されます（`ascii-magic`が必要）。
+
+`--debug_mode video`で、キャッシュディレクトリに画像または動画が保存されます（確認後、削除してください）。動画のビットレートは確認用に低くしてあります。実際には元動画の画像が学習に使用されます。
+
+`--debug_mode`指定時は、実際のキャッシュ処理は行われません。
 
 デフォルトではデータセットに含まれないキャッシュファイルは自動的に削除されます。`--keep_cache`を指定すると、キャッシュファイルを残すことができます。
 
