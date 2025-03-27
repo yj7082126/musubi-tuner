@@ -90,6 +90,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--save_path", type=str, required=True, help="path to save generated video")
     parser.add_argument("--seed", type=int, default=None, help="Seed for evaluation.")
     parser.add_argument(
+        "--cpu_noise", action="store_true", help="Use CPU to generate noise (compatible with ComfyUI). Default is False."
+    )
+    parser.add_argument(
         "--guidance_scale",
         type=float,
         default=5.0,
@@ -414,9 +417,7 @@ def merge_lora_weights(model: WanModel, args: argparse.Namespace, device: torch.
             include_pattern = args.include_patterns[i]
             regex_include = re.compile(include_pattern)
             weights_sd = {k: v for k, v in weights_sd.items() if regex_include.search(k)}
-            logger.info(
-                f"Filtered keys with include pattern {include_pattern}: {original_key_count} -> {len(weights_sd.keys())}"
-            )
+            logger.info(f"Filtered keys with include pattern {include_pattern}: {original_key_count} -> {len(weights_sd.keys())}")
         if args.exclude_patterns is not None and len(args.exclude_patterns) > i:
             original_key_count_ex = len(weights_sd.keys())
             exclude_pattern = args.exclude_patterns[i]
@@ -550,8 +551,12 @@ def prepare_t2v_inputs(
 
     # set seed
     seed = args.seed if args.seed is not None else random.randint(0, 2**32 - 1)
-    seed_g = torch.Generator(device=device)
-    seed_g.manual_seed(seed)
+    if not args.cpu_noise:
+        seed_g = torch.Generator(device=device)
+        seed_g.manual_seed(seed)
+    else:
+        # ComfyUI compatible noise
+        seed_g = torch.manual_seed(seed)
 
     # load text encoder
     text_encoder = load_text_encoder(args, config, device)
@@ -572,9 +577,8 @@ def prepare_t2v_inputs(
     clean_memory_on_device(device)
 
     # generate noise
-    noise = torch.randn(
-        target_shape[0], target_shape[1], target_shape[2], target_shape[3], dtype=torch.float32, device=device, generator=seed_g
-    )
+    noise = torch.randn(target_shape, dtype=torch.float32, generator=seed_g, device=device if not args.cpu_noise else "cpu")
+    noise = noise.to(device)
 
     # prepare model input arguments
     arg_c = {"context": context, "seq_len": seq_len}
@@ -634,11 +638,24 @@ def prepare_i2v_inputs(
 
     # set seed
     seed = args.seed if args.seed is not None else random.randint(0, 2**32 - 1)
-    seed_g = torch.Generator(device=device)
-    seed_g.manual_seed(seed)
+    if not args.cpu_noise:
+        seed_g = torch.Generator(device=device)
+        seed_g.manual_seed(seed)
+    else:
+        # ComfyUI compatible noise
+        seed_g = torch.manual_seed(seed)
 
     # generate noise
-    noise = torch.randn(16, lat_f + (1 if has_end_image else 0), lat_h, lat_w, dtype=torch.float32, generator=seed_g, device=device)
+    noise = torch.randn(
+        16,
+        lat_f + (1 if has_end_image else 0),
+        lat_h,
+        lat_w,
+        dtype=torch.float32,
+        generator=seed_g,
+        device=device if not args.cpu_noise else "cpu",
+    )
+    noise = noise.to(device)
 
     # configure negative prompt
     n_prompt = args.negative_prompt if args.negative_prompt else config.sample_neg_prompt
