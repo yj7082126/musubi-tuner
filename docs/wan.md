@@ -232,6 +232,18 @@ Specifying `--fp8` runs DiT in fp8 mode. fp8 can significantly reduce memory con
 
 `--trim_tail_frames` can be used to trim the tail frames when saving. The default is 0.
 
+`--cfg_skip_mode` specifies the mode for skipping CFG in different steps. The default is `none` (all steps).`--cfg_apply_ratio` specifies the ratio of steps where CFG is applied. See below for details.
+
+`--include_patterns` and `--exclude_patterns` can be used to specify which LoRA modules to apply or exclude during training. If not specified, all modules are applied by default. These options accept regular expressions. 
+
+`--include_patterns` specifies the modules to be applied, and `--exclude_patterns` specifies the modules to be excluded. The regular expression is matched against the LoRA key name, and include takes precedence.
+
+The key name to be searched is in sd-scripts format (`lora_unet_<module_name with dot replaced by _>`). For example, `lora_unet_blocks_9_cross_attn_k`.
+
+For example, if you specify `--exclude_patterns "blocks_[23]\d_"`, it will exclude modules containing `blocks_20` to `blocks_39`. If you specify `--include_patterns "cross_attn" --exclude_patterns "blocks_(0|1|2|3|4)_"`, it will apply LoRA to modules containing `cross_attn` and not containing `blocks_0` to `blocks_4`.
+
+If you specify multiple LoRA weights, please specify them with multiple arguments. For example: `--include_patterns "cross_attn" ".*" --exclude_patterns "dummy_do_not_exclude" "blocks_(0|1|2|3|4)"`. `".*"` is a regex that matches everything. `dummy_do_not_exclude` is a dummy regex that does not match anything.
+
 Other options are same as `hv_generate_video.py` (some options are not supported, please check the help).
 
 <details>
@@ -262,7 +274,104 @@ Other options are same as `hv_generate_video.py` (some options are not supported
 
 `--trim_tail_frames` で保存時に末尾のフレームをトリミングできます。デフォルトは0です。
 
+`--cfg_skip_mode` は異なるステップでCFGをスキップするモードを指定します。デフォルトは `none`（全ステップ）。`--cfg_apply_ratio` はCFGが適用されるステップの割合を指定します。詳細は後述します。
+
+LoRAのどのモジュールを適用するかを、`--include_patterns`と`--exclude_patterns`で指定できます（未指定時・デフォルトは全モジュール適用されます
+）。これらのオプションには、正規表現を指定します。`--include_patterns`は適用するモジュール、`--exclude_patterns`は適用しないモジュールを指定します。正規表現がLoRAのキー名に含まれるかどうかで判断され、includeが優先されます。
+
+検索対象となるキー名は sd-scripts 形式（`lora_unet_<モジュール名のドットを_に置換したもの>`）です。例：`lora_unet_blocks_9_cross_attn_k`
+
+たとえば `--exclude_patterns "blocks_[23]\d_"`のみを指定すると、`blocks_20`から`blocks_39`を含むモジュールが除外されます。`--include_patterns "cross_attn" --exclude_patterns "blocks_(0|1|2|3|4)_"`のようにincludeとexcludeを指定すると、`cross_attn`を含むモジュールで、かつ`blocks_0`から`blocks_4`を含まないモジュールにLoRAが適用されます。
+
+複数のLoRAの重みを指定する場合は、複数個の引数で指定してください。例：`--include_patterns "cross_attn" ".*" --exclude_patterns "dummy_do_not_exclude" "blocks_(0|1|2|3|4)"` `".*"`は全てにマッチする正規表現です。`dummy_do_not_exclude`は何にもマッチしないダミーの正規表現です。
+
 その他のオプションは `hv_generate_video.py` と同じです（一部のオプションはサポートされていないため、ヘルプを確認してください）。
+</details>
+
+#### CFG Skip Mode / CFGスキップモード
+
+ These options allow you to balance generation speed against prompt accuracy. More skipped steps results in faster generation with potential quality degradation.
+
+Setting `--cfg_apply_ratio` to 0.5 speeds up the denoising loop by up to 25%.
+
+`--cfg_skip_mode` specified one of the following modes:
+
+- `early`: Skips CFG in early steps for faster generation, applying guidance mainly in later refinement steps
+- `late`: Skips CFG in later steps, applying guidance during initial structure formation
+- `middle`: Skips CFG in middle steps, applying guidance in both early and later steps
+- `early_late`: Skips CFG in both early and late steps, applying only in middle steps
+- `alternate`: Applies CFG in alternate steps based on the specified ratio
+- `none`: Applies CFG at all steps (default)
+
+`--cfg_apply_ratio` specifies a value from 0.0 to 1.0 controlling the proportion of steps where CFG is applied. For example, setting 0.5 means CFG will be applied in only 50% of the steps.
+
+If num_steps is 10, the following table shows the steps where CFG is applied based on the `--cfg_skip_mode` option (A means CFG is applied, S means it is skipped, `--cfg_apply_ratio` is 0.6):
+
+| skip mode | CFG apply pattern |
+|---|---|
+| early | SSSSAAAAAA |
+| late | AAAAAASSSS |
+| middle | AAASSSSAAA |
+| early_late | SSAAAAAASS |
+| alternate | SASASAASAS |
+
+The appropriate settings are unknown, but you may want to try `late` or `early_late` mode with a ratio of around 0.3 to 0.5.
+<details>
+<summary>日本語</summary>
+これらのオプションは、生成速度とプロンプトの精度のバランスを取ることができます。スキップされるステップが多いほど、生成速度が速くなりますが、品質が低下する可能性があります。
+
+ratioに0.5を指定することで、デノイジングのループが最大25%程度、高速化されます。
+
+`--cfg_skip_mode` は次のモードのいずれかを指定します：
+
+- `early`：初期のステップでCFGをスキップして、主に終盤の精細化のステップで適用します
+- `late`：終盤のステップでCFGをスキップし、初期の構造が決まる段階で適用します
+- `middle`：中間のステップでCFGをスキップし、初期と終盤のステップの両方で適用します
+- `early_late`：初期と終盤のステップの両方でCFGをスキップし、中間のステップのみ適用します
+- `alternate`：指定された割合に基づいてCFGを適用します
+
+`--cfg_apply_ratio` は、CFGが適用されるステップの割合を0.0から1.0の値で指定します。たとえば、0.5に設定すると、CFGはステップの50%のみで適用されます。
+
+具体的なパターンは上のテーブルを参照してください。
+
+適切な設定は不明ですが、モードは`late`または`early_late`、ratioは0.3~0.5程度から試してみると良いかもしれません。
+</details>
+
+#### Skip Layer Guidance
+
+Skip Layer Guidance is a feature that uses the output of a model with some blocks skipped as the unconditional output of classifier free guidance. It was originally proposed in [SD 3.5](https://github.com/comfyanonymous/ComfyUI/pull/5404) and first applied in Wan2GP in [this PR](https://github.com/deepbeepmeep/Wan2GP/pull/61). It may improve the quality of generated videos.
+
+The implementation of SD 3.5 is [here](https://github.com/Stability-AI/sd3.5/blob/main/sd3_impls.py), and the implementation of Wan2GP (the PR mentioned above) has some different specifications. This inference script allows you to choose between the two methods.
+
+*The SD3.5 method applies slg output in addition to cond and uncond (slows down the speed). The Wan2GP method uses only cond and slg output.*
+
+The following arguments are available:
+
+- `--slg_mode`: Specifies the SLG mode. `original` for SD 3.5 method, `uncond` for Wan2GP method. Default is None (no SLG).
+- `--slg_layers`: Specifies the indices of the blocks (layers) to skip in SLG, separated by commas. Example: `--slg_layers 4,5,6`. Default is empty (no skip). If this option is not specified, `--slg_mode` is ignored.
+- `--slg_scale`: Specifies the scale of SLG when `original`. Default is 3.0.
+- `--slg_start`: Specifies the start step of SLG application in inference steps from 0.0 to 1.0. Default is 0.0 (applied from the beginning).
+- `--slg_end`: Specifies the end step of SLG application in inference steps from 0.0 to 1.0. Default is 0.3 (applied up to 30% from the beginning).
+
+Appropriate settings are unknown, but you may want to try `original` mode with a scale of around 3.0 and a start ratio of 0.0 and an end ratio of 0.5, with layers 4, 5, and 6 skipped.
+
+<details>
+<summary>日本語</summary>
+Skip Layer Guidanceは、一部のblockをスキップしたモデル出力をclassifier free guidanceのunconditional出力に使用する機能です。元々は[SD 3.5](https://github.com/comfyanonymous/ComfyUI/pull/5404)で提案されたもので、Wan2.1には[Wan2GPのこちらのPR](https://github.com/deepbeepmeep/Wan2GP/pull/61)で初めて適用されました。生成動画の品質が向上する可能性があります。
+
+SD 3.5の実装は[こちら](https://github.com/Stability-AI/sd3.5/blob/main/sd3_impls.py)で、Wan2GPの実装（前述のPR）は一部仕様が異なります。この推論スクリプトでは両者の方式を選択できるようになっています。
+
+※SD3.5方式はcondとuncondに加えてslg outputを適用します（速度が低下します）。Wan2GP方式はcondとslg outputのみを使用します。
+
+以下の引数があります。
+
+- `--slg_mode`：SLGのモードを指定します。`original`でSD 3.5の方式、`uncond`でWan2GPの方式です。デフォルトはNoneで、SLGを使用しません。
+- `--slg_layers`：SLGでスキップするblock (layer)のインデクスをカンマ区切りで指定します。例：`--slg_layers 4,5,6`。デフォルトは空（スキップしない）です。このオプションを指定しないと`--slg_mode`は無視されます。
+- `--slg_scale`：`original`のときのSLGのスケールを指定します。デフォルトは3.0です。
+- `--slg_start`：推論ステップのSLG適用開始ステップを0.0から1.0の割合で指定します。デフォルトは0.0です（最初から適用）。
+- `--slg_end`：推論ステップのSLG適用終了ステップを0.0から1.0の割合で指定します。デフォルトは0.3です（最初から30%まで適用）。
+
+適切な設定は不明ですが、`original`モードでスケールを3.0程度、開始割合を0.0、終了割合を0.5程度に設定し、4, 5, 6のlayerをスキップする設定から始めると良いかもしれません。
 </details>
 
 ### I2V Inference / I2V推論

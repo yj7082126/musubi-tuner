@@ -48,6 +48,22 @@ For Wan2.1, please also refer to [Wan2.1 documentation](./docs/wan.md).
 
 ### Recent Updates
 
+- **[NEW] GitHub Discussions Enabled**: We've enabled GitHub Discussions for community Q&A, knowledge sharing, and technical information exchange. Please use Issues for bug reports and feature requests, and Discussions for questions and sharing experiences. [Join the conversation →](https://github.com/kohya-ss/musubi-tuner/discussions)
+
+- Mar 23, 2025
+    - Added an option to save the actual image and video data used in training as files during latent caching with `--debug_mode video`. PR [#187](https://github.com/kohya-ss/musubi-tuner/pull/187). See [here](#latent-pre-caching) for details. Available for both HunyuanVideo and Wan2.1.
+    - Added an option to use Skip Layer Guidance during Wan2.1 inference. PR [#186](https://github.com/kohya-ss/musubi-tuner/pull/186). See [here](./docs/wan.md#skip-layer-guidance) for details.
+    - Added the ability to specify the target modules for LoRA application during Wan2.1 inference using regular expressions. PR [#185](https://github.com/kohya-ss/musubi-tuner/pull/185). 
+        - See [here](./docs/wan.md#t2v-inference--t2v推論) for details.
+
+- Mar 22, 2025
+    - Added `full` to the frame extraction method for video datasets. This uses the entire video from start to finish. See [here](./dataset/dataset_config.md#frame_extraction-options) for details.
+        - `full` is recommended when each video represents a single complete motion. The frame extraction methods other than `full` are recommended when the video contains repeated actions. 
+    - If a value other than "4\*N+1" is specified for `target_frames` in the video dataset, it will be automatically converted to "4\*N+1".
+    - Corrected some errors in the dataset configuration documentation.
+    - Added an option to speed up inference by skipping CFG (classifier free guidance) at some steps during Wan2.1 inference. PR [#180](https://github.com/kohya-ss/musubi-tuner/pull/180) 
+        - Set with `--cfg_skip_mode` and `--cfg_apply_ratio`. See [here](./docs/wan.md#cfg-skip-mode--cfgスキップモード) for details.
+
 - Mar 21, 2025
     - Fixed a bug where the image passed to CLIP during Wan2.1 inference was incorrectly in BGR format. PR [#176](https://github.com/kohya-ss/musubi-tuner/pull/176) 
     - Added the ability to specify the last frame image during Wan2.1 inference. PR [#177](https://github.com/kohya-ss/musubi-tuner/pull/177) This feature is experimental.
@@ -222,7 +238,11 @@ For additional options, use `python cache_latents.py --help`.
 
 If you're running low on VRAM, reduce `--vae_spatial_tile_sample_min_size` to around 128 and lower the `--batch_size`.
 
-Use `--debug_mode image` to display dataset images and captions in a new window, or `--debug_mode console` to display them in the console (requires `ascii-magic`).
+Use `--debug_mode image` to display dataset images and captions in a new window, or `--debug_mode console` to display them in the console (requires `ascii-magic`). 
+
+With `--debug_mode video`, images or videos will be saved in the cache directory (please delete them after checking). The bitrate of the saved video is set to 1Mbps for preview purposes. The images decoded from the original video (not degraded) are used for the cache (for training).
+
+When `--debug_mode` is specified, the actual caching process is not performed.
 
 By default, cache files not included in the dataset are automatically deleted. You can still keep cache files as before by specifying `--keep_cache`.
 

@@ -39,6 +39,21 @@ Wan2.1については、[Wan2.1のドキュメント](./docs/wan.md)も参照し
 
 ### 最近の更新
 
+- GitHub Discussionsを有効にしました。コミュニティのQ&A、知識共有、技術情報の交換などにご利用ください。バグ報告や機能リクエストにはIssuesを、質問や経験の共有にはDiscussionsをご利用ください。[Discussionはこちら](https://github.com/kohya-ss/musubi-tuner/discussions)
+
+- 2025/03/23
+    - latentのキャッシュ時に、実際に学習に使われる画像、動画データをファイルとして保存する `--debug_mode video` オプションを追加しました。PR [#187](https://github.com/kohya-ss/musubi-tuner/pull/187) 詳細は[こちら](#latentの事前キャッシュ)を参照してください。HunyuanVideo、Wan2.1の両方で使用可能です。
+    - Wan2.1の推論時にSkip Layer Guidanceを有効化するオプションを追加しました。PR [#186](https://github.com/kohya-ss/musubi-tuner/pull/186) 詳細は[こちら](./docs/wan.md#skip-layer-guidance)を参照してください。
+    - Wan2.1の推論時にLoRAの適用対象モジュールを正規表現で指定できるようになりました。PR [#185](https://github.com/kohya-ss/musubi-tuner/pull/185) 詳細は[こちら](./docs/wan.md#t2v-inference--t2v推論)を参照してください。
+
+- 2025/03/22
+    - 動画データセットの抽出方法に `full` を追加しました。それぞれの動画の最初から最後までを用います。詳細は[こちら](./dataset/dataset_config.md#frame_extraction-options)を参照してください。
+        - `full`はそれぞれの動画がひとつの完結したモーションの場合にお勧めします。`full`以外の抽出方法は、動画が特定の動作を繰り返している場合にお勧めします。
+    - 動画データセットで`target_frames`に「4\*N+1」以外の値が指定された場合、自動的に「4\*N+1」に変換されるよう修正しました。
+    - データセット設定のドキュメントの誤りを一部修正しました。
+    - Wan2.1の推論時に、CFG (classifier free guidance) を一部のステップでスキップすることで、推論速度を向上させるオプションを追加しました。PR [#180](https://github.com/kohya-ss/musubi-tuner/pull/180) 
+        - `--cfg_skip_mode`と`--cfg_apply_ratio`で設定します。詳細は[こちら](./docs/wan.md#cfg-skip-mode--cfgスキップモード)を参照してください。
+
 - 2025/03/21
     - Wan2.1の推論時、CLIPに渡される画像が誤ってBGR形式になっていた不具合を修正しました。PR [#176](https://github.com/kohya-ss/musubi-tuner/pull/176) 
     - Wan2.1の推論時に最後のフレームの画像を指定できるようになりました。PR [#177](https://github.com/kohya-ss/musubi-tuner/pull/177) この機能は実験的なものです。
@@ -200,6 +215,10 @@ uvでインストールした場合は、`uv run python cache_latents.py ...`の
 VRAMが足りない場合は、`--vae_spatial_tile_sample_min_size`を128程度に減らし、`--batch_size`を小さくしてください。
 
 `--debug_mode image` を指定するとデータセットの画像とキャプションが新規ウィンドウに表示されます。`--debug_mode console`でコンソールに表示されます（`ascii-magic`が必要）。
+
+`--debug_mode video`で、キャッシュディレクトリに画像または動画が保存されます（確認後、削除してください）。動画のビットレートは確認用に低くしてあります。実際には元動画の画像が学習に使用されます。
+
+`--debug_mode`指定時は、実際のキャッシュ処理は行われません。
 
 デフォルトではデータセットに含まれないキャッシュファイルは自動的に削除されます。`--keep_cache`を指定すると、キャッシュファイルを残すことができます。
 

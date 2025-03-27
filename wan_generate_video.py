@@ -3,6 +3,7 @@ from datetime import datetime
 import gc
 import random
 import os
+import re
 import time
 import math
 from typing import Tuple, Optional, List, Union, Any
@@ -65,6 +66,8 @@ def parse_args() -> argparse.Namespace:
     # LoRA
     parser.add_argument("--lora_weight", type=str, nargs="*", required=False, default=None, help="LoRA weight path")
     parser.add_argument("--lora_multiplier", type=float, nargs="*", default=1.0, help="LoRA multiplier")
+    parser.add_argument("--include_patterns", type=str, nargs="*", default=None, help="LoRA module include patterns")
+    parser.add_argument("--exclude_patterns", type=str, nargs="*", default=None, help="LoRA module exclude patterns")
     parser.add_argument(
         "--save_merged_model",
         type=str,
@@ -96,6 +99,38 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--image_path", type=str, default=None, help="path to image for image2video inference")
     parser.add_argument("--end_image_path", type=str, default=None, help="path to end image for image2video inference")
     parser.add_argument("--trim_tail_frames", type=int, default=0, help="trim tail N frames from the video before saving")
+    parser.add_argument(
+        "--cfg_skip_mode",
+        type=str,
+        default="none",
+        choices=["early", "late", "middle", "early_late", "alternate", "none"],
+        help="CFG skip mode. each mode skips different parts of the CFG. "
+        " early: initial steps, late: later steps, middle: middle steps, early_late: both early and late, alternate: alternate, none: no skip (default)",
+    )
+    parser.add_argument(
+        "--cfg_apply_ratio",
+        type=float,
+        default=None,
+        help="The ratio of steps to apply CFG (0.0 to 1.0). Default is None (apply all steps).",
+    )
+    parser.add_argument(
+        "--slg_layers", type=str, default=None, help="Skip block (layer) indices for SLG (Skip Layer Guidance), comma separated"
+    )
+    parser.add_argument(
+        "--slg_scale",
+        type=float,
+        default=3.0,
+        help="scale for SLG classifier free guidance. Default is 3.0. Ignored if slg_mode is None or uncond",
+    )
+    parser.add_argument("--slg_start", type=float, default=0.0, help="start ratio for inference steps for SLG. Default is 0.0.")
+    parser.add_argument("--slg_end", type=float, default=0.3, help="end ratio for inference steps for SLG. Default is 0.3.")
+    parser.add_argument(
+        "--slg_mode",
+        type=str,
+        default=None,
+        choices=["original", "uncond"],
+        help="SLG mode. original: same as SD3, uncond: replace uncond pred with SLG pred",
+    )
 
     # Flow Matching
     parser.add_argument(
@@ -188,6 +223,10 @@ def setup_args(args: argparse.Namespace) -> argparse.Namespace:
     # Force video_length to 1 for t2i tasks
     if "t2i" in args.task:
         assert args.video_length == 1, f"video_length should be 1 for task {args.task}"
+
+    # parse slg_layers
+    if args.slg_layers is not None:
+        args.slg_layers = list(map(int, args.slg_layers.split(",")))
 
     return args
 
@@ -344,7 +383,7 @@ def load_dit_model(
         loading_weight_dtype = dit_dtype  # load as-is
 
     # do not fp8 optimize because we will merge LoRA weights
-    model = load_wan_model(config, is_i2v, device, args.dit, args.attn_mode, False, loading_device, loading_weight_dtype, False)
+    model = load_wan_model(config, device, args.dit, args.attn_mode, False, loading_device, loading_weight_dtype, False)
 
     return model
 
@@ -368,6 +407,31 @@ def merge_lora_weights(model: WanModel, args: argparse.Namespace, device: torch.
 
         logger.info(f"Loading LoRA weights from {lora_weight} with multiplier {lora_multiplier}")
         weights_sd = load_file(lora_weight)
+
+        # apply include/exclude patterns
+        original_key_count = len(weights_sd.keys())
+        if args.include_patterns is not None and len(args.include_patterns) > i:
+            include_pattern = args.include_patterns[i]
+            regex_include = re.compile(include_pattern)
+            weights_sd = {k: v for k, v in weights_sd.items() if regex_include.search(k)}
+            logger.info(
+                f"Filtered keys with include pattern {include_pattern}: {original_key_count} -> {len(weights_sd.keys())}"
+            )
+        if args.exclude_patterns is not None and len(args.exclude_patterns) > i:
+            original_key_count_ex = len(weights_sd.keys())
+            exclude_pattern = args.exclude_patterns[i]
+            regex_exclude = re.compile(exclude_pattern)
+            weights_sd = {k: v for k, v in weights_sd.items() if not regex_exclude.search(k)}
+            logger.info(
+                f"Filtered keys with exclude pattern {exclude_pattern}: {original_key_count_ex} -> {len(weights_sd.keys())}"
+            )
+        if len(weights_sd) != original_key_count:
+            remaining_keys = list(set([k.split(".", 1)[0] for k in weights_sd.keys()]))
+            remaining_keys.sort()
+            logger.info(f"Remaining LoRA modules after filtering: {remaining_keys}")
+            if len(weights_sd) == 0:
+                logger.warning(f"No keys left after filtering.")
+
         if args.lycoris:
             lycoris_net, _ = create_network_from_weights(
                 multiplier=lora_multiplier,
@@ -753,25 +817,107 @@ def run_sampling(
     arg_c, arg_null = inputs
 
     latent = noise
-    if use_cpu_offload:
-        latent = latent.to("cpu")
+    latent_storage_device = device if not use_cpu_offload else "cpu"
+    latent = latent.to(latent_storage_device)
 
-    for _, t in enumerate(tqdm(timesteps)):
+    # cfg skip
+    apply_cfg_array = []
+    num_timesteps = len(timesteps)
+
+    if args.cfg_skip_mode != "none" and args.cfg_apply_ratio is not None:
+        # Calculate thresholds based on cfg_apply_ratio
+        apply_steps = int(num_timesteps * args.cfg_apply_ratio)
+
+        if args.cfg_skip_mode == "early":
+            # Skip CFG in early steps, apply in late steps
+            start_index = num_timesteps - apply_steps
+            end_index = num_timesteps
+        elif args.cfg_skip_mode == "late":
+            # Skip CFG in late steps, apply in early steps
+            start_index = 0
+            end_index = apply_steps
+        elif args.cfg_skip_mode == "early_late":
+            # Skip CFG in early and late steps, apply in middle steps
+            start_index = (num_timesteps - apply_steps) // 2
+            end_index = start_index + apply_steps
+        elif args.cfg_skip_mode == "middle":
+            # Skip CFG in middle steps, apply in early and late steps
+            skip_steps = num_timesteps - apply_steps
+            middle_start = (num_timesteps - skip_steps) // 2
+            middle_end = middle_start + skip_steps
+
+        w = 0.0
+        for step_idx in range(num_timesteps):
+            if args.cfg_skip_mode == "alternate":
+                # accumulate w and apply CFG when w >= 1.0
+                w += args.cfg_apply_ratio
+                apply = w >= 1.0
+                if apply:
+                    w -= 1.0
+            elif args.cfg_skip_mode == "middle":
+                # Skip CFG in early and late steps, apply in middle steps
+                apply = step_idx < middle_start or step_idx >= middle_end
+            else:
+                # Apply CFG on some steps based on ratio
+                apply = step_idx >= start_index and step_idx < end_index
+
+            apply_cfg_array.append(apply)
+
+        pattern = ["A" if apply else "S" for apply in apply_cfg_array]
+        pattern = "".join(pattern)
+        logger.info(f"CFG skip mode: {args.cfg_skip_mode}, apply ratio: {args.cfg_apply_ratio}, pattern: {pattern}")
+    else:
+        # Apply CFG on all steps
+        apply_cfg_array = [True] * num_timesteps
+
+    # SLG original implementation is based on https://github.com/Stability-AI/sd3.5/blob/main/sd3_impls.py
+    slg_start_step = int(args.slg_start * num_timesteps)
+    slg_end_step = int(args.slg_end * num_timesteps)
+
+    for i, t in enumerate(tqdm(timesteps)):
         # latent is on CPU if use_cpu_offload is True
         latent_model_input = [latent.to(device)]
         timestep = torch.stack([t]).to(device)
 
         with accelerator.autocast(), torch.no_grad():
-            noise_pred_cond = model(latent_model_input, t=timestep, **arg_c)[0]
-            noise_pred_uncond = model(latent_model_input, t=timestep, **arg_null)[0]
-            del latent_model_input
+            noise_pred_cond = model(latent_model_input, t=timestep, **arg_c)[0].to(latent_storage_device)
 
-            if use_cpu_offload:
-                noise_pred_cond = noise_pred_cond.to("cpu")
-                noise_pred_uncond = noise_pred_uncond.to("cpu")
+            apply_cfg = apply_cfg_array[i]  # apply CFG or not
+            if apply_cfg:
+                apply_slg = i >= slg_start_step and i < slg_end_step
+                # print(f"Applying SLG: {apply_slg}, i: {i}, slg_start_step: {slg_start_step}, slg_end_step: {slg_end_step}")
+                if args.slg_mode == "original" and apply_slg:
+                    noise_pred_uncond = model(latent_model_input, t=timestep, **arg_null)[0].to(latent_storage_device)
 
-            # apply guidance
-            noise_pred = noise_pred_uncond + args.guidance_scale * (noise_pred_cond - noise_pred_uncond)
+                    # apply guidance
+                    # SD3 formula: scaled = neg_out + (pos_out - neg_out) * cond_scale
+                    noise_pred = noise_pred_uncond + args.guidance_scale * (noise_pred_cond - noise_pred_uncond)
+
+                    # calculate skip layer out
+                    skip_layer_out = model(latent_model_input, t=timestep, skip_block_indices=args.slg_layers, **arg_null)[0].to(
+                        latent_storage_device
+                    )
+
+                    # apply skip layer guidance
+                    # SD3 formula: scaled = scaled + (pos_out - skip_layer_out) * self.slg
+                    noise_pred = noise_pred + args.slg_scale * (noise_pred_cond - skip_layer_out)
+                elif args.slg_mode == "uncond" and apply_slg:
+                    # noise_pred_uncond is skip layer out
+                    noise_pred_uncond = model(latent_model_input, t=timestep, skip_block_indices=args.slg_layers, **arg_null)[0].to(
+                        latent_storage_device
+                    )
+
+                    # apply guidance
+                    noise_pred = noise_pred_uncond + args.guidance_scale * (noise_pred_cond - noise_pred_uncond)
+
+                else:
+                    # normal guidance
+                    noise_pred_uncond = model(latent_model_input, t=timestep, **arg_null)[0].to(latent_storage_device)
+
+                    # apply guidance
+                    noise_pred = noise_pred_uncond + args.guidance_scale * (noise_pred_cond - noise_pred_uncond)
+            else:
+                noise_pred = noise_pred_cond
 
             # step
             latent_input = latent.unsqueeze(0)

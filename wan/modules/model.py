@@ -707,7 +707,7 @@ class WanModel(nn.Module):  # ModelMixin, ConfigMixin):
             return
         self.offloader.prepare_block_devices_before_forward(self.blocks)
 
-    def forward(self, x, t, context, seq_len, clip_fea=None, y=None):
+    def forward(self, x, t, context, seq_len, clip_fea=None, y=None, skip_block_indices=None):
         r"""
         Forward pass through the diffusion model
 
@@ -784,10 +784,13 @@ class WanModel(nn.Module):  # ModelMixin, ConfigMixin):
 
         # print(f"x: {x.shape}, e: {e0.shape}, context: {context.shape}, seq_lens: {seq_lens}")
         for block_idx, block in enumerate(self.blocks):
-            if self.blocks_to_swap:
+            is_block_skipped = skip_block_indices is not None and block_idx in skip_block_indices
+
+            if self.blocks_to_swap and not is_block_skipped:
                 self.offloader.wait_for_block(block_idx)
 
-            x = block(x, **kwargs)
+            if not is_block_skipped:
+                x = block(x, **kwargs)
 
             if self.blocks_to_swap:
                 self.offloader.submit_move_blocks_forward(self.blocks, block_idx)
@@ -867,7 +870,6 @@ def detect_wan_sd_dtype(path: str) -> torch.dtype:
 
 def load_wan_model(
     config: any,
-    i2v: bool,
     device: Union[str, torch.device],
     dit_path: str,
     attn_mode: str,
@@ -885,16 +887,16 @@ def load_wan_model(
     with init_empty_weights():
         logger.info(f"Creating WanModel")
         model = WanModel(
-            model_type="i2v" if i2v else "t2v",
+            model_type="i2v" if config.i2v else "t2v",
             dim=config.dim,
             eps=config.eps,
             ffn_dim=config.ffn_dim,
             freq_dim=config.freq_dim,
-            in_dim=36 if i2v else 16,  # 36 for I2V, 16 for T2V
+            in_dim=config.in_dim,
             num_heads=config.num_heads,
             num_layers=config.num_layers,
-            out_dim=16,
-            text_len=512,
+            out_dim=config.out_dim,
+            text_len=config.text_len,
             attn_mode=attn_mode,
             split_attn=split_attn,
         )
