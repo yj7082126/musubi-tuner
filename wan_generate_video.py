@@ -587,6 +587,7 @@ def prepare_t2v_inputs(
     # Fun-Control: encode control video to latent space
     if config.is_fun_control:
         # TODO use same resizing as for image
+        logger.info(f"Encoding control video to latent space")
         # C, F, H, W
         control_video = load_control_video(args.control_path, frames, height, width).to(device)
         with accelerator.autocast(), torch.no_grad():
@@ -603,8 +604,8 @@ def prepare_t2v_inputs(
     arg_c = {"context": context, "seq_len": seq_len}
     arg_null = {"context": context_null, "seq_len": seq_len}
     if y is not None:
-        arg_c["y"] = y
-        arg_null["y"] = y
+        arg_c["y"] = [y]
+        arg_null["y"] = [y]
 
     return noise, context, context_null, (arg_c, arg_null)
 
@@ -760,6 +761,7 @@ def prepare_i2v_inputs(
     # Fun-Control: encode control video to latent space
     if config.is_fun_control:
         # TODO use same resizing as for image
+        logger.info(f"Encoding control video to latent space")
         # C, F, H, W
         control_video = load_control_video(args.control_path, frames + (1 if has_end_image else 0), height, width).to(device)
         with accelerator.autocast(), torch.no_grad():
@@ -1063,7 +1065,7 @@ def generate(args: argparse.Namespace) -> torch.Tensor:
     else:
         # T2V: need text encoder
         vae = None
-        if args.is_fun_control:
+        if cfg.is_fun_control:
             # Fun-Control: need VAE for encoding control video
             vae = load_vae(args, cfg, device, vae_dtype)
         noise, context, context_null, inputs = prepare_t2v_inputs(args, cfg, accelerator, device, vae)
