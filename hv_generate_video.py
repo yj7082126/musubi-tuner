@@ -324,7 +324,7 @@ def load_images(image_dir, video_length, bucket_reso):
     image_files.sort()
     images = []
     for image_file in image_files[:video_length]:
-        image = Image.open(image_file)
+        image = Image.open(image_file).convert("RGB")
         image = resize_image_to_bucket(image, bucket_reso)  # returns a numpy array
         images.append(image)
 
