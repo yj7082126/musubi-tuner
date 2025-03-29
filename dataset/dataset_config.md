@@ -271,6 +271,28 @@ video2: xxxxxxxxxxxxxxxxxxxxxxxxx (25 frames)
 video3: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx (trimmed to 31 frames)
 ```
 
+### Sample for Video Dataset with Control Images
+
+The dataset with control images is supported. 
+
+The dataset configuration with caption text files is similar to the video dataset, but with an additional `control_directory` parameter.
+
+```toml
+[[datasets]]
+video_directory = "/path/to/video_dir"
+control_directory = "/path/to/control_dir" # required for dataset with control images
+cache_directory = "/path/to/cache_directory" # recommended to set cache directory
+target_frames = [1, 25, 45]
+frame_extraction = "head"
+```
+
+The dataset configuration with metadata JSONL file is  same as the video dataset, but metadata JSONL file must include the control image path.
+
+```json
+{"video_path": "/path/to/video1.mp4", "control_path": "/path/to/control1.mp4", "caption": "A caption for video1"}
+{"video_path": "/path/to/video2.mp4", "control_path": "/path/to/control2.mp4", "caption": "A caption for video2"}
+```
+
 ## Specifications
 
 ```toml
@@ -311,6 +333,8 @@ cache_directory = "/path/to/cache_directory" # required for metadata jsonl file
 video_directory = "/path/to/video_dir"
 caption_extension = ".txt" # required for caption text files, if general caption extension is not set
 resolution = [960, 544] # required if general resolution is not set
+
+control_directory = "/path/to/control_dir" # optional, required for dataset with control images
 
 # following configurations must be set in each [[datasets]] section for video datasets
 

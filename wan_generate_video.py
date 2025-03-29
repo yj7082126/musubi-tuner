@@ -38,7 +38,8 @@ except:
 
 from utils.model_utils import str_to_dtype
 from utils.device_utils import clean_memory_on_device
-from hv_generate_video import save_images_grid, save_videos_grid, synchronize_device, load_images, load_video
+from hv_generate_video import save_images_grid, save_videos_grid, synchronize_device
+from dataset.image_video_dataset import load_video
 
 import logging
 
@@ -808,12 +809,7 @@ def load_control_video(control_path: str, frames: int, height: int, width: int) 
         torch.Tensor: control video latent, CFHW
     """
     logger.info(f"Load control video from {control_path}")
-
-    if os.path.isfile(control_path):
-        video = load_video(control_path, 0, frames, bucket_reso=(width, height))  # list of frames
-    else:
-        video = load_images(control_path, frames, bucket_reso=(width, height))  # list of frames
-
+    video = load_video(control_path, 0, frames, bucket_reso=(width, height))  # list of frames
     if len(video) < frames:
         raise ValueError(f"Video length is less than {frames}")
     # video = np.stack(video, axis=0)  # F, H, W, C

@@ -136,7 +136,7 @@ The above is an example. The appropriate values for `timestep_sampling` and `dis
 
 For additional options, use `python wan_train_network.py --help` (note that many options are unverified).
 
-`--task` is one of `t2v-1.3B`, `t2v-14B`, `i2v-14B` and `t2i-14B`. Specify the DiT weights for the task with `--dit`.
+`--task` is one of `t2v-1.3B`, `t2v-14B`, `i2v-14B`, `t2i-14B` (for Wan2.1 official models), `t2v-1.3B-FC`, `t2v-14B-FC`, and `i2v-14B-FC` (for Wan2.1 Fun Control model). Specify the DiT weights for the task with `--dit`.
 
 Don't forget to specify `--network_module networks.lora_wan`.
 
@@ -150,7 +150,7 @@ Use `convert_lora.py` for converting the LoRA weights after training, as in Huny
 
 その他のオプションについては `python wan_train_network.py --help` を使用してください（多くのオプションは未検証です）。
 
-`--task` には `t2v-1.3B`, `t2v-14B`, `i2v-14B`, `t2i-14B` のいずれかを指定します。`--dit`に、taskに応じたDiTの重みを指定してください。
+`--task` には `t2v-1.3B`, `t2v-14B`, `i2v-14B`, `t2i-14B` （これらはWan2.1公式モデル）、`t2v-1.3B-FC`, `t2v-14B-FC`, `i2v-14B-FC`（Wan2.1-Fun Controlモデル）を指定します。`--dit`に、taskに応じたDiTの重みを指定してください。
 
  `--network_module` に `networks.lora_wan` を指定することを忘れないでください。
 
@@ -173,7 +173,7 @@ Each option is the same as when generating images or as HunyuanVideo. Please ref
 
 If you train I2V models, add `--clip path/to/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth` to specify the CLIP model. 
 
-You can specify the initial image and negative prompts in the prompt file. Please refer to [here](/docs/sampling_during_training.md#prompt-file--プロンプトファイル).
+You can specify the initial image, the negative prompt and the control video (for Wan2.1-Fun-Control) in the prompt file. Please refer to [here](/docs/sampling_during_training.md#prompt-file--プロンプトファイル).
 
 <details>
 <summary>日本語</summary>
@@ -181,7 +181,7 @@ You can specify the initial image and negative prompts in the prompt file. Pleas
 
 I2Vモデルを学習する場合は、`--clip path/to/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth` を追加してCLIPモデルを指定してください。
 
-プロンプトファイルで、初期画像やネガティブプロンプト等を指定できます。[こちら](/docs/sampling_during_training.md#prompt-file--プロンプトファイル)を参照してください。
+プロンプトファイルで、初期画像やネガティブプロンプト、制御動画（Wan2.1-Fun-Control用）等を指定できます。[こちら](/docs/sampling_during_training.md#prompt-file--プロンプトファイル)を参照してください。
 </details>
 
 
