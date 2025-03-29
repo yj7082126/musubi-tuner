@@ -75,11 +75,11 @@ A line starting with `#` is a comment.
 * `--g` specifies the guidance scale. The default is 6.0, which is the default value during inference of HunyuanVideo. Specify 1.0 for SkyReels V1 models. Ignore this option for Wan2.1 models.
 * `--fs` specifies the discrete flow shift. The default is 14.5, which corresponds to the number of steps 20. In the HunyuanVideo paper, 7.0 is recommended for 50 steps, and 17.0 is recommended for less than 20 steps (e.g. 10).
 
-If you train I2V models, you can use the additional options below. 
+If you train I2V models, you must add the following option.
 
 * `--i path/to/image.png`: the image path for image2video inference.
 
-If you train Wan2.1-Fun-Control models, you can use the additional options below.
+If you train Wan2.1-Fun-Control models, you must add the following option.
 
 * `--cn path/to/control_video_or_dir_of_images`: the path to the video or directory containing multiple images for control.
 
