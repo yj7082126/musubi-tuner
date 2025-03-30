@@ -273,25 +273,36 @@ video3: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx (trimmed to 31 frames)
 
 ### Sample for Video Dataset with Control Images
 
-The dataset with control images is supported. 
+The dataset with control videos is used for training ControlNet models. 
 
-The dataset configuration with caption text files is similar to the video dataset, but with an additional `control_directory` parameter.
+The dataset configuration with caption text files is similar to the video dataset, but with an additional `control_directory` parameter. 
+
+The control video for a video is used from the `control_directory` with the same filename (or different extension) as the video, for example, `video_dir/video1.mp4` and `control_dir/video1.mp4` or `control_dir/video1.mov`. The control video can also be a directory without an extension, for example, `video_dir/video1.mp4` and `control_dir/video1`.
 
 ```toml
 [[datasets]]
 video_directory = "/path/to/video_dir"
-control_directory = "/path/to/control_dir" # required for dataset with control images
+control_directory = "/path/to/control_dir" # required for dataset with control videos
 cache_directory = "/path/to/cache_directory" # recommended to set cache directory
 target_frames = [1, 25, 45]
 frame_extraction = "head"
 ```
 
-The dataset configuration with metadata JSONL file is  same as the video dataset, but metadata JSONL file must include the control image path.
+The dataset configuration with metadata JSONL file is  same as the video dataset, but metadata JSONL file must include the control video paths. The control video path can be a directory containing multiple images.
 
 ```json
 {"video_path": "/path/to/video1.mp4", "control_path": "/path/to/control1.mp4", "caption": "A caption for video1"}
 {"video_path": "/path/to/video2.mp4", "control_path": "/path/to/control2.mp4", "caption": "A caption for video2"}
 ```
+
+<details>
+<summary>日本語</summary>
+制御動画を持つデータセットです。ControlNetモデルの学習に使用します。
+
+キャプションを用いる場合のデータセット設定は動画データセットと似ていますが、`control_directory`パラメータが追加されています。上にある例を参照してください。ある動画に対する制御用動画として、動画と同じファイル名（または拡張子のみが異なるファイル名）の、`control_directory`にある動画が使用されます（例：`video_dir/video1.mp4`と`control_dir/video1.mp4`または`control_dir/video1.mov`）。また、拡張子なしのディレクトリ内の、複数枚の画像を制御用動画として使用することもできます（例：`video_dir/video1.mp4`と`control_dir/video1`）。
+
+データセット設定でメタデータJSONLファイルを使用する場合は、動画と制御用動画のパスを含める必要があります。制御用動画のパスは、複数枚の画像を含むディレクトリのパスでも構いません。
+</details>
 
 ## Specifications
 
