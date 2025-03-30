@@ -8,6 +8,7 @@ Image and video datasets are supported. The configuration file can include multi
 
 The cache directory must be different for each dataset.
 
+Each video is extracted frame by frame without additional processing and used for training. It is recommended to use videos with a frame rate of 24fps for HunyuanVideo and 16fps for Wan2.1. You can check the videos that will be trained using `--debug_mode video` when caching latent (see [here](/README.md#latent-caching)).
 <details>
 <summary>日本語</summary>
 
@@ -16,6 +17,8 @@ The cache directory must be different for each dataset.
 画像データセットと動画データセットがサポートされています。設定ファイルには、画像または動画データセットを複数含めることができます。キャプションテキストファイルまたはメタデータJSONLファイルを使用できます。
 
 キャッシュディレクトリは、各データセットごとに異なるディレクトリである必要があります。
+
+動画は追加のプロセスなしでフレームごとに抽出され、学習に用いられます。そのため、HunyuanVideoは24fps、Wan2.1は16fpsのフレームレートの動画を使用することをお勧めします。latentキャッシュ時の`--debug_mode video`を使用すると、学習される動画を確認できます（[こちら](/README.ja.md#latentの事前キャッシュ)を参照）。
 </details>
 
 ### Sample for Image Dataset with Caption Text Files
