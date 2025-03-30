@@ -1,6 +1,7 @@
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
 import copy
 import os
+import torch
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -15,13 +16,16 @@ t2i_14B.__name__ = "Config: Wan T2I 14B"
 # support Fun models: deepcopy and change some configs. FC denotes Fun Control
 t2v_1_3B_FC = copy.deepcopy(t2v_1_3B)
 t2v_1_3B_FC.__name__ = "Config: Wan-Fun-Control T2V 1.3B"
+t2v_1_3B_FC.i2v = True  # this is strange, but Fun-Control model needs this because it has img cross-attention
 t2v_1_3B_FC.in_dim = 48
-i2v_14B.is_fun_control = True
+t2v_1_3B_FC.is_fun_control = True
+
 t2v_14B_FC = copy.deepcopy(t2v_14B)
 t2v_14B_FC.__name__ = "Config: Wan-Fun-Control T2V 14B"
 t2v_14B_FC.i2v = True  # this is strange, but Fun-Control model needs this because it has img cross-attention
 t2v_14B_FC.in_dim = 48  # same as i2v_14B, use zeros for image latents
 t2v_14B_FC.is_fun_control = True
+
 i2v_14B_FC = copy.deepcopy(i2v_14B)
 i2v_14B_FC.__name__ = "Config: Wan-Fun-Control I2V 14B"
 i2v_14B_FC.in_dim = 48

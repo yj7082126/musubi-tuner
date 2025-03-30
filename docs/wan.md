@@ -33,7 +33,7 @@ Download the VAE from the above page `Wan2.1_VAE.pth` or download `split_files/v
 
 Download the DiT weights from the following page: https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/tree/main/split_files/diffusion_models
 
-Wan2.1 Fun Control model weights can be downloaded from [here](https://huggingface.co/alibaba-pai/Wan2.1-Fun-14B-Control). Navigate to each weight page and download.
+Wan2.1 Fun Control model weights can be downloaded from [here](https://huggingface.co/alibaba-pai/Wan2.1-Fun-14B-Control). Navigate to each weight page and download. The Fun Control model seems to support not only T2V but also I2V tasks.
 
 Please select the appropriate weights according to T2V, I2V, resolution, model size, etc. 
 
@@ -61,7 +61,7 @@ VAEは上のページから `Wan2.1_VAE.pth` をダウンロードするか、�
 
 DiTの重みを次のページからダウンロードしてください：https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/tree/main/split_files/diffusion_models
 
-Wan2.1 Fun Controlモデルの重みは、[こちら](https://huggingface.co/alibaba-pai/Wan2.1-Fun-14B-Control)から、それぞれの重みのページに遷移し、ダウンロードしてください。
+Wan2.1 Fun Controlモデルの重みは、[こちら](https://huggingface.co/alibaba-pai/Wan2.1-Fun-14B-Control)から、それぞれの重みのページに遷移し、ダウンロードしてください。Fun ControlモデルはT2VだけでなくI2Vタスクにも対応しているようです。
 
 T2VやI2V、解像度、モデルサイズなどにより適切な重みを選択してください。
 
@@ -84,6 +84,8 @@ If you train I2V models, add `--clip path/to/models_clip_open-clip-xlm-roberta-l
 
 If you're running low on VRAM, specify `--vae_cache_cpu` to use the CPU for the VAE internal cache, which will reduce VRAM usage somewhat.
 
+The control video settings are required for training the Fun-Control model. Please refer to [Dataset Settings](/dataset/dataset_config.md#sample-for-video-dataset-with-control-images) for details.
+
 <details>
 <summary>日本語</summary>
 latentの事前キャッシングはHunyuanVideoとほぼ同じです。上のコマンド例を使用してキャッシュを作成してください。
@@ -91,6 +93,8 @@ latentの事前キャッシングはHunyuanVideoとほぼ同じです。上の�
 I2Vモデルを学習する場合は、`--clip path/to/models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth` を追加してCLIPモデルを指定してください。指定しないと学習時にエラーが発生します。
 
 VRAMが不足している場合は、`--vae_cache_cpu` を指定するとVAEの内部キャッシュにCPUを使うことで、使用VRAMを多少削減できます。
+
+Fun-Controlモデルを学習する場合は、制御用動画の設定が必要です。[データセット設定](/dataset/dataset_config.md#sample-for-video-dataset-with-control-images)を参照してください。
 </details>
 
 ### Text Encoder Output Pre-caching

@@ -109,7 +109,7 @@ class WanNetworkTrainer(NetworkTrainer):
         # Note: VAE encoding is done in do_inference() for I2V training, because we have VAE in the pipeline. Control video is also done in do_inference()
         sample_prompts_image_embs = {}
         for prompt_dict in prompts:
-            if prompt_dict.get("image_path", None) is not None:
+            if prompt_dict.get("image_path", None) is not None and self.i2v_training:
                 sample_prompts_image_embs[prompt_dict["image_path"]] = None  # this will be replaced with CLIP context
 
         if len(sample_prompts_image_embs) > 0:
@@ -143,7 +143,7 @@ class WanNetworkTrainer(NetworkTrainer):
                 prompt_dict_copy["negative_t5_embeds"] = te_outputs_1[p][0]
 
             p = prompt_dict.get("image_path", None)
-            if p is not None:
+            if p is not None and self.i2v_training:
                 prompt_dict_copy["clip_embeds"] = sample_prompts_image_embs[p]
 
             sample_parameters.append(prompt_dict_copy)
