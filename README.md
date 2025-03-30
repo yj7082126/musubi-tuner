@@ -50,6 +50,10 @@ For Wan2.1, please also refer to [Wan2.1 documentation](./docs/wan.md).
 
 - **[NEW] GitHub Discussions Enabled**: We've enabled GitHub Discussions for community Q&A, knowledge sharing, and technical information exchange. Please use Issues for bug reports and feature requests, and Discussions for questions and sharing experiences. [Join the conversation →](https://github.com/kohya-ss/musubi-tuner/discussions)
 
+- Mar 30, 2025
+    - Added experimental support for training Wan2.1-Fun's Control model (untested). See [here](./docs/wan.md#training--学習) for details.
+    - Added experimental support for inference with Wan2.1-Fun's Control model. Tested only with 14B I2V Control. See [here](./docs/wan.md#inference--推論) for details.
+
 - Mar 27, 2025
     - Added `--cpu_noise` option to generate initial noise on CPU during Wan2.1 inference. This may result in the same output as ComfyUI with the same seed (depending on other settings).
 
