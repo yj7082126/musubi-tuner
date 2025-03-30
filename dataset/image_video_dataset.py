@@ -689,7 +689,6 @@ class VideoDatasource(ContentDatasource):
         video = load_video(video_path, start_frame, end_frame, bucket_selector)
         return video
 
-    # 新しく追加: コントロール画像を取得するためのメソッド
     def get_control_data_from_path(
         self,
         control_path: str,
@@ -745,13 +744,20 @@ class VideoDirectoryDatasource(VideoDatasource):
                     self.control_paths[video_path] = control_path
                 else:
                     # use the same base name for control path
-                    # for example: video_path = "vid/video.mp4" -> control_path = "control/video.mov"
                     base_name = os.path.splitext(video_basename)[0]
-                    for ext in VIDEO_EXTENSIONS:
-                        potential_path = os.path.join(self.control_directory, base_name + ext)
-                        if os.path.exists(potential_path):
-                            self.control_paths[video_path] = potential_path
-                            break
+
+                    # directory with images. for example: video_path = "vid/video.mp4" -> control_path = "control/video"
+                    potential_path = os.path.join(self.control_directory, base_name)  # no extension
+                    if os.path.isdir(potential_path):
+                        self.control_paths[video_path] = potential_path
+                    else:
+                        # another extension for control path
+                        # for example: video_path = "vid/video.mp4" -> control_path = "control/video.mov"
+                        for ext in VIDEO_EXTENSIONS:
+                            potential_path = os.path.join(self.control_directory, base_name + ext)
+                            if os.path.exists(potential_path):
+                                self.control_paths[video_path] = potential_path
+                                break
 
             logger.info(f"found {len(self.control_paths)} matching control videos/images")
             # check if all videos have matching control paths, if not, raise an error
@@ -782,7 +788,6 @@ class VideoDirectoryDatasource(VideoDatasource):
 
         _, caption = self.get_caption(idx)
 
-        # 新しく追加: コントロール画像の読み込み
         control = None
         if self.control_directory is not None and video_path in self.control_paths:
             control_path = self.control_paths[video_path]
@@ -867,7 +872,6 @@ class VideoJsonlDatasource(VideoDatasource):
 
         caption = data["caption"]
 
-        # 新しく追加: コントロール画像の読み込み
         control = None
         if "control_path" in data and data["control_path"]:
             control_path = data["control_path"]
