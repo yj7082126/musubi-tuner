@@ -24,6 +24,7 @@
     - [Dataset Configuration](#dataset-configuration)
     - [Latent Pre-caching](#latent-pre-caching)
     - [Text Encoder Output Pre-caching](#text-encoder-output-pre-caching)
+    - [Configuration of Accelerate](#configuration-of-accelerate)
     - [Training](#training)
     - [Merging LoRA Weights](#merging-lora-weights)
     - [Inference](#inference)
@@ -256,6 +257,24 @@ Adjust `--batch_size` according to your available VRAM.
 For systems with limited VRAM (less than ~16GB), use `--fp8_llm` to run the LLM in fp8 mode.
 
 By default, cache files not included in the dataset are automatically deleted. You can still keep cache files as before by specifying `--keep_cache`.
+
+### Configuration of Accelerate
+
+Run `accelerate config` to configure Accelerate. Choose appropriate values for each question based on your environment (either input values directly or use arrow keys and enter to select; uppercase is default, so if the default value is fine, just press enter without inputting anything). For training with a single GPU, answer the questions as follows:
+
+
+```txt
+- In which compute environment are you running?: This machine
+- Which type of machine are you using?: No distributed training
+- Do you want to run your training on CPU only (even if a GPU / Apple Silicon / Ascend NPU device is available)?[yes/NO]: NO
+- Do you wish to optimize your script with torch dynamo?[yes/NO]: NO
+- Do you want to use DeepSpeed? [yes/NO]: NO
+- What GPU(s) (by id) should be used for training on this machine as a comma-seperated list? [all]: all
+- Would you like to enable numa efficiency? (Currently only supported on NVIDIA hardware). [yes/NO]: NO
+- Do you wish to use mixed precision?: bf16
+```
+
+*Note*: In some cases, you may encounter the error `ValueError: fp16 mixed precision requires a GPU`. If this happens, answer "0" to the sixth question (`What GPU(s) (by id) should be used for training on this machine as a comma-separated list? [all]:`). This means that only the first GPU (id `0`) will be used.
 
 ### Training
 

@@ -18,6 +18,7 @@
     - [データセット設定](#データセット設定)
     - [latentの事前キャッシュ](#latentの事前キャッシュ)
     - [Text Encoder出力の事前キャッシュ](#Text-Encoder出力の事前キャッシュ)
+    - [Accelerateの設定](#Accelerateの設定)
     - [学習](#学習)
     - [LoRAの重みのマージ](#LoRAの重みのマージ)
     - [推論](#推論)
@@ -226,6 +227,24 @@ python cache_text_encoder_outputs.py --dataset_config path/to/toml  --text_encod
 VRAMが足りない場合（16GB程度未満の場合）は、`--fp8_llm`を指定して、fp8でLLMを実行してください。
 
 デフォルトではデータセットに含まれないキャッシュファイルは自動的に削除されます。`--keep_cache`を指定すると、キャッシュファイルを残すことができます。
+
+### Accelerateの設定
+
+`accelerate config`を実行して、Accelerateの設定を行います。それぞれの質問に、環境に応じた適切な値を選択してください（値を直接入力するか、矢印キーとエンターで選択、大文字がデフォルトなので、デフォルト値でよい場合は何も入力せずエンター）。GPU 1台での学習の場合、以下のように答えてください。
+
+```txt
+- In which compute environment are you running?: This machine
+- Which type of machine are you using?: No distributed training
+- Do you want to run your training on CPU only (even if a GPU / Apple Silicon / Ascend NPU device is available)?[yes/NO]: NO
+- Do you wish to optimize your script with torch dynamo?[yes/NO]: NO
+- Do you want to use DeepSpeed? [yes/NO]: NO
+- What GPU(s) (by id) should be used for training on this machine as a comma-seperated list? [all]: all
+- Would you like to enable numa efficiency? (Currently only supported on NVIDIA hardware). [yes/NO]: NO
+- Do you wish to use mixed precision?: bf16
+```
+
+※場合によって ``ValueError: fp16 mixed precision requires a GPU`` というエラーが出ることがあるようです。この場合、6番目の質問（
+``What GPU(s) (by id) should be used for training on this machine as a comma-separated list? [all]:``）に「0」と答えてください。（id `0`、つまり1台目のGPUが使われます。）
 
 ### 学習
 
