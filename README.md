@@ -24,6 +24,7 @@
     - [Dataset Configuration](#dataset-configuration)
     - [Latent Pre-caching](#latent-pre-caching)
     - [Text Encoder Output Pre-caching](#text-encoder-output-pre-caching)
+    - [Configuration of Accelerate](#configuration-of-accelerate)
     - [Training](#training)
     - [Merging LoRA Weights](#merging-lora-weights)
     - [Inference](#inference)
@@ -49,6 +50,13 @@ For Wan2.1, please also refer to [Wan2.1 documentation](./docs/wan.md).
 ### Recent Updates
 
 - **[NEW] GitHub Discussions Enabled**: We've enabled GitHub Discussions for community Q&A, knowledge sharing, and technical information exchange. Please use Issues for bug reports and feature requests, and Discussions for questions and sharing experiences. [Join the conversation →](https://github.com/kohya-ss/musubi-tuner/discussions)
+
+- Mar 30, 2025
+    - Added experimental support for training Wan2.1-Fun's Control model (untested). See [here](./docs/wan.md#training--学習) for details.
+    - Added experimental support for inference with Wan2.1-Fun's Control model. Tested only with 14B I2V Control. See [here](./docs/wan.md#inference--推論) for details.
+
+- Mar 27, 2025
+    - Added `--cpu_noise` option to generate initial noise on CPU during Wan2.1 inference. This may result in the same output as ComfyUI with the same seed (depending on other settings).
 
 - Mar 23, 2025
     - Added an option to save the actual image and video data used in training as files during latent caching with `--debug_mode video`. PR [#187](https://github.com/kohya-ss/musubi-tuner/pull/187). See [here](#latent-pre-caching) for details. Available for both HunyuanVideo and Wan2.1.
@@ -84,24 +92,6 @@ For Wan2.1, please also refer to [Wan2.1 documentation](./docs/wan.md).
     - Refactored the inference script for Wan2.1. Added `--fp8_fast` and `--compile` options. Please refer to [here](./docs/wan.md#inference--推論) for details. PR [#153](https://github.com/kohya-ss/musubi-tuner/pull/153)
         - A major change has been made, so please let us know if you encounter any issues.
     - The newly added `--fp8_scaled` option seems to work well for fp8 training and inference. If you are using `--fp8_base` for training, or `--fp8` for inference, please try to add `--fp8_scaled`. Please report any issues you encounter.
-
-- Mar 13, 2025
-    - In the inference script for HunyuanVideo, the `--fp8_fast` option for RTX 40x0 and the `--compile` option to use `torch.compile` have been added. Thanks to Sarania for PR [#137](https://github.com/kohya-ss/musubi-tuner/pull/137).
-        - See [Inference](#inference) for details.
-    - Added `--fp8_scaled` option for fp8 quantization in Wan2.1 training and inference. [PR #141](https://github.com/kohya-ss/musubi-tuner/pull/141) 
-        - This option quantizes the weights to FP8 with appropriate scaling, instead of simple casting to FP8. This reduces VRAM usage while maintaining precision.
-        - See [Advanced Configuration](./docs/advanced_config.md#fp8-quantization) for details.
-        - `fp16` models are now supported for Wan2.1 training and inference. 
-
-- Mar 9, 2025
-    - Fixed `--t5` option is required for training even without sampling images for Wan2.1 training.
-
-- Mar 7, 2025
-    - Added support for Wan 2.1 LoRA training. Please use `wan_train_network.py`. For details, please refer to [here](./docs/wan.md).
-        
-- Mar 4, 2025
-    - Added support for Wan 2.1 inference. Please use `wan_generate_video.py`. For details, please refer to [here](./docs/wan.md).
-        - `requirements.txt` has been updated. Please run `pip install -r requirements.txt` again.
 
 ### Releases
 
@@ -267,6 +257,24 @@ Adjust `--batch_size` according to your available VRAM.
 For systems with limited VRAM (less than ~16GB), use `--fp8_llm` to run the LLM in fp8 mode.
 
 By default, cache files not included in the dataset are automatically deleted. You can still keep cache files as before by specifying `--keep_cache`.
+
+### Configuration of Accelerate
+
+Run `accelerate config` to configure Accelerate. Choose appropriate values for each question based on your environment (either input values directly or use arrow keys and enter to select; uppercase is default, so if the default value is fine, just press enter without inputting anything). For training with a single GPU, answer the questions as follows:
+
+
+```txt
+- In which compute environment are you running?: This machine
+- Which type of machine are you using?: No distributed training
+- Do you want to run your training on CPU only (even if a GPU / Apple Silicon / Ascend NPU device is available)?[yes/NO]: NO
+- Do you wish to optimize your script with torch dynamo?[yes/NO]: NO
+- Do you want to use DeepSpeed? [yes/NO]: NO
+- What GPU(s) (by id) should be used for training on this machine as a comma-seperated list? [all]: all
+- Would you like to enable numa efficiency? (Currently only supported on NVIDIA hardware). [yes/NO]: NO
+- Do you wish to use mixed precision?: bf16
+```
+
+*Note*: In some cases, you may encounter the error `ValueError: fp16 mixed precision requires a GPU`. If this happens, answer "0" to the sixth question (`What GPU(s) (by id) should be used for training on this machine as a comma-separated list? [all]:`). This means that only the first GPU (id `0`) will be used.
 
 ### Training
 

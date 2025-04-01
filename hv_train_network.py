@@ -238,6 +238,11 @@ def line_to_prompt_dict(line: str) -> dict:
                 prompt_dict["image_path"] = m.group(1)
                 continue
 
+            m = re.match(r"cn (.+)", parg, re.IGNORECASE)
+            if m:
+                prompt_dict["control_video_path"] = m.group(1)
+                continue
+
         except ValueError as ex:
             logger.error(f"Exception in parsing / 解析エラー: {parg}")
             logger.error(ex)
@@ -935,6 +940,8 @@ class NetworkTrainer:
         cfg_scale = sample_parameter.get("cfg_scale", None)  # None for architecture default
         negative_prompt = sample_parameter.get("negative_prompt", None)
 
+        frame_count = (frame_count - 1) // 4 * 4 + 1  # 1, 5, 9, 13, ... For HunyuanVideo and Wan2.1
+
         if self.i2v_training:
             image_path = sample_parameter.get("image_path", None)
             if image_path is None:
@@ -942,6 +949,16 @@ class NetworkTrainer:
                 return
         else:
             image_path = None
+
+        if self.control_training:
+            control_video_path = sample_parameter.get("control_video_path", None)
+            if control_video_path is None:
+                logger.error(
+                    "No control_video_path for control model / controlモデルのサンプル画像生成にはcontrol_video_pathが必要です"
+                )
+                return
+        else:
+            control_video_path = None
 
         device = accelerator.device
         if seed is not None:
@@ -972,6 +989,8 @@ class NetworkTrainer:
 
         if self.i2v_training:
             logger.info(f"image path: {image_path}")
+        if self.control_training:
+            logger.info(f"control video path: {control_video_path}")
 
         # inference: architecture dependent
         video = self.do_inference(
@@ -991,6 +1010,7 @@ class NetworkTrainer:
             guidance_scale,
             cfg_scale,
             image_path=image_path,
+            control_video_path=control_video_path,
         )
 
         # Save video
@@ -1027,9 +1047,15 @@ class NetworkTrainer:
         if self._i2v_training:
             logger.info("I2V training mode")
 
+        self._control_training = False  # HunyuanVideo does not support control training yet
+
     @property
     def i2v_training(self) -> bool:
         return self._i2v_training
+
+    @property
+    def control_training(self) -> bool:
+        return self._control_training
 
     def process_sample_prompts(
         self,
@@ -1119,6 +1145,7 @@ class NetworkTrainer:
         guidance_scale,
         cfg_scale,
         image_path=None,
+        control_video_path=None,
     ):
         """architecture dependent inference"""
         device = accelerator.device
