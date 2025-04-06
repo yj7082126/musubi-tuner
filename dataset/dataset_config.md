@@ -175,8 +175,7 @@ video_jsonl_file = "/path/to/metadata.jsonl"
 target_frames = [1, 25, 45]
 frame_extraction = "head"
 cache_directory = "/path/to/cache_directory_head"
-source_fps = 30 # optional, source fps for videos in the jsonl file
-
+source_fps = 30.0 # optional, source fps for videos in the jsonl file
 # same metadata jsonl file can be used for multiple datasets
 [[datasets]]
 video_jsonl_file = "/path/to/metadata.jsonl"
