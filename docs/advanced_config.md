@@ -224,12 +224,16 @@ The implementation:
 
 The PyTorch Dynamo options are now available to optimize the training process. PyTorch Dynamo is a Python-level JIT compiler designed to make unmodified PyTorch programs faster by using TorchInductor, a deep learning compiler. This integration allows for potential speedups in training while maintaining model accuracy.
 
+[PR #215](https://github.com/kohya-ss/musubi-tuner/pull/215) added this feature.
+
 Specify the `--dynamo_backend` option to enable Dynamo optimization with one of the available backends from the `DynamoBackend` enum.
 
 Additional options allow for fine-tuning the Dynamo behavior:
 - `--dynamo_mode`: Controls the optimization strategy
 - `--dynamo_fullgraph`: Enables fullgraph mode for potentially better optimization
 - `--dynamo_dynamic`: Enables dynamic shape handling
+
+The `--dynamo_dynamic` option has been reported to have many problems based on the validation in PR #215.
 
 ### Available options:
 
@@ -267,12 +271,16 @@ Note: The best combination of options may depend on your specific model and hard
 <summary>日本語</summary>
 PyTorch Dynamoオプションが学習プロセスを最適化するために追加されました。PyTorch Dynamoは、TorchInductor（ディープラーニングコンパイラ）を使用して、変更を加えることなくPyTorchプログラムを高速化するためのPythonレベルのJITコンパイラです。この統合により、モデルの精度を維持しながら学習の高速化が期待できます。
 
+[PR #215](https://github.com/kohya-ss/musubi-tuner/pull/215) で追加されました。
+
 `--dynamo_backend`オプションを指定して、`DynamoBackend`列挙型から利用可能なバックエンドの一つを選択することで、Dynamo最適化を有効にします。
 
 追加のオプションにより、Dynamoの動作を微調整できます：
 - `--dynamo_mode`：最適化戦略を制御します
 - `--dynamo_fullgraph`：より良い最適化の可能性のためにフルグラフモードを有効にします
 - `--dynamo_dynamic`：動的形状処理を有効にします
+
+PR #215での検証によると、`--dynamo_dynamic`には問題が多いことが報告されています。
 
 __利用可能なオプション：__
 
