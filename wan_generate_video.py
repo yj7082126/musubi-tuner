@@ -222,6 +222,7 @@ def parse_prompt_line(line: str) -> Dict[str, Any]:
     Returns:
         Dict[str, Any]: Dictionary of argument overrides
     """
+    # TODO common function with hv_train_network.line_to_prompt_dict
     parts = line.split(" --")
     prompt = parts[0].strip()
 
@@ -1406,6 +1407,7 @@ def preprocess_prompts_for_batch(prompt_lines: List[str], base_args: argparse.Na
 
         # Parse prompt line and create override dictionary
         prompt_data = parse_prompt_line(line)
+        logger.info(f"Parsed prompt data: {prompt_data}")
         prompts_data.append(prompt_data)
 
     return prompts_data
