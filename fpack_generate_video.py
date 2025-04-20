@@ -383,6 +383,18 @@ def load_text_encoder1(args):
 
         state_dict = load_split_weights(args.text_encoder1)
 
+        # support weights from ComfyUI
+        if "model.embed_tokens.weight" in state_dict:
+            for key in list(state_dict.keys()):
+                if key.startswith("model."):
+                    new_key = key.replace("model.", "")
+                    state_dict[new_key] = state_dict[key]
+                    del state_dict[key]
+        if "tokenizer" in state_dict:
+            state_dict.pop("tokenizer")
+        if "lm_head.weight" in state_dict:
+            state_dict.pop("lm_head.weight")
+
         # # support weights from ComfyUI
         # if "tokenizer" in state_dict:
         #     state_dict.pop("tokenizer")
