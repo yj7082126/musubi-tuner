@@ -164,7 +164,7 @@ def parse_args() -> argparse.Namespace:
         "--output_type", type=str, default="video", choices=["video", "images", "latent", "both"], help="output type"
     )
     parser.add_argument("--no_metadata", action="store_true", help="do not save metadata")
-    # parser.add_argument("--latent_path", type=str, nargs="*", default=None, help="path to latent for decode. no inference")
+    parser.add_argument("--latent_path", type=str, nargs="*", default=None, help="path to latent for decode. no inference")
     parser.add_argument("--lycoris", action="store_true", help="use lycoris for inference")
     # parser.add_argument("--compile", action="store_true", help="Enable torch.compile")
     # parser.add_argument(
@@ -578,6 +578,9 @@ def optimize_model(model: HunyuanVideoTransformer3DModelPacked, args: argparse.N
 
 def decode_latent(args: argparse.Namespace, vae: AutoencoderKLCausal3D, latent: torch.Tensor, device: torch.device) -> torch.Tensor:
     logger.info(f"Decoding video...")
+    if latent.ndim == 4:
+        latent = latent.unsqueeze(0)  # add batch dimension
+
     vae.to(device)
     if not args.bulk_decode:
         latent_window_size = args.latent_window_size  # default is 9
@@ -1096,22 +1099,32 @@ def save_images(sample: torch.Tensor, args: argparse.Namespace, original_base_na
 
 
 def save_output(
-    list_of_latent: list[torch.Tensor],
-    video: torch.Tensor,
     args: argparse.Namespace,
+    vae: AutoencoderKLCausal3D,
+    latent: torch.Tensor,
+    device: torch.device,
     original_base_names: Optional[List[str]] = None,
 ) -> None:
     """save output
 
     Args:
-        list_of_latent: list of latent tensors
-        video: video tensor
         args: command line arguments
+        vae: VAE model
+        latent: latent tensor
+        device: device to use
         original_base_names: original base names (if latents are loaded from files)
     """
+    height, width = latent.shape[-2], latent.shape[-1]  # BCTHW
+    height *= 8
+    width *= 8
+    # print(f"Saving output. Latent shape {latent.shape}; pixel shape {height}x{width}")
     if args.output_type == "latent" or args.output_type == "both":
         # save latent
-        save_latent(list_of_latent, args, video.shape[2], video.shape[3])
+        save_latent(latent, args, height, width)
+    if args.output_type == "latent":
+        return
+
+    video = decode_latent(args, vae, latent, device)
 
     if args.output_type == "video" or args.output_type == "both":
         # save video
@@ -1498,13 +1511,62 @@ def main():
     # Parse arguments
     args = parse_args()
 
+    # Check if latents are provided
+    latents_mode = args.latent_path is not None and len(args.latent_path) > 0
+
     # Set device
     device = args.device if args.device is not None else "cuda" if torch.cuda.is_available() else "cpu"
     device = torch.device(device)
     logger.info(f"Using device: {device}")
     args.device = device
 
-    if args.from_file:
+    if latents_mode:
+        # Original latent decode mode
+        original_base_names = []
+        latents_list = []
+        seeds = []
+
+        assert len(args.latent_path) == 1, "Only one latent path is supported for now"
+
+        for latent_path in args.latent_path:
+            original_base_names.append(os.path.splitext(os.path.basename(latent_path))[0])
+            seed = 0
+
+            if os.path.splitext(latent_path)[1] != ".safetensors":
+                latents = torch.load(latent_path, map_location="cpu")
+            else:
+                latents = load_file(latent_path)["latent"]
+                with safe_open(latent_path, framework="pt") as f:
+                    metadata = f.metadata()
+                if metadata is None:
+                    metadata = {}
+                logger.info(f"Loaded metadata: {metadata}")
+
+                if "seeds" in metadata:
+                    seed = int(metadata["seeds"])
+                if "height" in metadata and "width" in metadata:
+                    height = int(metadata["height"])
+                    width = int(metadata["width"])
+                    args.video_size = [height, width]
+                if "video_seconds" in metadata:
+                    args.video_seconds = float(metadata["video_seconds"])
+
+            seeds.append(seed)
+            logger.info(f"Loaded latent from {latent_path}. Shape: {latents.shape}")
+
+            if latents.ndim == 5:  # [BCTHW]
+                latents = latents.squeeze(0)  # [CTHW]
+
+            latents_list.append(latents)
+
+        latent = torch.stack(latents_list, dim=0)  # [N, ...], must be same shape
+
+        args.seed = seeds[0]
+
+        vae = load_vae(args, device)
+        save_output(args, vae, latent, device, original_base_names)
+
+    elif args.from_file:
         # Batch mode from file
 
         # Read prompts from file
@@ -1527,17 +1589,15 @@ def main():
         vae, latent = generate(args, gen_settings)
         # print(f"Generated latent shape: {latent.shape}")
 
-        video = decode_latent(args, vae, latent, device)
-
         # Make sure the model is freed from GPU memory
         gc.collect()
-        clean_memory_on_device(args.device)
+        clean_memory_on_device(device)
 
         # # Save latent and video
         # if args.save_merged_model:
         #     return
 
-        save_output(latent, video, args)
+        save_output(args, vae, latent[0], device)
 
     logger.info("Done!")
 
