@@ -741,15 +741,15 @@ def apply_rotary_emb_transposed(x, freqs_cis):
 
 def attn_varlen_func(q, k, v, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv, attn_mode=None):
     if cu_seqlens_q is None and cu_seqlens_kv is None and max_seqlen_q is None and max_seqlen_kv is None:
-        if attn_mode == "sageattn" or sageattn is not None:
+        if attn_mode == "sageattn" or attn_mode is None and sageattn is not None:
             x = sageattn(q, k, v, tensor_layout="NHD")
             return x
 
-        if attn_mode == "flash" or flash_attn_func is not None:
+        if attn_mode == "flash" or attn_mode is None and flash_attn_func is not None:
             x = flash_attn_func(q, k, v)
             return x
 
-        if attn_mode == "xformers" or xformers_attn_func is not None:
+        if attn_mode == "xformers" or attn_mode is None and xformers_attn_func is not None:
             x = xformers_attn_func(q, k, v)
             return x
 
