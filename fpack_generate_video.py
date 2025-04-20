@@ -511,7 +511,7 @@ def optimize_model(model: HunyuanVideoTransformer3DModelPacked, args: argparse.N
 
         # if no blocks to swap, we can move the weights to GPU after optimization on GPU (omit redundant CPU->GPU copy)
         move_to_device = args.blocks_to_swap == 0  # if blocks_to_swap > 0, we will keep the model on CPU
-        state_dict = model.fp8_optimization(state_dict, device, move_to_device, use_scaled_mm=args.fp8_fast)
+        state_dict = model.fp8_optimization(state_dict, device, move_to_device, use_scaled_mm=False)  # args.fp8_fast)
 
         info = model.load_state_dict(state_dict, strict=True, assign=True)
         logger.info(f"Loaded FP8 optimized weights: {info}")
@@ -601,7 +601,35 @@ def prepare_i2v_inputs(
     if encoded_context is None:
         # load text encoder
         tokenizer1, text_encoder1 = load_text_encoder1(args)
-        text_encoder1.to(device)
+        if args.fp8_llm:
+            org_dtype = text_encoder1.dtype
+            logger.info(f"Moving and casting text encoder to {device} and torch.float8_e4m3fn")
+            text_encoder1.to(device=device, dtype=torch.float8_e4m3fn)
+
+            # prepare LLM for fp8
+            def prepare_fp8(llama_model: LlamaModel, target_dtype):
+                def forward_hook(module):
+                    def forward(hidden_states):
+                        input_dtype = hidden_states.dtype
+                        hidden_states = hidden_states.to(torch.float32)
+                        variance = hidden_states.pow(2).mean(-1, keepdim=True)
+                        hidden_states = hidden_states * torch.rsqrt(variance + module.variance_epsilon)
+                        return module.weight.to(input_dtype) * hidden_states.to(input_dtype)
+
+                    return forward
+
+                for module in llama_model.modules():
+                    if module.__class__.__name__ in ["Embedding"]:
+                        # print("set", module.__class__.__name__, "to", target_dtype)
+                        module.to(target_dtype)
+                    if module.__class__.__name__ in ["LlamaRMSNorm"]:
+                        # print("set", module.__class__.__name__, "hooks")
+                        module.forward = forward_hook(module)
+
+            prepare_fp8(text_encoder1, org_dtype)
+        else:
+            text_encoder1.to(device)
+
         tokenizer2, text_encoder2 = load_text_encoder2(args)
         text_encoder2.to(device)
 

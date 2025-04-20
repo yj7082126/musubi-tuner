@@ -16,6 +16,7 @@ import numpy as np
 
 from modules.custom_offloading_utils import ModelOffloader
 from utils.safetensors_utils import load_split_weights
+from modules.fp8_optimization_utils import apply_fp8_monkey_patch, optimize_state_dict_with_fp8
 from accelerate import init_empty_weights
 
 try:
@@ -233,9 +234,9 @@ class GELU(nn.Module):
         self.approximate = approximate
 
     def gelu(self, gate: torch.Tensor) -> torch.Tensor:
-        if gate.device.type == "mps" and is_torch_version("<", "2.0.0"):
-            # fp16 gelu not supported on mps before torch 2.0
-            return F.gelu(gate.to(dtype=torch.float32), approximate=self.approximate).to(dtype=gate.dtype)
+        # if gate.device.type == "mps" and is_torch_version("<", "2.0.0"):
+        #     # fp16 gelu not supported on mps before torch 2.0
+        #     return F.gelu(gate.to(dtype=torch.float32), approximate=self.approximate).to(dtype=gate.dtype)
         return F.gelu(gate, approximate=self.approximate)
 
     def forward(self, hidden_states):
@@ -653,6 +654,7 @@ class AttnProcessor2_0:
             attention_mask = attention_mask.view(batch_size, attn.heads, -1, attention_mask.shape[-1])
 
         query = attn.to_q(hidden_states)
+        query_dtype = query.dtype  # store dtype before potentially deleting query
 
         if encoder_hidden_states is None:
             encoder_hidden_states = hidden_states
@@ -664,7 +666,6 @@ class AttnProcessor2_0:
         head_dim = inner_dim // attn.heads
 
         query = query.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
-
         key = key.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
         value = value.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
 
@@ -675,9 +676,10 @@ class AttnProcessor2_0:
 
         # the output of sdp = (batch, num_heads, seq_len, head_dim)
         hidden_states = F.scaled_dot_product_attention(query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False)
+        del query, key, value, attention_mask  # free memory
 
         hidden_states = hidden_states.transpose(1, 2).reshape(batch_size, -1, attn.heads * head_dim)
-        hidden_states = hidden_states.to(query.dtype)
+        hidden_states = hidden_states.to(query_dtype)  # use stored dtype
 
         # linear proj
         hidden_states = attn.to_out[0](hidden_states)
@@ -716,7 +718,7 @@ def get_cu_seqlens(text_mask, img_len):
     text_len = text_mask.sum(dim=1)
     max_len = text_mask.shape[1] + img_len
 
-    cu_seqlens = torch.zeros([2 * batch_size + 1], dtype=torch.int32, device="cuda")
+    cu_seqlens = torch.zeros([2 * batch_size + 1], dtype=torch.int32, device=text_mask.device)  # ensure device match
 
     for i in range(batch_size):
         s = text_len[i] + img_len
@@ -730,11 +732,11 @@ def get_cu_seqlens(text_mask, img_len):
 
 def apply_rotary_emb_transposed(x, freqs_cis):
     cos, sin = freqs_cis.unsqueeze(-2).chunk(2, dim=-1)
+    del freqs_cis
     x_real, x_imag = x.unflatten(-1, (-1, 2)).unbind(-1)
     x_rotated = torch.stack([-x_imag, x_real], dim=-1).flatten(3)
-    out = x.float() * cos + x_rotated.float() * sin
-    out = out.to(x)
-    return out
+    del x_real, x_imag
+    return (x.float() * cos + x_rotated.float() * sin).to(x.dtype)
 
 
 def attn_varlen_func(q, k, v, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv, attn_mode=None):
@@ -762,8 +764,10 @@ def attn_varlen_func(q, k, v, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seq
     v = v.view(v.shape[0] * v.shape[1], *v.shape[2:])
     if sageattn_varlen is not None:
         x = sageattn_varlen(q, k, v, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv)
+        del q, k, v  # free memory
     elif flash_attn_varlen_func is not None:
         x = flash_attn_varlen_func(q, k, v, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv)
+        del q, k, v  # free memory
     else:
         raise NotImplementedError("No Attn Installed!")
     x = x.view(batch_size, max_seqlen_q, *x.shape[2:])
@@ -782,9 +786,11 @@ class HunyuanAttnProcessorFlashAttnDouble:
     ):
         cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv = attention_mask
 
+        # Project image latents
         query = attn.to_q(hidden_states)
         key = attn.to_k(hidden_states)
         value = attn.to_v(hidden_states)
+        del hidden_states  # free memory
 
         query = query.unflatten(2, (attn.heads, -1))
         key = key.unflatten(2, (attn.heads, -1))
@@ -795,10 +801,14 @@ class HunyuanAttnProcessorFlashAttnDouble:
 
         query = apply_rotary_emb_transposed(query, image_rotary_emb)
         key = apply_rotary_emb_transposed(key, image_rotary_emb)
+        del image_rotary_emb  # free memory
 
+        # Project context (text/encoder) embeddings
         encoder_query = attn.add_q_proj(encoder_hidden_states)
         encoder_key = attn.add_k_proj(encoder_hidden_states)
         encoder_value = attn.add_v_proj(encoder_hidden_states)
+        txt_length = encoder_hidden_states.shape[1]  # store length before deleting
+        del encoder_hidden_states  # free memory
 
         encoder_query = encoder_query.unflatten(2, (attn.heads, -1))
         encoder_key = encoder_key.unflatten(2, (attn.heads, -1))
@@ -807,20 +817,24 @@ class HunyuanAttnProcessorFlashAttnDouble:
         encoder_query = attn.norm_added_q(encoder_query)
         encoder_key = attn.norm_added_k(encoder_key)
 
+        # Concatenate image and context q, k, v
         query = torch.cat([query, encoder_query], dim=1)
         key = torch.cat([key, encoder_key], dim=1)
         value = torch.cat([value, encoder_value], dim=1)
+        del encoder_query, encoder_key, encoder_value  # free memory
 
-        hidden_states = attn_varlen_func(
+        hidden_states_attn = attn_varlen_func(
             query, key, value, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv, attn_mode=attn_mode
         )
-        hidden_states = hidden_states.flatten(-2)
+        del query, key, value  # free memory
+        hidden_states_attn = hidden_states_attn.flatten(-2)
 
-        txt_length = encoder_hidden_states.shape[1]
-        hidden_states, encoder_hidden_states = hidden_states[:, :-txt_length], hidden_states[:, -txt_length:]
+        hidden_states, encoder_hidden_states = hidden_states_attn[:, :-txt_length], hidden_states_attn[:, -txt_length:]
+        del hidden_states_attn  # free memory
 
+        # Apply output projections
         hidden_states = attn.to_out[0](hidden_states)
-        hidden_states = attn.to_out[1](hidden_states)
+        hidden_states = attn.to_out[1](hidden_states)  # Dropout/Identity
         encoder_hidden_states = attn.to_add_out(encoder_hidden_states)
 
         return hidden_states, encoder_hidden_states
@@ -837,12 +851,17 @@ class HunyuanAttnProcessorFlashAttnSingle:
         attn_mode: Optional[str] = None,
     ):
         cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv = attention_mask
+        txt_length = encoder_hidden_states.shape[1]  # Store text length
 
-        hidden_states = torch.cat([hidden_states, encoder_hidden_states], dim=1)
+        # Concatenate image and context inputs
+        hidden_states_cat = torch.cat([hidden_states, encoder_hidden_states], dim=1)
+        del hidden_states, encoder_hidden_states  # free memory
 
-        query = attn.to_q(hidden_states)
-        key = attn.to_k(hidden_states)
-        value = attn.to_v(hidden_states)
+        # Project concatenated inputs
+        query = attn.to_q(hidden_states_cat)
+        key = attn.to_k(hidden_states_cat)
+        value = attn.to_v(hidden_states_cat)
+        del hidden_states_cat  # free memory
 
         query = query.unflatten(2, (attn.heads, -1))
         key = key.unflatten(2, (attn.heads, -1))
@@ -851,14 +870,14 @@ class HunyuanAttnProcessorFlashAttnSingle:
         query = attn.norm_q(query)
         key = attn.norm_k(key)
 
-        txt_length = encoder_hidden_states.shape[1]
-
         query = torch.cat([apply_rotary_emb_transposed(query[:, :-txt_length], image_rotary_emb), query[:, -txt_length:]], dim=1)
         key = torch.cat([apply_rotary_emb_transposed(key[:, :-txt_length], image_rotary_emb), key[:, -txt_length:]], dim=1)
+        del image_rotary_emb  # free memory
 
         hidden_states = attn_varlen_func(
             query, key, value, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv, attn_mode=attn_mode
         )
+        del query, key, value  # free memory
         hidden_states = hidden_states.flatten(-2)
 
         hidden_states, encoder_hidden_states = hidden_states[:, :-txt_length], hidden_states[:, -txt_length:]
@@ -929,7 +948,7 @@ class HunyuanVideoIndividualTokenRefinerBlock(nn.Module):
         self,
         num_attention_heads: int,
         attention_head_dim: int,
-        mlp_width_ratio: str = 4.0,
+        mlp_width_ratio: float = 4.0,
         mlp_drop_rate: float = 0.0,
         attention_bias: bool = True,
     ) -> None:
@@ -959,17 +978,21 @@ class HunyuanVideoIndividualTokenRefinerBlock(nn.Module):
     ) -> torch.Tensor:
         norm_hidden_states = self.norm1(hidden_states)
 
+        # Self-attention
         attn_output = self.attn(
             hidden_states=norm_hidden_states,
             encoder_hidden_states=None,
             attention_mask=attention_mask,
         )
+        del norm_hidden_states  # free memory
 
         gate_msa, gate_mlp = self.norm_out(temb)
         hidden_states = hidden_states + attn_output * gate_msa
+        del attn_output, gate_msa  # free memory
 
         ff_output = self.ff(self.norm2(hidden_states))
         hidden_states = hidden_states + ff_output * gate_mlp
+        del ff_output, gate_mlp  # free memory
 
         return hidden_states
 
@@ -1004,7 +1027,7 @@ class HunyuanVideoIndividualTokenRefiner(nn.Module):
         hidden_states: torch.Tensor,
         temb: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
-    ) -> None:
+    ) -> torch.Tensor:
         self_attn_mask = None
         if attention_mask is not None:
             batch_size = attention_mask.shape[0]
@@ -1062,8 +1085,11 @@ class HunyuanVideoTokenRefiner(nn.Module):
             pooled_projections = pooled_projections.to(original_dtype)
 
         temb = self.time_text_embed(timestep, pooled_projections)
+        del pooled_projections  # free memory
+
         hidden_states = self.proj_in(hidden_states)
         hidden_states = self.token_refiner(hidden_states, temb, attention_mask)
+        del temb, attention_mask  # free memory
 
         return hidden_states
 
@@ -1091,12 +1117,17 @@ class HunyuanVideoRotaryPosEmbed(nn.Module):
         )
 
         FCT, FST = self.get_frequency(self.DT, GT)
+        del GT  # free memory
         FCY, FSY = self.get_frequency(self.DY, GY)
+        del GY  # free memory
         FCX, FSX = self.get_frequency(self.DX, GX)
+        del GX  # free memory
 
         result = torch.cat([FCT, FCY, FCX, FST, FSY, FSX], dim=0)
+        del FCT, FCY, FCX, FST, FSY, FSX  # free memory
 
-        return result.to(device)
+        # Return result already on the correct device
+        return result  # Shape (2 * total_dim / 2, T, H, W) -> (total_dim, T, H, W)
 
     @torch.no_grad()
     def forward(self, frame_indices, height, width, device):
@@ -1117,9 +1148,7 @@ class AdaLayerNormZero(nn.Module):
             raise ValueError(f"unknown norm_type {norm_type}")
 
     def forward(
-        self,
-        x: torch.Tensor,
-        emb: Optional[torch.Tensor] = None,
+        self, x: torch.Tensor, emb: Optional[torch.Tensor] = None
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         emb = emb.unsqueeze(-2)
         emb = self.linear(self.silu(emb))
@@ -1143,7 +1172,7 @@ class AdaLayerNormZeroSingle(nn.Module):
         self,
         x: torch.Tensor,
         emb: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         emb = emb.unsqueeze(-2)
         emb = self.linear(self.silu(emb))
         shift_msa, scale_msa, gate_msa = emb.chunk(3, dim=-1)
@@ -1173,6 +1202,7 @@ class AdaLayerNormContinuous(nn.Module):
         emb = emb.unsqueeze(-2)
         emb = self.linear(self.silu(emb))
         scale, shift = emb.chunk(2, dim=-1)
+        del emb  # free memory
         x = self.norm(x) * (1 + scale) + shift
         return x
 
@@ -1192,6 +1222,7 @@ class HunyuanVideoSingleTransformerBlock(nn.Module):
         mlp_dim = int(hidden_size * mlp_ratio)
         self.attn_mode = attn_mode
 
+        # Attention layer (pre_only=True means no output projection in Attention module itself)
         self.attn = Attention(
             query_dim=hidden_size,
             cross_attention_dim=None,
@@ -1202,7 +1233,7 @@ class HunyuanVideoSingleTransformerBlock(nn.Module):
             processor=HunyuanAttnProcessorFlashAttnSingle(),
             qk_norm=qk_norm,
             eps=1e-6,
-            pre_only=True,
+            pre_only=True,  # Crucial: Attn processor will return raw attention output
         )
 
         self.norm = AdaLayerNormZeroSingle(hidden_size, norm_type="layer_norm")
@@ -1220,6 +1251,7 @@ class HunyuanVideoSingleTransformerBlock(nn.Module):
     ) -> torch.Tensor:
         text_seq_length = encoder_hidden_states.shape[1]
         hidden_states = torch.cat([hidden_states, encoder_hidden_states], dim=1)
+        del encoder_hidden_states  # free memory
 
         residual = hidden_states
 
@@ -1241,9 +1273,12 @@ class HunyuanVideoSingleTransformerBlock(nn.Module):
             attn_mode=self.attn_mode,
         )
         attn_output = torch.cat([attn_output, context_attn_output], dim=1)
+        del norm_hidden_states, norm_encoder_hidden_states, context_attn_output  # free memory
+        del image_rotary_emb
 
         # 3. Modulation and residual connection
         hidden_states = torch.cat([attn_output, mlp_hidden_states], dim=2)
+        del attn_output, mlp_hidden_states  # free memory
         hidden_states = gate * self.proj_out(hidden_states)
         hidden_states = hidden_states + residual
 
@@ -1313,23 +1348,32 @@ class HunyuanVideoTransformerBlock(nn.Module):
             image_rotary_emb=freqs_cis,
             attn_mode=self.attn_mode,
         )
+        del norm_hidden_states, norm_encoder_hidden_states, freqs_cis  # free memory
 
         # 3. Modulation and residual connection
         hidden_states = hidden_states + attn_output * gate_msa
+        del attn_output, gate_msa  # free memory
         encoder_hidden_states = encoder_hidden_states + context_attn_output * c_gate_msa
+        del context_attn_output, c_gate_msa  # free memory
 
         norm_hidden_states = self.norm2(hidden_states)
         norm_encoder_hidden_states = self.norm2_context(encoder_hidden_states)
 
         norm_hidden_states = norm_hidden_states * (1 + scale_mlp) + shift_mlp
+        del shift_mlp, scale_mlp  # free memory
         norm_encoder_hidden_states = norm_encoder_hidden_states * (1 + c_scale_mlp) + c_shift_mlp
+        del c_shift_mlp, c_scale_mlp  # free memory
 
         # 4. Feed-forward
         ff_output = self.ff(norm_hidden_states)
+        del norm_hidden_states  # free memory
         context_ff_output = self.ff_context(norm_encoder_hidden_states)
+        del norm_encoder_hidden_states  # free memory
 
         hidden_states = hidden_states + gate_mlp * ff_output
+        del ff_output, gate_mlp  # free memory
         encoder_hidden_states = encoder_hidden_states + c_gate_mlp * context_ff_output
+        del context_ff_output, c_gate_mlp  # free memory
 
         return hidden_states, encoder_hidden_states
 
@@ -1465,6 +1509,7 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
 
         self.high_quality_fp32_output_for_inference = True  # False # change default to True
 
+        # Block swapping attributes (initialized to None)
         self.blocks_to_swap = None
         self.offloader_double = None
         self.offloader_single = None
@@ -1479,11 +1524,11 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
 
     def enable_gradient_checkpointing(self):
         self.use_gradient_checkpointing = True
-        print("self.use_gradient_checkpointing = True")
+        print("Gradient checkpointing enabled for HunyuanVideoTransformer3DModelPacked.")  # Logging
 
     def disable_gradient_checkpointing(self):
         self.use_gradient_checkpointing = False
-        print("self.use_gradient_checkpointing = False")
+        print("Gradient checkpointing disabled for HunyuanVideoTransformer3DModelPacked.")  # Logging
 
     def initialize_teacache(self, enable_teacache=True, num_steps=25, rel_l1_thresh=0.15):
         self.enable_teacache = enable_teacache
@@ -1494,6 +1539,10 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
         self.previous_modulated_input = None
         self.previous_residual = None
         self.teacache_rescale_func = np.poly1d([7.33226126e02, -4.01131952e02, 6.75869174e01, -3.14987800e00, 9.61237896e-02])
+        if enable_teacache:
+            print(f"TeaCache enabled: num_steps={num_steps}, rel_l1_thresh={rel_l1_thresh}")
+        else:
+            print("TeaCache disabled.")
 
     def gradient_checkpointing_method(self, block, *args):
         if self.use_gradient_checkpointing:
@@ -1520,7 +1569,8 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
             self.num_double_blocks,
             double_blocks_to_swap,
             supports_backward,
-            device,  # , debug=True
+            device,
+            # debug=True # Optional debugging
         )
         self.offloader_single = ModelOffloader(
             "single",
@@ -1535,14 +1585,14 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
         )
 
     def switch_block_swap_for_inference(self):
-        if self.blocks_to_swap:
+        if self.blocks_to_swap and self.blocks_to_swap > 0:
             self.offloader_double.set_forward_only(True)
             self.offloader_single.set_forward_only(True)
             self.prepare_block_swap_before_forward()
             print(f"HunyuanVideoTransformer3DModelPacked: Block swap set to forward only.")
 
     def switch_block_swap_for_training(self):
-        if self.blocks_to_swap:
+        if self.blocks_to_swap and self.blocks_to_swap > 0:
             self.offloader_double.set_forward_only(False)
             self.offloader_single.set_forward_only(False)
             self.prepare_block_swap_before_forward()
@@ -1551,16 +1601,16 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
     def move_to_device_except_swap_blocks(self, device: torch.device):
         # assume model is on cpu. do not move blocks to device to reduce temporary memory usage
         if self.blocks_to_swap:
-            save_double_blocks = self.transformer_blocks
-            save_single_blocks = self.single_transformer_blocks
+            saved_double_blocks = self.transformer_blocks
+            saved_single_blocks = self.single_transformer_blocks
             self.transformer_blocks = None
             self.single_transformer_blocks = None
 
         self.to(device)
 
         if self.blocks_to_swap:
-            self.transformer_blocks = save_double_blocks
-            self.single_transformer_blocks = save_single_blocks
+            self.transformer_blocks = saved_double_blocks
+            self.single_transformer_blocks = saved_single_blocks
 
     def prepare_block_swap_before_forward(self):
         if self.blocks_to_swap is None or self.blocks_to_swap == 0:
@@ -1675,6 +1725,15 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
             clean_latents_4x,
             clean_latent_4x_indices,
         )
+        del (
+            latent_indices,
+            clean_latents,
+            clean_latent_indices,
+            clean_latents_2x,
+            clean_latent_2x_indices,
+            clean_latents_4x,
+            clean_latent_4x_indices,
+        )  # free memory
 
         temb = self.gradient_checkpointing_method(self.time_text_embed, timestep, guidance, pooled_projections)
         encoder_hidden_states = self.gradient_checkpointing_method(
@@ -1693,6 +1752,7 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
             # must cat before (not after) encoder_hidden_states, due to attn masking
             encoder_hidden_states = torch.cat([extra_encoder_hidden_states, encoder_hidden_states], dim=1)
             encoder_attention_mask = torch.cat([extra_attention_mask, encoder_attention_mask], dim=1)
+            del extra_encoder_hidden_states, extra_attention_mask  # free memory
 
         with torch.no_grad():
             if batch_size == 1:
@@ -1711,6 +1771,8 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
                 max_seqlen_kv = max_seqlen_q
 
                 attention_mask = cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv
+                del cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv  # free memory
+        del encoder_attention_mask  # free memory
 
         if self.enable_teacache:
             modulated_inp = self.transformer_blocks[0].norm1(hidden_states, emb=temb)[0]
@@ -1752,16 +1814,32 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
                     )
 
                 self.previous_residual = hidden_states - ori_hidden_states
+                del ori_hidden_states  # free memory
         else:
             for block_id, block in enumerate(self.transformer_blocks):
+                if self.blocks_to_swap:
+                    self.offloader_double.wait_for_block(block_id)
+
                 hidden_states, encoder_hidden_states = self.gradient_checkpointing_method(
                     block, hidden_states, encoder_hidden_states, temb, attention_mask, rope_freqs
                 )
 
+                if self.blocks_to_swap:
+                    self.offloader_double.submit_move_blocks_forward(self.transformer_blocks, block_id)
+
             for block_id, block in enumerate(self.single_transformer_blocks):
+                if self.blocks_to_swap:
+                    self.offloader_single.wait_for_block(block_id)
+
                 hidden_states, encoder_hidden_states = self.gradient_checkpointing_method(
                     block, hidden_states, encoder_hidden_states, temb, attention_mask, rope_freqs
                 )
+
+                if self.blocks_to_swap:
+                    self.offloader_single.submit_move_blocks_forward(self.single_transformer_blocks, block_id)
+
+        del attention_mask, rope_freqs  # free memory
+        del encoder_hidden_states  # free memory
 
         hidden_states = self.gradient_checkpointing_method(self.norm_out, hidden_states, temb)
 
@@ -1790,6 +1868,33 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
             return SimpleNamespace(sample=hidden_states)
 
         return (hidden_states,)
+
+    def fp8_optimization(
+        self, state_dict: dict[str, torch.Tensor], device: torch.device, move_to_device: bool, use_scaled_mm: bool = False
+    ) -> dict[str, torch.Tensor]:  # Return type hint added
+        """
+        Optimize the model state_dict with fp8.
+
+        Args:
+            state_dict (dict[str, torch.Tensor]):
+                The state_dict of the model.
+            device (torch.device):
+                The device to calculate the weight.
+            move_to_device (bool):
+                Whether to move the weight to the device after optimization.
+            use_scaled_mm (bool):
+                Whether to use scaled matrix multiplication for FP8.
+        """
+        TARGET_KEYS = ["transformer_blocks", "single_transformer_blocks"]
+        EXCLUDE_KEYS = ["norm"]  # Exclude norm layers (e.g., LayerNorm, RMSNorm) from FP8
+
+        # inplace optimization
+        state_dict = optimize_state_dict_with_fp8(state_dict, device, TARGET_KEYS, EXCLUDE_KEYS, move_to_device=move_to_device)
+
+        # apply monkey patching
+        apply_fp8_monkey_patch(self, state_dict, use_scaled_mm=use_scaled_mm)
+
+        return state_dict
 
 
 def load_packed_model(
