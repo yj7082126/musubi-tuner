@@ -564,6 +564,48 @@ def optimize_model(model: HunyuanVideoTransformer3DModelPacked, args: argparse.N
 # endregion
 
 
+def decode_latent(args: argparse.Namespace, vae: AutoencoderKLCausal3D, latent: torch.Tensor, device: torch.device) -> torch.Tensor:
+    logger.info(f"Decoding video...")
+    vae.to(device)
+    if not args.bulk_decode:
+        latent_window_size = args.latent_window_size  # default is 9
+        total_latent_sections = (args.video_seconds * 30) / (latent_window_size * 4)
+        total_latent_sections = int(max(round(total_latent_sections), 1))
+        num_frames = latent_window_size * 4 - 3
+
+        latents_to_decode = []
+        latent_frame_index = 0
+        for i in range(total_latent_sections - 1, -1, -1):
+            is_last_section = i == total_latent_sections - 1
+            generated_latent_frames = (num_frames + 3) // 4 + (1 if is_last_section else 0)
+            section_latent_frames = (latent_window_size * 2 + 1) if is_last_section else (latent_window_size * 2)
+
+            section_latent = latent[:, :, latent_frame_index : latent_frame_index + section_latent_frames, :, :]
+            latents_to_decode.append(section_latent)
+
+            latent_frame_index += generated_latent_frames
+
+        latents_to_decode = latents_to_decode[::-1]  # reverse the order of latents to decode
+
+        history_pixels = None
+        for latent in tqdm(latents_to_decode):
+            if history_pixels is None:
+                history_pixels = hunyuan.vae_decode(latent, vae).cpu()
+            else:
+                overlapped_frames = latent_window_size * 4 - 3
+                current_pixels = hunyuan.vae_decode(latent, vae).cpu()
+                history_pixels = soft_append_bcthw(current_pixels, history_pixels, overlapped_frames)
+            clean_memory_on_device(device)
+    else:
+        # bulk decode
+        logger.info(f"Bulk decoding")
+        history_pixels = hunyuan.vae_decode(latent, vae).cpu()
+    vae.to("cpu")
+
+    print(f"Decoded. Pixel shape {history_pixels.shape}")
+    return history_pixels[0]  # remove batch dimension
+
+
 def prepare_i2v_inputs(
     args: argparse.Namespace,
     device: torch.device,
@@ -803,9 +845,8 @@ def generate(args: argparse.Namespace, gen_settings: GenerationSettings, shared_
 
     # sampling
     latent_window_size = args.latent_window_size  # default is 9
-    total_latent_sections = (video_seconds * 30) / (
-        latent_window_size * 4
-    )  # ex: (5s * 30fps) / (9 * 4) = 4.16 -> 4 sections, 60s -> 1800 / 36 = 50 sections
+    # ex: (5s * 30fps) / (9 * 4) = 4.16 -> 4 sections, 60s -> 1800 / 36 = 50 sections
+    total_latent_sections = (video_seconds * 30) / (latent_window_size * 4)
     total_latent_sections = int(max(round(total_latent_sections), 1))
 
     # set random generator
@@ -832,7 +873,6 @@ def generate(args: argparse.Namespace, gen_settings: GenerationSettings, shared_
         # 4 sections: 3, 2, 1, 0. 50 sections: 3, 2, 2, ... 2, 1, 0
         latent_paddings = [3] + [2] * (total_latent_sections - 3) + [1, 0]
 
-    latents_to_decode = []  # for decoding after generation. splitting video to sections makes memory usage smaller for decoding
     for latent_padding in latent_paddings:
         is_last_section = latent_padding == 0
         latent_padding_size = latent_padding * latent_window_size
@@ -906,13 +946,7 @@ def generate(args: argparse.Namespace, gen_settings: GenerationSettings, shared_
 
         real_history_latents = history_latents[:, :, :total_generated_latent_frames, :, :]
 
-        logger.info(f"Generated. Current latent shape {real_history_latents.shape}")
-
-        if len(latents_to_decode) == 0:
-            latents_to_decode.append(real_history_latents)
-        else:
-            section_latent_frames = (latent_window_size * 2 + 1) if is_last_section else (latent_window_size * 2)
-            latents_to_decode.append(real_history_latents[:, :, :section_latent_frames, :, :])
+        logger.info(f"Generated. Latent shape {real_history_latents.shape}")
 
         # # TODO support saving intermediate video
         # clean_memory_on_device(device)
@@ -944,39 +978,14 @@ def generate(args: argparse.Namespace, gen_settings: GenerationSettings, shared_
     gc.collect()
     clean_memory_on_device(device)
 
-    logger.info(f"Decoding video...")
-    vae.to(device)
-    if not args.bulk_decode:
-        history_pixels = None
-        for latents in tqdm(latents_to_decode):
-            if history_pixels is None:
-                history_pixels = hunyuan.vae_decode(latents, vae).cpu()
-            else:
-                overlapped_frames = latent_window_size * 4 - 3
-                current_pixels = hunyuan.vae_decode(latents, vae).cpu()
-                history_pixels = soft_append_bcthw(current_pixels, history_pixels, overlapped_frames)
-            clean_memory_on_device(device)
-    else:
-        # bulk decode
-        logger.info(f"Bulk decoding. Real history latents shape {history_latents.shape}")
-        history_pixels = hunyuan.vae_decode(real_history_latents, vae).cpu()
-    vae.to("cpu")
-
-    latents_to_decode.insert(0, real_history_latents)
-
-    # if not is_last_section:
-    #     # save intermediate video
-    #     save_video(history_pixels[0], args, total_generated_latent_frames)
-    print(f"Decoded. Pixel shape {history_pixels.shape}")
-
-    return latents_to_decode, history_pixels[0]
+    return vae, real_history_latents
 
 
-def save_latent(list_of_latent: list[torch.Tensor], args: argparse.Namespace, height: int, width: int) -> str:
+def save_latent(latent: torch.Tensor, args: argparse.Namespace, height: int, width: int) -> str:
     """Save latent to file
 
     Args:
-        list_of_latent: list of latent tensors
+        latent: Latent tensor
         args: command line arguments
         height: height of frame
         width: width of frame
@@ -1003,16 +1012,17 @@ def save_latent(list_of_latent: list[torch.Tensor], args: argparse.Namespace, he
             "video_seconds": f"{video_seconds}",
             "infer_steps": f"{args.infer_steps}",
             "guidance_scale": f"{args.guidance_scale}",
+            "latent_window_size": f"{args.latent_window_size}",
+            "embedded_cfg_scale": f"{args.embedded_cfg_scale}",
+            "guidance_rescale": f"{args.guidance_rescale}",
+            "sample_solver": f"{args.sample_solver}",
+            "latent_window_size": f"{args.latent_window_size}",
+            "fps": f"{args.fps}",
         }
         if args.negative_prompt is not None:
             metadata["negative_prompt"] = f"{args.negative_prompt}"
 
-    # sd = {"latent": latent.contiguous()}
-    sd = {}
-    for i, latent in enumerate(list_of_latent):
-        latent = latent.contiguous()
-        sd[f"latent_{i}"] = latent
-
+    sd = {"latent": latent.contiguous()}
     save_file(sd, latent_path, metadata=metadata)
     logger.info(f"Latent saved to: {latent_path}")
 
@@ -1502,8 +1512,10 @@ def main():
 
         # Generate latent
         gen_settings = get_generation_settings(args)
-        list_of_latent, video = generate(args, gen_settings)
-        print(f"Generated latent shape: {[l.shape for l in list_of_latent]}, video shape: {video.shape}")
+        vae, latent = generate(args, gen_settings)
+        # print(f"Generated latent shape: {latent.shape}")
+
+        video = decode_latent(args, vae, latent, device)
 
         # Make sure the model is freed from GPU memory
         gc.collect()
@@ -1513,7 +1525,7 @@ def main():
         # if args.save_merged_model:
         #     return
 
-        save_output(list_of_latent, video, args)
+        save_output(latent, video, args)
 
     logger.info("Done!")
 
