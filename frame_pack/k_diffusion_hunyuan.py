@@ -69,10 +69,10 @@ def sample_hunyuan(
     ).to(device=device, dtype=torch.float32)
 
     B, C, T, H, W = latents.shape
-    seq_length = T * H * W // 4
+    seq_length = T * H * W // 4  # 9*80*80//4 = 14400
 
     if shift is None:
-        mu = calculate_flux_mu(seq_length, exp_max=7.0)
+        mu = calculate_flux_mu(seq_length, exp_max=7.0)  # 1.9459... if seq_len is large, mu is clipped.
     else:
         mu = math.log(shift)
 

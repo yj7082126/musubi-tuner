@@ -96,7 +96,7 @@ def vae_decode_fake(latents):
 
 
 @torch.no_grad()
-def vae_decode(latents, vae, image_mode=False):
+def vae_decode(latents, vae, image_mode=False) -> torch.Tensor:
     latents = latents / vae.config.scaling_factor
 
     if not image_mode:
@@ -110,7 +110,7 @@ def vae_decode(latents, vae, image_mode=False):
 
 
 @torch.no_grad()
-def vae_encode(image, vae:AutoencoderKLCausal3D):
+def vae_encode(image, vae: AutoencoderKLCausal3D) -> torch.Tensor:
     latents = vae.encode(image.to(device=vae.device, dtype=vae.dtype)).latent_dist.sample()
     latents = latents * vae.config.scaling_factor
     return latents
