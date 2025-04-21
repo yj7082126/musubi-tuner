@@ -345,9 +345,9 @@ class FramePackNetworkTrainer(NetworkTrainer):
         distilled_guidance = torch.tensor([args.guidance_scale * 1000.0] * batch_size).to(device=device, dtype=network_dtype)
         latents = latents.to(device=accelerator.device, dtype=network_dtype)
         noisy_model_input = noisy_model_input.to(device=accelerator.device, dtype=network_dtype)
-        for k, v in batch.items():
-            if isinstance(v, torch.Tensor):
-                print(f"{k}: {v.shape} {v.dtype} {v.device}")
+        # for k, v in batch.items():
+        #     if isinstance(v, torch.Tensor):
+        #         print(f"{k}: {v.shape} {v.dtype} {v.device}")
         with accelerator.autocast():
             model_pred = model(
                 hidden_states=noisy_model_input,
