@@ -29,6 +29,8 @@ HunyuanVideoとの主な違いは次のとおりです。
 
 You need to download the DiT, VAE, Text Encoder 1 (LLaMA), Text Encoder 2 (CLIP), and Image Encoder (SigLIP) models specifically for FramePack. Several download options are available for each component.
 
+***Note:** The weights are publicly available on the following page: [maybleMyers/framepack_h1111](https://huggingface.co/maybleMyers/framepack_h1111). Thank you maybleMyers!
+
 ### DiT Model
 
 Choose one of the following methods:
@@ -71,6 +73,8 @@ Choose one of the following methods:
 
 <details>
 <summary>日本語</summary>
+
+※以下のページに重みが一括で公開されています。maybleMyers 氏に感謝いたします。: https://huggingface.co/maybleMyers/framepack_h1111
 
 DiT、VAE、テキストエンコーダー1（LLaMA）、テキストエンコーダー2（CLIP）、および画像エンコーダー（SigLIP）モデルは複数の方法でダウンロードできます。英語の説明を参考にして、ダウンロードしてください。
 
