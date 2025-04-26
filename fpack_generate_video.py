@@ -419,7 +419,7 @@ def decode_latent(
         history_pixels = hunyuan.vae_decode(latent, vae).cpu()
     vae.to("cpu")
 
-    print(f"Decoded. Pixel shape {history_pixels.shape}")
+    logger.info(f"Decoded. Pixel shape {history_pixels.shape}")
     return history_pixels[0]  # remove batch dimension
 
 
@@ -496,7 +496,6 @@ def prepare_i2v_inputs(
         return image_tensor, image_np
 
     section_image_paths = parse_section_strings(args.image_path)
-    print(f"section_image_paths: {section_image_paths}")
 
     section_images = {}
     for index, image_path in section_image_paths.items():
@@ -505,7 +504,8 @@ def prepare_i2v_inputs(
 
     if args.end_image_path is not None:
         end_img_tensor, end_img_np = preprocess_image(args.end_image_path)
-        section_images[-1] = (end_img_tensor, end_img_np)
+    else:
+        end_img_tensor, end_img_np = None, None
 
     # configure negative prompt
     n_prompt = args.negative_prompt if args.negative_prompt else ""
@@ -513,7 +513,6 @@ def prepare_i2v_inputs(
     if encoded_context is None:
         # parse section prompts
         section_prompts = parse_section_strings(args.prompt)
-        print(f"section_prompts: {section_prompts}")
 
         # load text encoder
         tokenizer1, text_encoder1 = load_text_encoder1(args, args.fp8_llm, device)
@@ -580,10 +579,14 @@ def prepare_i2v_inputs(
     # VAE encoding
     logger.info(f"Encoding image to latent space")
     vae.to(device)
+
     section_start_latents = {}
     for index, (img_tensor, img_np) in section_images.items():
         start_latent = hunyuan.vae_encode(img_tensor, vae).cpu()
         section_start_latents[index] = start_latent
+
+    end_latent = hunyuan.vae_encode(end_img_tensor, vae).cpu() if end_img_tensor is not None else None
+
     vae.to("cpu")  # move VAE to CPU to save memory
     clean_memory_on_device(device)
 
@@ -615,7 +618,7 @@ def prepare_i2v_inputs(
         arg_c_img_i = {"image_encoder_last_hidden_state": image_encoder_last_hidden_state, "start_latent": start_latent}
         arg_c_img[index] = arg_c_img_i
 
-    return height, width, video_seconds, arg_c, arg_null, arg_c_img
+    return height, width, video_seconds, arg_c, arg_null, arg_c_img, end_latent
 
 
 # def setup_scheduler(args: argparse.Namespace, config, device: torch.device) -> Tuple[Any, torch.Tensor]:
@@ -688,13 +691,13 @@ def generate(args: argparse.Namespace, gen_settings: GenerationSettings, shared_
         n_prompt = args.negative_prompt if args.negative_prompt else ""
         encoded_context_n = shared_models.get("encoded_contexts", {}).get(n_prompt)
 
-        height, width, video_seconds, context, context_null, context_img = prepare_i2v_inputs(
+        height, width, video_seconds, context, context_null, context_img, end_latent = prepare_i2v_inputs(
             args, device, vae, encoded_context, encoded_context_n
         )
     else:
         # prepare inputs without shared models
         vae = load_vae(args.vae, args.vae_chunk_size, args.vae_spatial_tile_sample_min_size, device)
-        height, width, video_seconds, context, context_null, context_img = prepare_i2v_inputs(args, device, vae)
+        height, width, video_seconds, context, context_null, context_img, end_latent = prepare_i2v_inputs(args, device, vae)
 
         # load DiT model
         model = load_dit_model(args, device)
@@ -721,12 +724,15 @@ def generate(args: argparse.Namespace, gen_settings: GenerationSettings, shared_
     num_frames = latent_window_size * 4 - 3
 
     logger.info(
-        f"Video size: {height}x{width}@{video_seconds} (HxW@seconds), fps: {args.fps}, "
+        f"Video size: {height}x{width}@{video_seconds} (HxW@seconds), fps: {args.fps}, num sections: {total_latent_sections}, "
         f"infer_steps: {args.infer_steps}, frames per generation: {num_frames}"
     )
 
     history_latents = torch.zeros((1, 16, 1 + 2 + 16, height // 8, width // 8), dtype=torch.float32)
-    # history_pixels = None
+    if end_latent is not None:
+        logger.info(f"Use end image: {args.end_image_path}")
+        history_latents[:, :, 0:1] = end_latent.to(history_latents)
+
     total_generated_latent_frames = 0
 
     latent_paddings = reversed(range(total_latent_sections))
