@@ -133,7 +133,7 @@ Install the required dependencies using the following command:
 pip install -r requirements.txt
 ```
 
-Optionally, you can use FlashAttention and SageAttention (for inference only; see [SageAttention Installation](#sageattention-installation) for installation instructions).
+Optionally, you can use FlashAttention and SageAttention (**for inference only**; see [SageAttention Installation](#sageattention-installation) for installation instructions).
 
 Optional dependencies for additional features:
 - `ascii-magic`: Used for dataset verification
@@ -318,7 +318,7 @@ If you're running low on VRAM, use `--blocks_to_swap` to offload some blocks to 
 
 (The idea of block swap is based on the implementation by 2kpr. Thanks again to 2kpr.)
 
-Use `--sdpa` for PyTorch's scaled dot product attention. Use `--flash_attn` for [FlashAttention](https://github.com/Dao-AILab/flash-attention). Use `--xformers` for xformers, but specify `--split_attn` when using xformers. Use `--sage_attn` for SageAttention, but SageAttention is not yet supported for training and will not work correctly.
+Use `--sdpa` for PyTorch's scaled dot product attention. Use `--flash_attn` for [FlashAttention](https://github.com/Dao-AILab/flash-attention). Use `--xformers` for xformers, but specify `--split_attn` when using xformers. `--sage_attn` for SageAttention, but SageAttention is not yet supported for training, so it raises a ValueError.
 
 `--split_attn` processes attention in chunks. Speed may be slightly reduced, but VRAM usage is slightly reduced.
 
