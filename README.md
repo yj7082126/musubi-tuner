@@ -7,6 +7,7 @@
 - [Musubi Tuner](#musubi-tuner)
   - [Table of Contents](#table-of-contents)
   - [Introduction](#introduction)
+    - [Support the Project](#support-the-project)
     - [Recent Updates](#recent-updates)
     - [Releases](#releases)
   - [Overview](#overview)
@@ -47,9 +48,13 @@ For Wan2.1, please also refer to [Wan2.1 documentation](./docs/wan.md). For Fram
 
 *This repository is under development.*
 
+### Support the Project
+
+If you find this project helpful, please consider supporting its development via [GitHub Sponsors](https://github.com/sponsors/kohya-ss/). Your support is greatly appreciated!
+
 ### Recent Updates
 
-- **[NEW] GitHub Discussions Enabled**: We've enabled GitHub Discussions for community Q&A, knowledge sharing, and technical information exchange. Please use Issues for bug reports and feature requests, and Discussions for questions and sharing experiences. [Join the conversation →](https://github.com/kohya-ss/musubi-tuner/discussions)
+- GitHub Discussions Enabled: We've enabled GitHub Discussions for community Q&A, knowledge sharing, and technical information exchange. Please use Issues for bug reports and feature requests, and Discussions for questions and sharing experiences. [Join the conversation →](https://github.com/kohya-ss/musubi-tuner/discussions)
 
 - Apr 26, 2025:
     - Added inference and LoRA training for FramePack. PR [#230](https://github.com/kohya-ss/musubi-tuner/pull/230). See [FramePack documentation](./docs/framepack.md) for details.
