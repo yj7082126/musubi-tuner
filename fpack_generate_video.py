@@ -726,7 +726,7 @@ def generate(args: argparse.Namespace, gen_settings: GenerationSettings, shared_
             merge_lora_weights(lora_framepack, model, args, device)  # ugly hack to common merge_lora_weights function
             # if we only want to save the model, we can skip the rest
             if args.save_merged_model:
-                return None
+                return None, None
 
         # optimize model: fp8 conversion, block swap etc.
         optimize_model(model, args, device)
@@ -1192,11 +1192,10 @@ def main():
         gen_settings = get_generation_settings(args)
         vae, latent = generate(args, gen_settings)
         # print(f"Generated latent shape: {latent.shape}")
+        if args.save_merged_model:
+            return
 
-        # # Save latent and video
-        # if args.save_merged_model:
-        #     return
-
+        # Save latent and video
         save_output(args, vae, latent[0], device)
 
     logger.info("Done!")
