@@ -17,7 +17,7 @@ def encode_prompt_conds(prompt, text_encoder, text_encoder_2, tokenizer, tokeniz
 
     # LLAMA
 
-    # # debug
+    # We can verify crop_start by checking the token count of the prompt:
     # custom_system_prompt = (
     #     "Describe the video by detailing the following aspects: "
     #     "1. The main content and theme of the video."
