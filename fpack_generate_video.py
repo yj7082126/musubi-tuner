@@ -94,6 +94,12 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="negative prompt for generation, default is empty string. should not change.",
     )
+    parser.add_argument(
+        "--custom_system_prompt",
+        type=str,
+        default=None,
+        help="Custom system prompt for LLM. If specified, it will override the default system prompt. See hunyuan_model/text_encoder.py for the default system prompt.",
+    )
     parser.add_argument("--video_size", type=int, nargs=2, default=[256, 256], help="video size, height and width")
     parser.add_argument("--video_seconds", type=float, default=5.0, help="video length, Default is 5.0 seconds")
     parser.add_argument("--fps", type=int, default=30, help="video fps, Default is 30")
@@ -122,6 +128,12 @@ def parse_args() -> argparse.Namespace:
         help="path to image for image2video inference. If `;;;` is used, it will be used as section images. The notation is same as `--prompt`.",
     )
     parser.add_argument("--end_image_path", type=str, default=None, help="path to end image for image2video inference")
+    parser.add_argument(
+        "--latent_paddings",
+        type=str,
+        default=None,
+        help="latent paddings for each section, comma separated values. default is None (FramePack default paddings)",
+    )
     # parser.add_argument(
     #     "--control_path",
     #     type=str,
@@ -183,8 +195,9 @@ def parse_args() -> argparse.Namespace:
     if args.from_file and args.interactive:
         raise ValueError("Cannot use both --from_file and --interactive at the same time")
 
-    if args.prompt is None and not args.from_file and not args.interactive:
-        raise ValueError("Either --prompt, --from_file or --interactive must be specified")
+    if args.latent_path is None or len(args.latent_path) == 0:
+        if args.prompt is None and not args.from_file and not args.interactive:
+            raise ValueError("Either --prompt, --from_file or --interactive must be specified")
 
     return args
 
@@ -525,7 +538,9 @@ def prepare_i2v_inputs(
         clip_l_poolers = {}
         with torch.autocast(device_type=device.type, dtype=text_encoder1.dtype), torch.no_grad():
             for index, prompt in section_prompts.items():
-                llama_vec, clip_l_pooler = hunyuan.encode_prompt_conds(prompt, text_encoder1, text_encoder2, tokenizer1, tokenizer2)
+                llama_vec, clip_l_pooler = hunyuan.encode_prompt_conds(
+                    prompt, text_encoder1, text_encoder2, tokenizer1, tokenizer2, custom_system_prompt=args.custom_system_prompt
+                )
                 llama_vec = llama_vec.cpu()
                 clip_l_pooler = clip_l_pooler.cpu()
 
@@ -540,7 +555,7 @@ def prepare_i2v_inputs(
         else:
             with torch.autocast(device_type=device.type, dtype=text_encoder1.dtype), torch.no_grad():
                 llama_vec_n, clip_l_pooler_n = hunyuan.encode_prompt_conds(
-                    n_prompt, text_encoder1, text_encoder2, tokenizer1, tokenizer2
+                    n_prompt, text_encoder1, text_encoder2, tokenizer1, tokenizer2, custom_system_prompt=args.custom_system_prompt
                 )
                 llama_vec_n = llama_vec_n.cpu()
                 clip_l_pooler_n = clip_l_pooler_n.cpu()
@@ -615,7 +630,11 @@ def prepare_i2v_inputs(
     for index in section_images.keys():
         image_encoder_last_hidden_state = section_image_encoder_last_hidden_states[index]
         start_latent = section_start_latents[index]
-        arg_c_img_i = {"image_encoder_last_hidden_state": image_encoder_last_hidden_state, "start_latent": start_latent}
+        arg_c_img_i = {
+            "image_encoder_last_hidden_state": image_encoder_last_hidden_state,
+            "start_latent": start_latent,
+            "image_path": section_image_paths[index],
+        }
         arg_c_img[index] = arg_c_img_i
 
     return height, width, video_seconds, arg_c, arg_null, arg_c_img, end_latent
@@ -745,11 +764,29 @@ def generate(args: argparse.Namespace, gen_settings: GenerationSettings, shared_
         # 4 sections: 3, 2, 1, 0. 50 sections: 3, 2, 2, ... 2, 1, 0
         latent_paddings = [3] + [2] * (total_latent_sections - 3) + [1, 0]
 
+    if args.latent_paddings is not None:
+        # parse user defined latent paddings
+        user_latent_paddings = [int(x) for x in args.latent_paddings.split(",")]
+        if len(user_latent_paddings) < total_latent_sections:
+            print(
+                f"User defined latent paddings length {len(user_latent_paddings)} does not match total sections {total_latent_sections}."
+            )
+            print(f"Use default paddings instead for unspecified sections.")
+            latent_paddings[: len(user_latent_paddings)] = user_latent_paddings
+        elif len(user_latent_paddings) > total_latent_sections:
+            print(
+                f"User defined latent paddings length {len(user_latent_paddings)} is greater than total sections {total_latent_sections}."
+            )
+            print(f"Use only first {total_latent_sections} paddings instead.")
+            latent_paddings = user_latent_paddings[:total_latent_sections]
+        else:
+            latent_paddings = user_latent_paddings
+
     for section_index_reverse, latent_padding in enumerate(latent_paddings):
         section_index = total_latent_sections - 1 - section_index_reverse
         section_index_from_last = -(section_index_reverse + 1)  # -1, -2 ...
 
-        is_last_section = latent_padding == 0
+        is_last_section = section_index == 0
         is_first_section = section_index_reverse == 0
         latent_padding_size = latent_padding * latent_window_size
 
@@ -767,9 +804,9 @@ def generate(args: argparse.Namespace, gen_settings: GenerationSettings, shared_
             apply_section_image = False
 
         start_latent = context_img[image_index]["start_latent"]
+        image_path = context_img[image_index]["image_path"]
         if apply_section_image:
-            latent_padding_size = 0
-            logger.info(f"Apply experimental section image, latent_padding_size = {latent_padding_size}")
+            logger.info(f"Apply experimental section image, latent_padding_size = {latent_padding_size}, image_path = {image_path}")
 
         # sum([1, 3, 9, 1, 2, 16]) = 32
         indices = torch.arange(0, sum([1, latent_padding_size, latent_window_size, 1, 2, 16])).unsqueeze(0)
@@ -1090,7 +1127,7 @@ def main():
         latents_list = []
         seeds = []
 
-        assert len(args.latent_path) == 1, "Only one latent path is supported for now"
+        # assert len(args.latent_path) == 1, "Only one latent path is supported for now"
 
         for latent_path in args.latent_path:
             original_base_names.append(os.path.splitext(os.path.basename(latent_path))[0])
@@ -1123,12 +1160,13 @@ def main():
 
             latents_list.append(latents)
 
-        latent = torch.stack(latents_list, dim=0)  # [N, ...], must be same shape
+        # latent = torch.stack(latents_list, dim=0)  # [N, ...], must be same shape
 
-        args.seed = seeds[0]
+        for i, latent in enumerate(latents_list):
+            args.seed = seeds[i]
 
-        vae = load_vae(args.vae, args.vae_chunk_size, args.vae_spatial_tile_sample_min_size, device)
-        save_output(args, vae, latent, device, original_base_names)
+            vae = load_vae(args.vae, args.vae_chunk_size, args.vae_spatial_tile_sample_min_size, device)
+            save_output(args, vae, latent, device, original_base_names)
 
     elif args.from_file:
         # Batch mode from file
