@@ -108,7 +108,9 @@ Key differences from HunyuanVideo caching:
 -   The script generates multiple cache files per video, each corresponding to a different section, with the section index appended to the filename (e.g., `..._frame_pos-0000-count_...` becomes `..._frame_pos-0000-0000-count_...`, `..._frame_pos-0000-0001-count_...`, etc.).
 -   Image embeddings are calculated using the Image Encoder and stored in the cache files alongside the latents.
 
-By default, the sampling method used is Inverted anti-drifting (the same as during inference, using the latent and index in reverse order), described in the paper. You can switch to Vanilla sampling in the paper (using the temporally ordered latent and index) by specifying `--vanilla_sampling`. Preliminary tests suggest that Vanilla sampling may yield better quality. If you change this option, please overwrite the existing cache without specifying `--skip_existing`.
+By default, the sampling method used is Inverted anti-drifting (the same as during inference, using the latent and index in reverse order), described in the paper. You can switch to Vanilla sampling in the paper (using the temporally ordered latent and index) by specifying `--vanilla_sampling`. If you change this option, please overwrite the existing cache without specifying `--skip_existing`.
+
+ ~~Preliminary tests suggest that Vanilla sampling may yield better quality.~~ Some community reports indicate that Vanilla sampling may not work well in some cases.
 
 For VRAM savings during VAE decoding, consider using `--vae_chunk_size` and `--vae_spatial_tile_sample_min_size`. If VRAM is overflowing and using shared memory, it is recommended to set `--vae_chunk_size` to 16 or 8, and `--vae_spatial_tile_sample_min_size` to 64 or 32.
 
@@ -127,7 +129,9 @@ HunyuanVideoのキャッシングとの主な違いは次のとおりです。
 -  スクリプトは、各ビデオに対して複数のキャッシュファイルを生成します。各ファイルは異なるセクションに対応し、セクションインデックスがファイル名に追加されます（例：`..._frame_pos-0000-count_...`は`..._frame_pos-0000-0000-count_...`、`..._frame_pos-0000-0001-count_...`などになります）。
 -  画像埋め込みは画像エンコーダーを使用して計算され、latentとともにキャッシュファイルに保存されます。
 
-デフォルトでは、論文のサンプリング方法 Inverted anti-drifting （推論時と同じ、逆順の latent と index を使用）を使用します。`--vanilla_sampling`を指定すると Vanilla sampling （時間順の latent と index を使用）に変更できます。簡単なテストの結果では、Vanilla sampling の方が品質が良いようです。このオプションの有無を変更する場合には `--skip_existing` を指定せずに既存のキャッシュを上書きしてください。
+デフォルトでは、論文のサンプリング方法 Inverted anti-drifting （推論時と同じ、逆順の latent と index を使用）を使用します。`--vanilla_sampling`を指定すると Vanilla sampling （時間順の latent と index を使用）に変更できます。このオプションの有無を変更する場合には `--skip_existing` を指定せずに既存のキャッシュを上書きしてください。
+
+~~簡単なテストの結果では、Vanilla sampling の方が品質が良いようです。~~ コミュニティからの報告によると、Vanilla sampling はうまく動かない場合もあるようです。
 
 VAEのdecode時のVRAM節約のために、`--vae_chunk_size`と`--vae_spatial_tile_sample_min_size`を使用することを検討してください。VRAMがあふれて共有メモリを使用している場合には、`--vae_chunk_size`を16、8などに、`--vae_spatial_tile_sample_min_size`を64、32などに変更することをお勧めします。
 </details>
