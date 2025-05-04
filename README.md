@@ -56,6 +56,9 @@ If you find this project helpful, please consider supporting its development via
 
 - GitHub Discussions Enabled: We've enabled GitHub Discussions for community Q&A, knowledge sharing, and technical information exchange. Please use Issues for bug reports and feature requests, and Discussions for questions and sharing experiences. [Join the conversation →](https://github.com/kohya-ss/musubi-tuner/discussions)
 
+- May 4, 2025:
+    - Added training and inference for FramePack-F1 (experimental feature). See [FramePack documentation](./docs/framepack.md) for details.
+
 - May 1, 2025:
     - Added features to the inference code of FramePack, such as latent padding specification and custom prompt specification. See [FramePack documentation](./docs/framepack.md#inference) for details.
         - The behavior when specifying the section start image has changed (it no longer automatically sets latent padding to 0, so the start image is used as a reference image). To maintain the previous behavior (force the section start image), specify `--latent_padding 0,0,0,0` (specify 0 for each section).
