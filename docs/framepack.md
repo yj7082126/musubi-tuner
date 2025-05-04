@@ -117,7 +117,7 @@ Key differences from HunyuanVideo caching:
 For VRAM savings during VAE decoding, consider using `--vae_chunk_size` and `--vae_spatial_tile_sample_min_size`. If VRAM is overflowing and using shared memory, it is recommended to set `--vae_chunk_size` to 16 or 8, and `--vae_spatial_tile_sample_min_size` to 64 or 32.
 
 **FramePack-F1 support:**
-You can apply the FramePack-F1 sampling method by changing the options during caching. The training script options remain the same for FramePack and F1.
+You can apply the FramePack-F1 sampling method by changing the options during caching. The training script also requires specifying `--f1` to change the options during sample generation.
 
 By default, the sampling method used is Inverted anti-drifting (the same as during inference with the original FramePack model, using the latent and index in reverse order), described in the paper. You can switch to FramePack-F1 sampling (Vanilla sampling, using the temporally ordered latent and index) by specifying `--f1`. If you change this option, please overwrite the existing cache without specifying `--skip_existing`.
 <details>
@@ -138,7 +138,7 @@ HunyuanVideoのキャッシングとの主な違いは次のとおりです。
 VAEのdecode時のVRAM節約のために、`--vae_chunk_size`と`--vae_spatial_tile_sample_min_size`を使用することを検討してください。VRAMがあふれて共有メモリを使用している場合には、`--vae_chunk_size`を16、8などに、`--vae_spatial_tile_sample_min_size`を64、32などに変更することをお勧めします。
 
 **FramePack-F1のサポート：**
-キャッシュ時のオプションを変更することで、FramePack-F1のサンプリング方法を適用できます。学習スクリプトのオプションはFramePack/F1で変わりません。
+キャッシュ時のオプションを変更することで、FramePack-F1のサンプリング方法を適用できます。学習スクリプトについても`--f1`を指定してサンプル生成時のオプションを変更する必要があります。
 
 デフォルトでは、論文のサンプリング方法 Inverted anti-drifting （無印のFramePackの推論時と同じ、逆順の latent と index を使用）を使用します。`--f1`を指定すると FramePack-F1 の Vanilla sampling （時間順の latent と index を使用）に変更できます。このオプションの有無を変更する場合には `--skip_existing` を指定せずに既存のキャッシュを上書きしてください。
 </details>
@@ -203,6 +203,7 @@ The maximum value for `--blocks_to_swap` is 36. The default resolution for Frame
 
 Key differences from HunyuanVideo training:
 -   Uses `fpack_train_network.py`.
+- `--f1` option is available for FramePack-F1 model training. You need to specify the FramePack-F1 model as `--dit`. This option only changes the sample generation during training. The training process itself is the same as the original FramePack model.
 -   **Requires** specifying `--vae`, `--text_encoder1`, `--text_encoder2`, and `--image_encoder`.
 -   **Requires** specifying `--network_module networks.lora_framepack`.
 -  Optional `--latent_window_size` argument (default 9, should match caching).
@@ -224,6 +225,7 @@ FramePackの学習は専用のスクリプト`fpack_train_network.py`を使用�
 
 HunyuanVideoの学習との主な違いは次のとおりです。
 -  `fpack_train_network.py`を使用します。
+- FramePack-F1モデルの学習時には`--f1`を指定してください。この場合、`--dit`にFramePack-F1モデルを指定する必要があります。このオプションは学習時のサンプル生成時のみに影響し、学習プロセス自体は元のFramePackモデルと同じです。
 -  `--vae`、`--text_encoder1`、`--text_encoder2`、`--image_encoder`を指定する必要があります。
 -  `--network_module networks.lora_framepack`を指定する必要があります。
 -  必要に応じて`--latent_window_size`引数（デフォルト9）を指定できます（キャッシング時と一致させる必要があります）。

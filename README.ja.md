@@ -49,6 +49,7 @@ Wan2.1については、[Wan2.1のドキュメント](./docs/wan.md)も参照し
 
 - 2025/05/04
     - FramePack-F1の学習および推論を追加しました（実験的機能）。詳細は[FramePackのドキュメント](./docs/framepack.md)を参照してください。
+        - FramePack-F1用に、`--f1`オプションを指定してlatentのキャッシュを再作成してください（`--vanilla_sampling`が`--f1`に変わり、仕様も変わっています）。FramePack-F1はFramePackとは互換性がありません。FramePackとFramePack-F1のキャッシュファイルは共有できないため、別の`.toml`ファイルを使用して別のキャッシュディレクトリを指定してください。
 
 - 2025/05/01
     - FramePackの推論コードに、latent padding指定、カスタムプロンプト指定等の機能を追加しました。詳細は[FramePackのドキュメント](./docs/framepack.md#inference)を参照してください。
