@@ -241,14 +241,12 @@ def encode_and_save_batch_one_frame(
     latent_window_size: int,
     vanilla_sampling: bool = False,
 ):
-    # item.content: target image (F, H, W, C)
-    # item.control_content: start image (F, H, W, C)
-    print(f"item.content shape: {batch[0].content.shape}")
-    print(f"item.control_content shape: {batch[0].control_content.shape}")
+    # item.content: target image (H, W, C)
+    # item.control_content: start image (H, W, C)
 
-    # Stack batch into tensor (B, F, H, W, C) in RGB order
+    # Stack batch into tensor (B,F,H,W,C) in RGB order.
     contents = torch.stack(
-        [torch.cat([torch.from_numpy(item.control_content), torch.from_numpy(item.content)], dim=0) for item in batch]
+        [torch.stack([torch.from_numpy(item.control_content), torch.from_numpy(item.content)]) for item in batch]
     )
 
     contents = contents.permute(0, 4, 1, 2, 3).contiguous()  # B, C, F, H, W
@@ -260,9 +258,6 @@ def encode_and_save_batch_one_frame(
         item = batch[0]  # other items should have the same size
         raise ValueError(f"Image or video size too small: {item.item_key} and {len(batch) - 1} more, size: {item.original_size}")
 
-    latent_f = 1
-    total_latent_sections = 1
-
     # VAE encode (list of tensor -> stack)
     start_latents = hunyuan.vae_encode(contents[:, :, 0:1], vae)  # include scaling factor
     start_latents = start_latents.to("cpu")  # (B, C, 1, H/8, W/8)
@@ -270,7 +265,7 @@ def encode_and_save_batch_one_frame(
     latents = latents.to("cpu")  # (B, C, 1, H/8, W/8)
 
     # Vision encoding per‑item (once): use control content because it is the start image
-    images = np.stack([item.control_content[0] for item in batch], axis=0)  # B, H, W, C
+    images = [item.control_content for item in batch]  # list of [H, W, C]
 
     # encode image with image encoder
     image_embeddings = []
@@ -403,7 +398,8 @@ def encode_datasets_framepack(datasets: list[BaseDataset], encode: callable, arg
             # we expand it to "{basename}_{section_idx:04d}_{w:04d}x{h:04d}_{self.architecture}.safetensors"
             filtered_batch = []
             for item in batch:
-                latent_f = (item.frame_count - 1) // 4 + 1
+                frame_count = item.frame_count if item.frame_count is not None else 1  # 1 for image dataset
+                latent_f = (frame_count - 1) // 4 + 1
                 num_sections = max(1, math.floor((latent_f - 1) / args.latent_window_size))  # min 1 section
                 all_existing = True
                 for sec in range(num_sections):
