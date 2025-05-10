@@ -309,7 +309,6 @@ def encode_and_save_batch_one_frame(
         target_latents = latents[b : b + 1]
 
         # save cache (file path is inside item.latent_cache_path pattern), remove batch dim
-        item.latent_cache_path = append_section_idx_to_latent_cache_path(original_latent_cache_path, 0)  # section_index=0
         save_latent_cache_framepack(
             item_info=item,
             latent=target_latents.squeeze(0),  # Ground truth for this section
@@ -395,17 +394,21 @@ def encode_datasets_framepack(datasets: list[BaseDataset], encode: callable, arg
             batch: list[ItemInfo] = batch  # type: ignore
 
             # latent_cache_path is "{basename}_{w:04d}x{h:04d}_{self.architecture}.safetensors"
-            # we expand it to "{basename}_{section_idx:04d}_{w:04d}x{h:04d}_{self.architecture}.safetensors"
+            # For video dataset,we expand it to "{basename}_{section_idx:04d}_{w:04d}x{h:04d}_{self.architecture}.safetensors"
             filtered_batch = []
             for item in batch:
-                frame_count = item.frame_count if item.frame_count is not None else 1  # 1 for image dataset
-                latent_f = (frame_count - 1) // 4 + 1
-                num_sections = max(1, math.floor((latent_f - 1) / args.latent_window_size))  # min 1 section
-                all_existing = True
-                for sec in range(num_sections):
-                    p = append_section_idx_to_latent_cache_path(item.latent_cache_path, sec)
-                    all_latent_cache_paths.append(p)
-                    all_existing = all_existing and os.path.exists(p)
+                if item.frame_count is None:
+                    # image dataset
+                    all_latent_cache_paths.append(item.latent_cache_path)
+                    all_existing = os.path.exists(item.latent_cache_path)
+                else:
+                    latent_f = (item.frame_count - 1) // 4 + 1
+                    num_sections = max(1, math.floor((latent_f - 1) / args.latent_window_size))  # min 1 section
+                    all_existing = True
+                    for sec in range(num_sections):
+                        p = append_section_idx_to_latent_cache_path(item.latent_cache_path, sec)
+                        all_latent_cache_paths.append(p)
+                        all_existing = all_existing and os.path.exists(p)
 
                 if not all_existing:  # if any section cache is missing
                     filtered_batch.append(item)
