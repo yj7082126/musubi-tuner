@@ -94,7 +94,7 @@ def glob_images(directory, base="*"):
 
 def glob_videos(directory, base="*"):
     video_paths = []
-    for ext in VIDEO_EXTENSIONS:
+    for ext in [VIDEO_EXTENSIONS + IMAGE_EXTENSIONS]:
         if base == "*":
             video_paths.extend(glob.glob(os.path.join(glob.escape(directory), base + ext)))
         else:
@@ -807,16 +807,20 @@ class VideoDatasource(ContentDatasource):
         start_frame: Optional[int] = None,
         end_frame: Optional[int] = None,
         bucket_selector: Optional[BucketSelector] = None,
-    ) -> tuple[str, list[Image.Image], str]:
+    ) -> list[Image.Image]:
         # this method can resize the video if bucket_selector is given to reduce the memory usage
 
         start_frame = start_frame if start_frame is not None else self.start_frame
         end_frame = end_frame if end_frame is not None else self.end_frame
         bucket_selector = bucket_selector if bucket_selector is not None else self.bucket_selector
 
-        video = load_video(
-            video_path, start_frame, end_frame, bucket_selector, source_fps=self.source_fps, target_fps=self.target_fps
-        )
+        if os.path.splitext(video_path)[1] in IMAGE_EXTENSIONS:
+            image = Image.open(video_path).convert("RGB")
+            video = [image]
+        else:
+            video = load_video(
+                video_path, start_frame, end_frame, bucket_selector, source_fps=self.source_fps, target_fps=self.target_fps
+            )
         return video
 
     def get_control_data_from_path(
@@ -830,9 +834,13 @@ class VideoDatasource(ContentDatasource):
         end_frame = end_frame if end_frame is not None else self.end_frame
         bucket_selector = bucket_selector if bucket_selector is not None else self.bucket_selector
 
-        control = load_video(
-            control_path, start_frame, end_frame, bucket_selector, source_fps=self.source_fps, target_fps=self.target_fps
-        )
+        if os.path.splitext(control_path)[1] in IMAGE_EXTENSIONS:
+            image = Image.open(control_path).convert("RGB")
+            control = [image]
+        else:
+            control = load_video(
+                control_path, start_frame, end_frame, bucket_selector, source_fps=self.source_fps, target_fps=self.target_fps
+            )
         return control
 
     def set_start_and_end_frame(self, start_frame: Optional[int], end_frame: Optional[int]):
@@ -889,7 +897,7 @@ class VideoDirectoryDatasource(VideoDatasource):
                     else:
                         # another extension for control path
                         # for example: video_path = "vid/video.mp4" -> control_path = "control/video.mov"
-                        for ext in VIDEO_EXTENSIONS:
+                        for ext in VIDEO_EXTENSIONS + IMAGE_EXTENSIONS:
                             potential_path = os.path.join(self.control_directory, base_name + ext)
                             if os.path.exists(potential_path):
                                 self.control_paths[video_path] = potential_path
