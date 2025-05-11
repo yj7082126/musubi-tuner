@@ -247,7 +247,9 @@ HunyuanVideoの学習との主な違いは次のとおりです。
 
 The dataset must be an image dataset. If you use caption files, you need to specify `control_directory` and place the **starting images** in that directory. The `image_directory` should contain the images after the change. The filenames of both directories must match. Caption files should be placed in the `image_directory`.
 
-If you use JSONL files, specify them as `{"image_path": "/path/to/target_image1.jpg", "control_path": "/path/to/source_image1.jpg", "caption": "The object changes to red."}`. The `image_path` should point to the images after the change, and `control_path` should point to the starting images.
+If you use JSONL files, specify them as `{"image_path": "/path/to/target_image1.jpg", "control_path": "/path/to/source_image1.jpg", "caption": "The object changes to red."}`. The `image_path` should point to the images after the change, and `control_path` should point to the starting images. 
+
+For the dataset configuration, see [here](../dataset/dataset_config.md#sample-for-video-dataset-with-control-images) for more details.
 
 For single frame training, specify `--one_frame` in `fpack_cache_latents.py` to create the cache. The `--latent_window_size` is used as the timestamp of the frames to be trained (specifically, the RoPE value). It may be desirable to match the value used during inference.
 
@@ -262,6 +264,8 @@ The optimal training settings are currently unknown. Feedback is welcome.
 データセットは画像データセットである必要があります。キャプションファイルを用いる場合は、`control_directory`を追加で指定し、そのディレクトリに**開始画像**を格納してください。`image_directory`には変化後の画像を格納します。両者のファイル名は一致させる必要があります。キャプションファイルは`image_directory`に格納してください。
 
 JSONLファイルを用いる場合は、`{"image_path": "/path/to/target_image1.jpg", "control_path": "/path/to/source_image1.jpg", "caption": "The object changes to red"}`のように指定してください。`image_path`は変化後の画像、`control_path`は開始画像を指定します。
+
+データセットの設定については、[こちら](../dataset/dataset_config.md#sample-for-video-dataset-with-control-images)も参照してください。
 
 1フレーム学習時は、`fpack_cache_latents.py`に`--one_frame`を指定してキャッシュを作成してください。`--latent_window_size`は学習するフレームのタイムスタンプとして用いられます（具体的にはRoPEの値）。推論時と同じ値が望ましいかもしれません。
 
