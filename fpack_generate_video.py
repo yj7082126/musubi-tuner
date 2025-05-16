@@ -434,7 +434,8 @@ def decode_latent(
             section_latent_frames = (latent_window_size * 2 + 1) if is_last_section else (latent_window_size * 2)
 
             section_latent = latent[:, :, latent_frame_index : latent_frame_index + section_latent_frames, :, :]
-            latents_to_decode.append(section_latent)
+            if section_latent.shape[2] > 0:
+                latents_to_decode.append(section_latent)
 
             latent_frame_index += generated_latent_frames
 
