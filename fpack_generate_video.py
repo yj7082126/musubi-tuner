@@ -1081,22 +1081,62 @@ def generate(args: argparse.Namespace, gen_settings: GenerationSettings, shared_
         # call DiT model to generate latents
         sample_num_frames = num_frames
         if one_frame_inference is not None:
-            latent_indices = latent_indices[:, -1:]  # only use the last frame
+            latent_indices = latent_indices[:, -1:]  # only use the last frame (default)
             sample_num_frames = 1
+            mask_image = None
+
+            for one_frame_param in one_frame_inference:
+                if one_frame_param.startswith("target_index="):
+                    target_index = int(one_frame_param.split("=")[1])
+                    latent_indices[:, 0] = target_index
+                    logger.info(f"Set index for clean latents (start image): {target_index}")
+                elif one_frame_param.startswith("history_index="):
+                    history_index = int(one_frame_param.split("=")[1])
+                    clean_latent_indices[:, 1] = history_index
+                    logger.info(f"Set index for clean latents 1x (end image): {history_index}")
+                else:
+                    mask_start = one_frame_param.startswith("image_mask_path=")
+                    mask_end = one_frame_param.startswith("end_image_mask_path=")
+                    if mask_start or mask_end:
+                        image_mask_path = one_frame_param.split("=")[1]
+                        mask_image = Image.open(image_mask_path).convert("L")  # grayscale
+                        mask_image = mask_image.resize((width // 8, height // 8), Image.LANCZOS)
+                        mask_image = np.array(mask_image)  # PIL to numpy, HWC
+                        mask_image = torch.from_numpy(mask_image).float() / 255.0  # 0 to 1.0, HWC
+                        mask_image = mask_image.squeeze(-1)  # HWC -> HW
+                        mask_image = mask_image.unsqueeze(0).unsqueeze(0)  # HW -> 11HW
+                        mask_image = mask_image.to(clean_latents)
+
+                        if mask_start:
+                            # apply mask to clean latents
+                            clean_latents[:, :, 0, :, :] = clean_latents[:, :, 0, :, :] * mask_image
+                            logger.info(f"Apply mask for clean latents (start image): {image_mask_path}, shape: {mask_image.shape}")
+                        elif mask_end:
+                            # apply mask to clean latents 1x
+                            clean_latents[:, :, 1, :, :] = clean_latents[:, :, 1, :, :] * mask_image
+                            logger.info(
+                                f"Apply mask for clean latents 1x (end image): {image_mask_path}, shape: {mask_image.shape}"
+                            )
+
             if "no_2x" in one_frame_inference:
                 clean_latents_2x = None
                 clean_latent_2x_indices = None
+                logger.info(f"No clean_latents_2x")
             if "no_4x" in one_frame_inference:
                 clean_latents_4x = None
                 clean_latent_4x_indices = None
+                logger.info(f"No clean_latents_4x")
             if "no_post" in one_frame_inference:
                 clean_latents = clean_latents[:, :, :1, :, :]
                 clean_latent_indices = clean_latent_indices[:, :1]
-            else:
+                logger.info(f"No clean_latents post")
+            elif "zero_post" in one_frame_inference:
                 # zero out the history latents. this seems to prevent the images from corrupting
                 clean_latents[:, :, 1:, :, :] = torch.zeros_like(clean_latents[:, :, 1:, :, :])
+                logger.info(f"Zero out clean_latents post")
+
             logger.info(
-                f"One frame inference: {one_frame_inference}, latent_indices: {latent_indices}, num_frames: {sample_num_frames}"
+                f"One frame inference. latent_indices: {latent_indices}, clean_latent_indices: {clean_latent_indices}, num_frames: {sample_num_frames}"
             )
 
         generated_latents = sample_hunyuan(
