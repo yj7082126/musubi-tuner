@@ -116,6 +116,18 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="one frame inference, default is None, comma separated values from 'default', 'no_2x', 'no_4x' and 'no_post'.",
     )
+    parser.add_argument(
+        "--image_mask_path",
+        type=str,
+        default=None,
+        help="path to image mask for one frame inference. If specified, it will be used as mask for input image.",
+    )
+    parser.add_argument(
+        "--end_image_mask_path",
+        type=str,
+        default=None,
+        help="path to end (reference) image mask for one frame inference. If specified, it will be used as mask for end image.",
+    )
     parser.add_argument("--fps", type=int, default=30, help="video fps, default is 30")
     parser.add_argument("--infer_steps", type=int, default=25, help="number of inference steps, default is 25")
     parser.add_argument("--save_path", type=str, required=True, help="path to save generated video")
@@ -1081,9 +1093,28 @@ def generate(args: argparse.Namespace, gen_settings: GenerationSettings, shared_
         # call DiT model to generate latents
         sample_num_frames = num_frames
         if one_frame_inference is not None:
+            # one frame inference
             latent_indices = latent_indices[:, -1:]  # only use the last frame (default)
             sample_num_frames = 1
-            mask_image = None
+
+            def get_latent_mask(mask_path: str):
+                mask_image = Image.open(mask_path).convert("L")  # grayscale
+                mask_image = mask_image.resize((width // 8, height // 8), Image.LANCZOS)
+                mask_image = np.array(mask_image)  # PIL to numpy, HWC
+                mask_image = torch.from_numpy(mask_image).float() / 255.0  # 0 to 1.0, HWC
+                mask_image = mask_image.squeeze(-1)  # HWC -> HW
+                mask_image = mask_image.unsqueeze(0).unsqueeze(0)  # HW -> 11HW
+                mask_image = mask_image.to(clean_latents)
+                return mask_image
+
+            if args.image_mask_path is not None:
+                mask_image = get_latent_mask(args.image_mask_path)
+                logger.info(f"Apply mask for clean latents (start image): {args.image_mask_path}, shape: {mask_image.shape}")
+                clean_latents[:, :, 0, :, :] = clean_latents[:, :, 0, :, :] * mask_image
+            if args.end_image_mask_path is not None:
+                mask_image = get_latent_mask(args.end_image_mask_path)
+                logger.info(f"Apply mask for clean latents 1x (end image): {args.end_image_mask_path}, shape: {mask_image.shape}")
+                clean_latents[:, :, 1, :, :] = clean_latents[:, :, 1, :, :] * mask_image
 
             for one_frame_param in one_frame_inference:
                 if one_frame_param.startswith("target_index="):
@@ -1094,29 +1125,6 @@ def generate(args: argparse.Namespace, gen_settings: GenerationSettings, shared_
                     history_index = int(one_frame_param.split("=")[1])
                     clean_latent_indices[:, 1] = history_index
                     logger.info(f"Set index for clean latents 1x (end image): {history_index}")
-                else:
-                    mask_start = one_frame_param.startswith("image_mask_path=")
-                    mask_end = one_frame_param.startswith("end_image_mask_path=")
-                    if mask_start or mask_end:
-                        image_mask_path = one_frame_param.split("=")[1]
-                        mask_image = Image.open(image_mask_path).convert("L")  # grayscale
-                        mask_image = mask_image.resize((width // 8, height // 8), Image.LANCZOS)
-                        mask_image = np.array(mask_image)  # PIL to numpy, HWC
-                        mask_image = torch.from_numpy(mask_image).float() / 255.0  # 0 to 1.0, HWC
-                        mask_image = mask_image.squeeze(-1)  # HWC -> HW
-                        mask_image = mask_image.unsqueeze(0).unsqueeze(0)  # HW -> 11HW
-                        mask_image = mask_image.to(clean_latents)
-
-                        if mask_start:
-                            # apply mask to clean latents
-                            clean_latents[:, :, 0, :, :] = clean_latents[:, :, 0, :, :] * mask_image
-                            logger.info(f"Apply mask for clean latents (start image): {image_mask_path}, shape: {mask_image.shape}")
-                        elif mask_end:
-                            # apply mask to clean latents 1x
-                            clean_latents[:, :, 1, :, :] = clean_latents[:, :, 1, :, :] * mask_image
-                            logger.info(
-                                f"Apply mask for clean latents 1x (end image): {image_mask_path}, shape: {mask_image.shape}"
-                            )
 
             if "no_2x" in one_frame_inference:
                 clean_latents_2x = None
