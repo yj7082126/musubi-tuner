@@ -578,3 +578,54 @@ clean latents 2x、clean latents 4x、postを渡す場合でも値はゼロベ�
 `--video_sections` に1より大きい値を指定した場合、`latent_window_size * n` (nはセクション数)のタイムスタンプで複数枚画像が生成されます。
 
 </details>
+
+### History Reference Options / 履歴参照オプション
+
+Pull request [#284](https://github.com/kohya-ss/musubi-tuner/pull/284) extends
+`--one_frame_inference` with parameters that manipulate the indices of clean
+latents and allow masking the start or end images. These options can be combined
+with existing flags such as `no_2x`, `no_4x`, and `no_post`.
+
+- `target_index=<int>`: Use the specified clean latent index as the starting
+  image instead of the default last frame.
+- `history_index=<int>`: Select which clean latent index to reference as the
+  end image when building the history latent sequence.
+- `image_mask_path=<path>`: Apply a grayscale mask to the starting image.
+- `end_image_mask_path=<path>`: Apply a grayscale mask to the end image.
+- `zero_post`: Zero out all history latents after the first frame to reduce
+  artifacts on very long inferences.
+
+Example:
+
+```bash
+--video_sections 1 --output_type latent_images \
+--one_frame_inference target_index=5,history_index=10,image_mask_path=mask.png,zero_post
+```
+
+<details>
+<summary>日本語</summary>
+
+プルリクエスト[#284](https://github.com/kohya-ss/musubi-tuner/pull/284)で、
+`--one_frame_inference`にclean latentのインデックス操作や開始・終了画像への
+マスク適用を行う追加オプションが導入されました。`no_2x`や`no_4x`、
+`no_post`など既存のフラグと併用できます。
+
+- `target_index=<整数>`: 既定で最後のフレームが参照される開始画像を、指定した
+  インデックスのclean latentに置き換えます。
+- `history_index=<整数>`: 終了画像として参照するclean latentのインデックスを
+  指定します。
+- `image_mask_path=<パス>`: 開始画像に適用するグレースケールマスクのパスを指定
+  します。
+- `end_image_mask_path=<パス>`: 終了画像に適用するグレースケールマスクのパスを
+  指定します。
+- `zero_post`: 1フレーム目以降の履歴latentをゼロ埋めし、長時間推論時の崩壊を抑
+  制します。
+
+例:
+
+```bash
+--video_sections 1 --output_type latent_images \
+--one_frame_inference target_index=5,history_index=10,image_mask_path=mask.png,zero_post
+```
+
+</details>
