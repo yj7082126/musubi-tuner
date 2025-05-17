@@ -556,7 +556,7 @@ class BucketBatchManager:
             for i in range(num_batches):
                 self.bucket_batch_indices.append((bucket_reso, i))
         
-        # do nou shuffle here to avoid multiple datasets have different order
+        # do no shuffle here to avoid multiple datasets have different order
         # self.shuffle()
 
     def show_bucket_info(self):
