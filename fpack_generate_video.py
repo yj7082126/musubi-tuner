@@ -614,6 +614,7 @@ def prepare_i2v_inputs(
         image_encoder.to(device)
 
         # encode image with image encoder
+        
         section_image_encoder_last_hidden_states = {}
         for index, section_imgs in section_images.items():
             for (img_tensor, img_np) in section_imgs:
@@ -995,7 +996,7 @@ def generate(args: argparse.Namespace, gen_settings: GenerationSettings, shared_
                 latent_paddings = user_latent_paddings
     else:
         start_latents = context_img[0]["start_latents"]
-        history_latents = torch.cat([history_latents, *start_latents], dim=2)
+        history_latents = torch.cat([history_latents, start_latents[0]], dim=2)
         total_generated_latent_frames = 1  # a bit hacky, but we employ the same logic as in official code
         latent_paddings = [0] * total_latent_sections  # dummy paddings for F1 mode
 
@@ -1045,16 +1046,17 @@ def generate(args: argparse.Namespace, gen_settings: GenerationSettings, shared_
                 clean_latent_2x_indices,
                 clean_latent_4x_indices,
             ) = indices.split([1, latent_padding_size, latent_window_size, 1, 2, 16], dim=1)
-            index_tensor_1 = torch.tensor([[1]], device=clean_latent_indices_pre.device)
             
-            clean_latent_indices = torch.cat([clean_latent_indices_pre, index_tensor_1, clean_latent_indices_post], dim=1)
+            index_tensors = []
+            for i in range(1, len(start_latents)):
+                index_tensors.append(torch.tensor([[i]], device=clean_latent_indices_pre.device))
+            
+            clean_latent_indices = torch.cat([clean_latent_indices_pre, *index_tensors, clean_latent_indices_post], dim=1)
 
             clean_latents_pres = [start_latent.to(history_latents) for start_latent in start_latents]
             clean_latents_post, clean_latents_2x, clean_latents_4x = history_latents[:, :, : 1 + 2 + 16, :, :].split(
                 [1, 2, 16], dim=2
             )
-            print("$$$$$")
-            print(len(clean_latents_pres))
             clean_latents = torch.cat([*clean_latents_pres, clean_latents_post], dim=2)
 
         else:
@@ -1195,9 +1197,7 @@ def generate(args: argparse.Namespace, gen_settings: GenerationSettings, shared_
         if not f1_mode:
             # Inverted Anti-drifting: prepend generated latents to history latents
             if is_last_section:
-                generated_latents = torch.cat([
-                    *[start_latent.to(generated_latents) for start_latent in start_latents],
-                    generated_latents], dim=2)
+                generated_latents = torch.cat([start_latents[0].to(generated_latents), generated_latents], dim=2)
                 total_generated_latent_frames += 1
 
             history_latents = torch.cat([generated_latents.to(history_latents), history_latents], dim=2)
