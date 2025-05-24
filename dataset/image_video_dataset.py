@@ -796,10 +796,13 @@ class ImageJsonlDatasource(ImageDatasource):
 
         control = None
         if self.has_control:
-            control_path = data["control_path"]
-            control = Image.open(control_path).convert("RGB")
+            control_paths = data["control_path"]
+            controls = []
+            for control_path in control_paths.split(","):
+                control = Image.open(control_path).convert("RGB")
+                controls.append(control)
 
-        return image_path, image, caption, control
+        return image_path, image, caption, controls
 
     def get_caption(self, idx: int) -> tuple[str, str]:
         data = self.data[idx]
@@ -1334,15 +1337,15 @@ class ImageDataset(BaseDataset):
                         break  # submit batch if possible
 
                 for future in completed_futures:
-                    original_size, item_key, image, caption, control = future.result()
+                    original_size, item_key, image, caption, controls = future.result()
                     bucket_height, bucket_width = image.shape[:2]
                     bucket_reso = (bucket_width, bucket_height)
 
                     item_info = ItemInfo(item_key, caption, original_size, bucket_reso, content=image)
                     item_info.latent_cache_path = self.get_latent_cache_path(item_info)
 
-                    if control is not None:
-                        item_info.control_content = control
+                    if controls is not None:
+                        item_info.control_contents = controls
 
                     if bucket_reso not in batches:
                         batches[bucket_reso] = []
@@ -1366,15 +1369,19 @@ class ImageDataset(BaseDataset):
 
             # fetch and resize image in a separate thread
             def fetch_and_resize(op: callable) -> tuple[tuple[int, int], str, Image.Image, str, Optional[Image.Image]]:
-                image_key, image, caption, control = op()
+                image_key, image, caption, controls = op()
                 image: Image.Image
                 image_size = image.size
 
                 bucket_reso = buckset_selector.get_bucket_resolution(image_size)
                 image = resize_image_to_bucket(image, bucket_reso)
-                if control is not None:
-                    control = resize_image_to_bucket(control, bucket_reso)
-                return image_size, image_key, image, caption, control
+                if controls is not None:
+                    resized_controls = []
+                    for control in controls:
+                        resized_control = resize_image_to_bucket(control, bucket_reso)
+                        resized_controls.append(resized_control)
+                        
+                return image_size, image_key, image, caption, resized_controls
 
             future = executor.submit(fetch_and_resize, fetch_op)
             futures.append(future)

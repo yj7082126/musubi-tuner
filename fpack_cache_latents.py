@@ -9,6 +9,7 @@ import torch
 import torch.nn.functional as F
 from tqdm import tqdm
 from transformers import SiglipImageProcessor, SiglipVisionModel
+from torchvision.transforms import ToTensor
 
 from dataset import config_utils
 from dataset.config_utils import BlueprintGenerator, ConfigSanitizer
@@ -40,11 +41,7 @@ def encode_and_save_batch(
     # Stack batch into tensor (B,C,F,H,W) in RGB order
     contents = torch.stack([torch.from_numpy(item.content) for item in batch])
     if len(contents.shape) == 4:
-        contents = contents.unsqueeze(1)  # B, H, W, C -> B, F, H, W, C
-
-    contents = contents.permute(0, 4, 1, 2, 3).contiguous()  # B, C, F, H, W
-    contents = contents.to(vae.device, dtype=vae.dtype)
-    contents = contents / 127.5 - 1.0  # normalize to [-1, 1]
+        contents = contents.unsqueeze(1) 
 
     height, width = contents.shape[3], contents.shape[4]
     if height < 8 or width < 8:
@@ -245,13 +242,19 @@ def encode_and_save_batch_one_frame(
     # item.control_content: start image (H, W, C)
 
     # Stack batch into tensor (B,F,H,W,C) in RGB order.
-    contents = torch.stack(
-        [torch.stack([torch.from_numpy(item.control_content), torch.from_numpy(item.content)]) for item in batch]
-    )
+    to_tensor = ToTensor()
+    
+    contents = torch.stack([
+    torch.stack([
+        *[torch.from_numpy(control_content) for control_content in item.control_contents],
+        torch.from_numpy(item.content)
+    ]) for item in batch])
 
     contents = contents.permute(0, 4, 1, 2, 3).contiguous()  # B, C, F, H, W
     contents = contents.to(vae.device, dtype=vae.dtype)
     contents = contents / 127.5 - 1.0  # normalize to [-1, 1]
+
+    num_control = len(batch[0].control_contents)
 
     height, width = contents.shape[3], contents.shape[4]
     if height < 8 or width < 8:
@@ -259,13 +262,12 @@ def encode_and_save_batch_one_frame(
         raise ValueError(f"Image or video size too small: {item.item_key} and {len(batch) - 1} more, size: {item.original_size}")
 
     # VAE encode (list of tensor -> stack)
-    start_latents = hunyuan.vae_encode(contents[:, :, 0:1], vae)  # include scaling factor
-    start_latents = start_latents.to("cpu")  # (B, C, 1, H/8, W/8)
-    latents = hunyuan.vae_encode(contents[:, :, 1:], vae)  # include scaling factor
+    start_latents = [hunyuan.vae_encode(contents[:, :, idx: idx + 1], vae).to("cpu") for idx in range(num_control)]
+    latents = hunyuan.vae_encode(contents[:, :, num_control:], vae)  # include scaling factor
     latents = latents.to("cpu")  # (B, C, 1, H/8, W/8)
 
     # Vision encoding per‑item (once): use control content because it is the start image
-    images = [item.control_content for item in batch]  # list of [H, W, C]
+    images = [item.control_contents[0] for item in batch]  # list of [H, W, C]
 
     # encode image with image encoder
     image_embeddings = []
@@ -282,6 +284,27 @@ def encode_and_save_batch_one_frame(
     )  # C=16 for HY
 
     # indices generation (same as inference)
+
+    # This ensures latent_indices is exactly latent_window_size long
+    
+    split_sizes = [
+        num_control,                         # clean_latent_indices_pre
+        latent_window_size - 1,                 # latent_indices (target frames)
+        1, 2, 16                             # post, 2x, 4x
+    ]
+    
+    indices = torch.arange(0, sum(split_sizes)).unsqueeze(0)
+    (
+        clean_latent_indices_pre,
+        latent_indices,
+        clean_latent_indices_post,
+        clean_latent_2x_indices,
+        clean_latent_4x_indices,
+    ) = indices.split(split_sizes, dim=1)
+    
+    
+
+    """
     indices = torch.arange(0, sum([1, latent_window_size, 1, 2, 16])).unsqueeze(0)
     (
         clean_latent_indices_pre,  # Index for start_latent
@@ -289,11 +312,20 @@ def encode_and_save_batch_one_frame(
         clean_latent_indices_post,  # Index for the most recent history frame
         clean_latent_2x_indices,  # Indices for the next 2 history frames
         clean_latent_4x_indices,  # Indices for the next 16 history frames
-    ) = indices.split([1, latent_window_size, 1, 2, 16], dim=1)
+    ) = indices.split([1 , latent_window_size, 1, 2, 16], dim=1)
+    """
+    
 
     # Indices for clean_latents (start + recent history)
     latent_indices = latent_indices[:, -1:]  # Only the last index is used for one frame training
     clean_latent_indices = torch.cat([clean_latent_indices_pre, clean_latent_indices_post], dim=1)
+
+    print("------")
+    print(latent_indices)
+    print(clean_latent_indices)
+    print(clean_latent_2x_indices)
+    print(clean_latent_4x_indices)
+    print("------")
 
     # clean latents preparation for all items (emulating inference)
     clean_latents_post, clean_latents_2x, clean_latents_4x = history_latents[:, :, : 1 + 2 + 16, :, :].split([1, 2, 16], dim=2)
@@ -302,8 +334,8 @@ def encode_and_save_batch_one_frame(
         original_latent_cache_path = item.latent_cache_path
 
         # clean latents preparation (emulating inference)
-        clean_latents_pre = start_latents[b : b + 1]
-        clean_latents = torch.cat([clean_latents_pre, clean_latents_post], dim=2)  # Combine start frame + placeholder
+        clean_latents_pres = [latent[b : b + 1] for latent in start_latents]
+        clean_latents = torch.cat([*clean_latents_pres, clean_latents_post], dim=2)  # Combine start frame + placeholder
 
         # Target latents for this section (ground truth)
         target_latents = latents[b : b + 1]

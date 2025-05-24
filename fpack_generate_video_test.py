@@ -552,11 +552,11 @@ def prepare_i2v_inputs(
 
     section_images = {}
     for index, image_paths in section_image_paths.items():
-        section_imgs = []
-        for image_path in image_paths.split(","):
+        section_images[index] = []
+        for idx, image_path in enumerate(image_paths.split(",")): 
             img_tensor, img_np = preprocess_image(image_path)
-            section_imgs.append((img_tensor, img_np))
-        section_images[index] = section_imgs
+            section_images[index].append((img_tensor, img_np))
+            
 
     if args.end_image_path is not None:
         end_img_tensor, end_img_np = preprocess_image(args.end_image_path)
@@ -615,13 +615,12 @@ def prepare_i2v_inputs(
 
         # encode image with image encoder
         section_image_encoder_last_hidden_states = {}
-        for index, section_imgs in section_images.items():
-            for (img_tensor, img_np) in section_imgs:
-                with torch.no_grad():
-                    image_encoder_output = hf_clip_vision_encode(img_np, feature_extractor, image_encoder)
-                image_encoder_last_hidden_state = image_encoder_output.last_hidden_state.cpu()
-                section_image_encoder_last_hidden_states[index] = image_encoder_last_hidden_state
-                break
+        for index,  images in section_images.items():
+            (img_tensor, img_np) = images[0]
+            with torch.no_grad():
+                image_encoder_output = hf_clip_vision_encode(img_np, feature_extractor, image_encoder)
+            image_encoder_last_hidden_state = image_encoder_output.last_hidden_state.cpu()
+            section_image_encoder_last_hidden_states[index] = image_encoder_last_hidden_state
 
         # free image encoder and clean memory
         del image_encoder, feature_extractor
@@ -634,7 +633,6 @@ def prepare_i2v_inputs(
         llama_vec_n = encoded_context_n["llama_vec"]
         llama_attention_mask_n = encoded_context_n["llama_attention_mask"]
         clip_l_pooler_n = encoded_context_n["clip_l_pooler"]
-        
         image_encoder_last_hidden_state = encoded_context["image_encoder_last_hidden_state"]
 
     # VAE encoding
@@ -642,12 +640,13 @@ def prepare_i2v_inputs(
     vae.to(device)
 
     section_start_latents = {}
-    for index, section_imgs in section_images.items():
-        start_latents = []
-        for (img_tensor, img_np) in section_imgs:
-            start_latent = hunyuan.vae_encode(img_tensor, vae).cpu()
-            start_latents.append(start_latent)
-        section_start_latents[index] = start_latents
+    section_second_latents = {}
+    for index, images in section_images.items():
+        #start_latent = hunyuan.vae_encode(img_tensor, vae).cpu()
+        start_latent = hunyuan.vae_encode(images[0][0], vae).cpu()  # shape: [1, 16, 1, H, W]
+        second_latent = hunyuan.vae_encode(images[1][0], vae).cpu()
+        section_start_latents[index] = start_latent
+        section_second_latents[index] = second_latent
 
     end_latent = hunyuan.vae_encode(end_img_tensor, vae).cpu() if end_img_tensor is not None else None
 
@@ -678,11 +677,14 @@ def prepare_i2v_inputs(
     arg_c_img = {}
     for index in section_images.keys():
         image_encoder_last_hidden_state = section_image_encoder_last_hidden_states[index]
-        start_latents = section_start_latents[index]
+        start_latent = section_start_latents[index]
+        second_latent = section_second_latents[index]
         arg_c_img_i = {
             "image_encoder_last_hidden_state": image_encoder_last_hidden_state,
-            "start_latents": start_latents,
-            "image_path": section_image_paths[index],
+            "start_latent": start_latent,
+            "second_latent": second_latent,
+            "image_path": section_image_paths[index].split(",")[0],
+            "second_image_path": section_image_paths[index].split(",")[1],
         }
         arg_c_img[index] = arg_c_img_i
 
@@ -994,8 +996,8 @@ def generate(args: argparse.Namespace, gen_settings: GenerationSettings, shared_
             else:
                 latent_paddings = user_latent_paddings
     else:
-        start_latents = context_img[0]["start_latents"]
-        history_latents = torch.cat([history_latents, *start_latents], dim=2)
+        start_latent = context_img[0]["start_latent"]
+        history_latents = torch.cat([history_latents, start_latent], dim=2)
         total_generated_latent_frames = 1  # a bit hacky, but we employ the same logic as in official code
         latent_paddings = [0] * total_latent_sections  # dummy paddings for F1 mode
 
@@ -1029,7 +1031,8 @@ def generate(args: argparse.Namespace, gen_settings: GenerationSettings, shared_
         else:
             image_index = 0
 
-        start_latents = context_img[image_index]["start_latents"]
+        start_latent = context_img[image_index]["start_latent"]
+        second_latent = context_img[image_index]["second_latent"]
         image_path = context_img[image_index]["image_path"]
         if image_index != 0:  # use section image other than section 0
             logger.info(f"Apply experimental section image, latent_padding_size = {latent_padding_size}, image_path = {image_path}")
@@ -1045,17 +1048,18 @@ def generate(args: argparse.Namespace, gen_settings: GenerationSettings, shared_
                 clean_latent_2x_indices,
                 clean_latent_4x_indices,
             ) = indices.split([1, latent_padding_size, latent_window_size, 1, 2, 16], dim=1)
+            print("======")
+            print(clean_latent_indices_pre)
+            print("======")
             index_tensor_1 = torch.tensor([[1]], device=clean_latent_indices_pre.device)
-            
             clean_latent_indices = torch.cat([clean_latent_indices_pre, index_tensor_1, clean_latent_indices_post], dim=1)
 
-            clean_latents_pres = [start_latent.to(history_latents) for start_latent in start_latents]
+            clean_latents_pre = start_latent.to(history_latents)
+            clean_second_latents = second_latent.to(history_latents)
             clean_latents_post, clean_latents_2x, clean_latents_4x = history_latents[:, :, : 1 + 2 + 16, :, :].split(
                 [1, 2, 16], dim=2
             )
-            print("$$$$$")
-            print(len(clean_latents_pres))
-            clean_latents = torch.cat([*clean_latents_pres, clean_latents_post], dim=2)
+            clean_latents = torch.cat([clean_latents_pre, clean_second_latents ,clean_latents_post], dim=2)
 
         else:
             # F1 mode
@@ -1072,7 +1076,7 @@ def generate(args: argparse.Namespace, gen_settings: GenerationSettings, shared_
             clean_latents_4x, clean_latents_2x, clean_latents_1x = history_latents[:, :, -sum([16, 2, 1]) :, :, :].split(
                 [16, 2, 1], dim=2
             )
-            clean_latents = torch.cat([*[start_latent.to(history_latents) for start_latent in start_latents] , clean_latents_1x], dim=2)
+            clean_latents = torch.cat([start_latent.to(history_latents), clean_latents_1x], dim=2)
 
         # if use_teacache:
         #     transformer.initialize_teacache(enable_teacache=True, num_steps=steps)
@@ -1160,6 +1164,10 @@ def generate(args: argparse.Namespace, gen_settings: GenerationSettings, shared_
                 f"One frame inference. latent_indices: {latent_indices}, clean_latent_indices: {clean_latent_indices}, num_frames: {sample_num_frames}"
             )
 
+        print("=====check=====")
+        print(clean_latents.shape)
+        print("===============")
+
         generated_latents = sample_hunyuan(
             transformer=model,
             sampler=args.sample_solver,
@@ -1195,9 +1203,7 @@ def generate(args: argparse.Namespace, gen_settings: GenerationSettings, shared_
         if not f1_mode:
             # Inverted Anti-drifting: prepend generated latents to history latents
             if is_last_section:
-                generated_latents = torch.cat([
-                    *[start_latent.to(generated_latents) for start_latent in start_latents],
-                    generated_latents], dim=2)
+                generated_latents = torch.cat([start_latent.to(generated_latents), generated_latents], dim=2)
                 total_generated_latent_frames += 1
 
             history_latents = torch.cat([generated_latents.to(history_latents), history_latents], dim=2)
@@ -1226,7 +1232,9 @@ def generate(args: argparse.Namespace, gen_settings: GenerationSettings, shared_
         # print(f"Decoded. Current latent shape {real_history_latents.shape}; pixel shape {history_pixels.shape}")
 
     if one_frame_inference is not None:
+        
         real_history_latents = real_history_latents[:, :, 1:, :, :]  # remove the first frame (start_latent)
+        ###real_history_latents = real_history_latents[:, :, 2:, :, :]
 
     # Only clean up shared models if they were created within this function
     if shared_models is None:
