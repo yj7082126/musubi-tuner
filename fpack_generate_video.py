@@ -123,11 +123,14 @@ def parse_args() -> argparse.Namespace:
         help="path to image mask for one frame inference. If specified, it will be used as mask for input image.",
     )
     parser.add_argument(
-        "--end_image_mask_path",
+        "--control_image_path", type=str, default=None, nargs="*", help="path to control (reference) image for one frame inference."
+    )
+    parser.add_argument(
+        "--control_image_mask_path",
         type=str,
         default=None,
         nargs="*",
-        help="path to end (reference) image mask for one frame inference. If specified, it will be used as mask for end image.",
+        help="path to control (reference) image mask for one frame inference.",
     )
     parser.add_argument("--fps", type=int, default=30, help="video fps, default is 30")
     parser.add_argument("--infer_steps", type=int, default=25, help="number of inference steps, default is 25")
@@ -154,7 +157,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="path to image for image2video inference. If `;;;` is used, it will be used as section images. The notation is same as `--prompt`.",
     )
-    parser.add_argument("--end_image_path", type=str, nargs="*", default=None, help="path to end image for image2video inference")
+    parser.add_argument("--end_image_path", type=str, default=None, help="path to end image for image2video inference")
     parser.add_argument(
         "--latent_paddings",
         type=str,
@@ -248,9 +251,9 @@ def parse_prompt_line(line: str) -> Dict[str, Any]:
 
     # Create dictionary of overrides
     overrides = {"prompt": prompt}
-    # Initialize end_image_path and end_image_mask_path as a list to accommodate multiple paths
-    overrides["end_image_path"] = []
-    overrides["end_image_mask_path"] = []
+    # Initialize control_image_path and control_image_mask_path as a list to accommodate multiple paths
+    overrides["control_image_path"] = []
+    overrides["control_image_mask_path"] = []
 
     for part in parts[1:]:
         if not part.strip():
@@ -285,17 +288,19 @@ def parse_prompt_line(line: str) -> Dict[str, Any]:
         elif option == "vs":  # video_sections
             overrides["video_sections"] = int(value)
         elif option == "ei":  # end_image_path
-            overrides["end_image_path"].append(value)
-        elif option == "eim":  # end_image_mask_path
-            overrides["end_image_mask_path"].append(value)
+            overrides["end_image_path"] = value
+        elif option == "ci":  # control_image_path
+            overrides["control_image_path"].append(value)
+        elif option == "cim":  # control_image_mask_path
+            overrides["control_image_mask_path"].append(value)
         elif option == "of":  # one_frame_inference
             overrides["one_frame_inference"] = value
 
-    # If no end_image_path was provided, remove the empty list
-    if not overrides["end_image_path"]:
-        del overrides["end_image_path"]
-    if not overrides["end_image_mask_path"]:
-        del overrides["end_image_mask_path"]
+    # If no control_image_path was provided, remove the empty list
+    if not overrides["control_image_path"]:
+        del overrides["control_image_path"]
+    if not overrides["control_image_mask_path"]:
+        del overrides["control_image_mask_path"]
 
     return overrides
 
@@ -570,21 +575,24 @@ def prepare_i2v_inputs(
     section_image_paths = parse_section_strings(args.image_path)
 
     section_images = {}
-    for index, image_paths in section_image_paths.items():
-        section_imgs = []
-        for image_path in image_paths.split(","):
-            img_tensor, img_np = preprocess_image(image_path)
-            section_imgs.append((img_tensor, img_np))
-        section_images[index] = section_imgs
+    for index, image_path in section_image_paths.items():
+        img_tensor, img_np = preprocess_image(image_path)
+        section_images[index] = (img_tensor, img_np)
+
+    # check end image
+    if args.end_image_path is not None:
+        end_image_tensor, _ = preprocess_image(args.end_image_path)
+    else:
+        end_image_tensor = None
 
     # check end images
-    if args.end_image_path is not None and len(args.end_image_path) > 0:
-        end_image_tensors = []
-        for end_img_path in args.end_image_path:
-            end_image_tensor, _ = preprocess_image(end_img_path)
-            end_image_tensors.append(end_image_tensor)
+    if args.control_image_path is not None and len(args.control_image_path) > 0:
+        control_image_tensors = []
+        for ctrl_image_path in args.control_image_path:
+            control_image_tensor, _ = preprocess_image(ctrl_image_path)
+            control_image_tensors.append(control_image_tensor)
     else:
-        end_image_tensors = None
+        control_image_tensors = None
 
     # configure negative prompt
     n_prompt = args.negative_prompt if args.negative_prompt else ""
@@ -649,13 +657,11 @@ def prepare_i2v_inputs(
     # encode image with image encoder
 
     section_image_encoder_last_hidden_states = {}
-    for index, section_imgs in section_images.items():
-        for (img_tensor, img_np) in section_imgs:
-            with torch.no_grad():
-                image_encoder_output = hf_clip_vision_encode(img_np, feature_extractor, image_encoder)
-            image_encoder_last_hidden_state = image_encoder_output.last_hidden_state.cpu()
-            section_image_encoder_last_hidden_states[index] = image_encoder_last_hidden_state
-            break
+    for index, (img_tensor, img_np) in section_images.items():
+        with torch.no_grad():
+            image_encoder_output = hf_clip_vision_encode(img_np, feature_extractor, image_encoder)
+        image_encoder_last_hidden_state = image_encoder_output.last_hidden_state.cpu()
+        section_image_encoder_last_hidden_states[index] = image_encoder_last_hidden_state
 
     # free image encoder and clean memory
     if shared_models is not None:
@@ -668,21 +674,18 @@ def prepare_i2v_inputs(
     vae.to(device)
 
     section_start_latents = {}
-    for index, section_imgs in section_images.items():
-        start_latents = []
-        for (img_tensor, img_np) in section_imgs:
-            start_latent = hunyuan.vae_encode(img_tensor, vae).cpu()
-            start_latents.append(start_latent)
-        section_start_latents[index] = start_latents
+    for index, (img_tensor, img_np) in section_images.items():
+        start_latent = hunyuan.vae_encode(img_tensor, vae).cpu()
+        section_start_latents[index] = start_latent
 
-    # end_latent = hunyuan.vae_encode(end_image_tensor, vae).cpu() if end_image_tensor is not None else None
-    if end_image_tensors is not None:
-        end_latents = []
-        for end_image_tensor in end_image_tensors:
-            end_latent = hunyuan.vae_encode(end_image_tensor, vae).cpu()
-            end_latents.append(end_latent)
-    else:
-        end_latents = None
+    end_latent = hunyuan.vae_encode(end_image_tensor, vae).cpu() if end_image_tensor is not None else None
+
+    control_latents = None
+    if control_image_tensors is not None:
+        control_latents = []
+        for ctrl_image_tensor in control_image_tensors:
+            control_latent = hunyuan.vae_encode(ctrl_image_tensor, vae).cpu()
+            control_latents.append(control_latent)
 
     vae.to("cpu")  # move VAE to CPU to save memory
     clean_memory_on_device(device)
@@ -711,15 +714,15 @@ def prepare_i2v_inputs(
     arg_c_img = {}
     for index in section_images.keys():
         image_encoder_last_hidden_state = section_image_encoder_last_hidden_states[index]
-        start_latents = section_start_latents[index]
+        start_latent = section_start_latents[index]
         arg_c_img_i = {
             "image_encoder_last_hidden_state": image_encoder_last_hidden_state,
-            "start_latents": start_latents,
+            "start_latent": start_latent,
             "image_path": section_image_paths[index],
         }
         arg_c_img[index] = arg_c_img_i
 
-    return height, width, video_seconds, arg_c, arg_null, arg_c_img, end_latents
+    return height, width, video_seconds, arg_c, arg_null, arg_c_img, end_latent, control_latents
 
 
 # def setup_scheduler(args: argparse.Namespace, config, device: torch.device) -> Tuple[Any, torch.Tensor]:
@@ -939,13 +942,15 @@ def generate(
     if shared_models is not None:
         # Use shared models and encoded data
         vae = shared_models.get("vae")
-        height, width, video_seconds, context, context_null, context_img, end_latents = prepare_i2v_inputs(
+        height, width, video_seconds, context, context_null, context_img, end_latent, control_latents = prepare_i2v_inputs(
             args, device, vae, shared_models
         )
     else:
         # prepare inputs without shared models
         vae = load_vae(args.vae, args.vae_chunk_size, args.vae_spatial_tile_sample_min_size, device)
-        height, width, video_seconds, context, context_null, context_img, end_latents = prepare_i2v_inputs(args, device, vae)
+        height, width, video_seconds, context, context_null, context_img, end_latent, control_latents = prepare_i2v_inputs(
+            args, device, vae
+        )
 
     if shared_models is None or "model" not in shared_models:
         # load DiT model
@@ -997,10 +1002,9 @@ def generate(
 
     # prepare history latents
     history_latents = torch.zeros((1, 16, 1 + 2 + 16, height // 8, width // 8), dtype=torch.float32)
-    if end_latents is not None and not f1_mode:
+    if end_latent is not None and not f1_mode:
         logger.info(f"Use end image(s): {args.end_image_path}")
-        for i, end_latent in enumerate(end_latents):
-            history_latents[:, :, i + 1 : i + 2] = end_latent.to(history_latents)
+        history_latents[:, :, :1] = end_latent.to(history_latents)
 
     # prepare clean latents and indices
     if not f1_mode:
@@ -1034,8 +1038,8 @@ def generate(
             else:
                 latent_paddings = user_latent_paddings
     else:
-        start_latents = context_img[0]["start_latents"]
-        history_latents = torch.cat([history_latents, start_latents[0]], dim=2)
+        start_latent = context_img[0]["start_latent"]
+        history_latents = torch.cat([history_latents, start_latent], dim=2)
         total_generated_latent_frames = 1  # a bit hacky, but we employ the same logic as in official code
         latent_paddings = [0] * total_latent_sections  # dummy paddings for F1 mode
 
@@ -1069,7 +1073,7 @@ def generate(
         else:
             image_index = 0
 
-        start_latents = context_img[image_index]["start_latents"]
+        start_latent = context_img[image_index]["start_latent"]
         image_path = context_img[image_index]["image_path"]
         if image_index != 0:  # use section image other than section 0
             logger.info(f"Apply experimental section image, latent_padding_size = {latent_padding_size}, image_path = {image_path}")
@@ -1085,24 +1089,14 @@ def generate(
                 clean_latent_2x_indices,
                 clean_latent_4x_indices,
             ) = indices.split([1, latent_padding_size, latent_window_size, 1, 2, 16], dim=1)
-            
-            index_tensors = []
-            for i in range(1, len(start_latents)):
-                index_tensors.append(torch.tensor([[i]], device=clean_latent_indices_pre.device))
-            
-            clean_latent_indices = torch.cat([clean_latent_indices_pre, *index_tensors, clean_latent_indices_post], dim=1)
 
-            clean_latents_pres = [start_latent.to(history_latents) for start_latent in start_latents]
+            clean_latent_indices = torch.cat([clean_latent_indices_pre, clean_latent_indices_post], dim=1)
+
+            clean_latents_pre = start_latent.to(history_latents)
             clean_latents_post, clean_latents_2x, clean_latents_4x = history_latents[:, :, : 1 + 2 + 16, :, :].split(
                 [1, 2, 16], dim=2
             )
-            clean_latents = torch.cat([*clean_latents_pres, clean_latents_post], dim=2)
-
-            if end_latents is not None:
-                clean_latents = torch.cat([clean_latents_pre, history_latents[:, :, : len(end_latents)]], dim=2)
-                clean_latent_indices_extended = torch.zeros(1, 1 + len(end_latents), dtype=clean_latent_indices.dtype)
-                clean_latent_indices_extended[:, :2] = clean_latent_indices
-                clean_latent_indices = clean_latent_indices_extended
+            clean_latents = torch.cat([clean_latents_pre, clean_latents_post], dim=2)
 
         else:
             # F1 mode
@@ -1119,7 +1113,7 @@ def generate(
             clean_latents_4x, clean_latents_2x, clean_latents_1x = history_latents[:, :, -sum([16, 2, 1]) :, :, :].split(
                 [16, 2, 1], dim=2
             )
-            clean_latents = torch.cat([*[start_latent.to(history_latents) for start_latent in start_latents] , clean_latents_1x], dim=2)
+            clean_latents = torch.cat([start_latent.to(history_latents), clean_latents_1x], dim=2)
 
         # if use_teacache:
         #     transformer.initialize_teacache(enable_teacache=True, num_steps=steps)
@@ -1171,13 +1165,19 @@ def generate(
                 mask_image = get_latent_mask(args.image_mask_path)
                 logger.info(f"Apply mask for clean latents (start image): {args.image_mask_path}, shape: {mask_image.shape}")
                 clean_latents[:, :, 0, :, :] = clean_latents[:, :, 0, :, :] * mask_image
-            if args.end_image_mask_path is not None and len(args.end_image_mask_path) > 0:
+
+            if control_latents is not None and len(control_latents) > 0:
+                # kisekaeichi and 1f-mc: both are using control images, but indices are different
+                # start latent -> control_latents -> zero out history latents
+                clean_latents = torch.cat([clean_latents[:, :, :1, :, :], control_latents, clean_latents[:, :, 1:, :, :]], dim=2)
+
+            if args.control_image_mask_path is not None and len(args.control_image_mask_path) > 0:
                 # # apply mask for clean latents 1x (end image)
-                count = min(len(args.end_image_mask_path), len(end_latents))
+                count = min(len(args.control_image_mask_path), len(control_latents))
                 for i in range(count):
-                    mask_image = get_latent_mask(args.end_image_mask_path[i])
+                    mask_image = get_latent_mask(args.control_image_mask_path[i])
                     logger.info(
-                        f"Apply mask for clean latents 1x (end image) for {i+1}: {args.end_image_mask_path[i]}, shape: {mask_image.shape}"
+                        f"Apply mask for clean latents 1x (end image) for {i+1}: {args.control_image_mask_path[i]}, shape: {mask_image.shape}"
                     )
                     clean_latents[:, :, i + 1 : i + 2, :, :] = clean_latents[:, :, i + 1 : i + 2, :, :] * mask_image
 
@@ -1190,17 +1190,17 @@ def generate(
                     start_index = int(one_frame_param.split("=")[1])
                     clean_latent_indices[:, 0] = start_index
                     logger.info(f"Set index for clean latent pre (start image): {start_index}")
-                elif one_frame_param.startswith("history_index="):
-                    history_indices = one_frame_param.split("=")[1].split(";")
+                elif one_frame_param.startswith("control_index="):
+                    control_indices = one_frame_param.split("=")[1].split(";")
                     i = 0
-                    while i < len(history_indices) and i < len(end_latents):
-                        history_index = int(history_indices[i])
-                        clean_latent_indices[:, 1 + i] = history_index
+                    while i < len(control_indices) and i < len(control_latents):
+                        control_index = int(control_indices[i])
+                        clean_latent_indices[:, 1 + i] = control_index
                         i += 1
-                    while i < len(end_latents):
-                        clean_latent_indices[:, 1 + i] = history_index
+                    while i < len(control_indices):
+                        clean_latent_indices[:, 1 + i] = control_index
                         i += 1
-                    logger.info(f"Set index for clean latent post (end image): {history_indices}")
+                    logger.info(f"Set index for clean latent post (control image): {control_indices}")
 
             if "no_2x" in one_frame_inference:
                 clean_latents_2x = None
@@ -1211,11 +1211,11 @@ def generate(
                 clean_latent_4x_indices = None
                 logger.info(f"No clean_latents_4x")
             if "no_post" in one_frame_inference:
-                clean_latents = clean_latents[:, :, :1, :, :]
-                clean_latent_indices = clean_latent_indices[:, :1]
-                logger.info(f"No clean_latents post")
+                clean_latents = clean_latents[:, :, :-1, :, :]
+                clean_latent_indices = clean_latent_indices[:, :-1]
+                logger.info(f"Remove clean_latents post (last frame)")
             elif "zero_post" in one_frame_inference:
-                # zero out the history latents. this seems to prevent the images from corrupting
+                # zero out the history latents. this seems to prevent the images from corrupting. This is not necessary except for multi-time inference.
                 clean_latents[:, :, 1:, :, :] = torch.zeros_like(clean_latents[:, :, 1:, :, :])
                 logger.info(f"Zero out clean_latents post")
 
@@ -1258,7 +1258,7 @@ def generate(
         if not f1_mode:
             # Inverted Anti-drifting: prepend generated latents to history latents
             if is_last_section:
-                generated_latents = torch.cat([start_latents[0].to(generated_latents), generated_latents], dim=2)
+                generated_latents = torch.cat([start_latent.to(generated_latents), generated_latents], dim=2)
                 total_generated_latent_frames += 1
 
             history_latents = torch.cat([generated_latents.to(history_latents), history_latents], dim=2)
