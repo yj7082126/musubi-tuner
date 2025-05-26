@@ -46,7 +46,11 @@ def encode_and_save_batch(
     # Stack batch into tensor (B,C,F,H,W) in RGB order
     contents = torch.stack([torch.from_numpy(item.content) for item in batch])
     if len(contents.shape) == 4:
-        contents = contents.unsqueeze(1)
+        contents = contents.unsqueeze(1)  # B, H, W, C -> B, F, H, W, C
+
+    contents = contents.permute(0, 4, 1, 2, 3).contiguous()  # B, C, F, H, W
+    contents = contents.to(vae.device, dtype=vae.dtype)
+    contents = contents / 127.5 - 1.0  # normalize to [-1, 1]
 
     height, width = contents.shape[3], contents.shape[4]
     if height < 8 or width < 8:
