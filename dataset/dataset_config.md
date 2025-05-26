@@ -361,6 +361,20 @@ The dataset configuration with metadata JSONL file is  same as the video dataset
 
 The dataset configuration is shared across all architectures. However, some architectures may require additional settings or have specific requirements for the dataset.
 
+### FramePack
+
+For FramePack, you can set the latent window size for training. It is recommended to set it to 9 for FramePack training. The default value is 9, so you can usually omit this setting.
+
+```toml
+[[datasets]]
+fp_latent_window_size = 9
+```
+
+<details>
+<summary>日本語</summary>
+学習時のlatent window sizeを指定できます。FramePackの学習においては、9を指定することを推奨します。省略時は9が使用されますので、通常は省略して構いません。
+</details>
+
 ### FramePack Single Frame Training
 
 For the default single frame training of FramePack, you need to set the following parameters in the dataset configuration:
@@ -369,11 +383,16 @@ For the default single frame training of FramePack, you need to set the followin
 [[datasets]]
 fp_1f_clean_indices = [0]
 fp_1f_target_index = 9
+fp_1f_zero_post = true
 ```
 
 **Advanced Settings:**
 
-`fp_1f_clean_indices` sets the `clean_indices` value passed to the FramePack model. You can specify multiple indices. `fp_1f_target_index` sets the index of the frame to be trained (generated). The number of control images should match the number of indices specified in `fp_1f_clean_indices`.
+Note that these parameters are still experimental, and the optimal values are not yet known. The parameters may also change in the future.
+
+`fp_1f_clean_indices` sets the `clean_indices` value passed to the FramePack model. You can specify multiple indices. `fp_1f_target_index` sets the index of the frame to be trained (generated). `fp_1f_zero_post` sets whether to add a zero value as `clean_latent_post`, default is `true`.
+
+The number of control images should match the number of indices specified in `fp_1f_clean_indices`.
 
 The default values mean that the first image (control image) is at index `0`, and the target image (the changed image) is at index `9`.
 
@@ -383,33 +402,49 @@ For training with 1f-mc, set `fp_1f_clean_indices` to `[0, 1]` and `fp_1f_target
 [[datasets]]
 fp_1f_clean_indices = [0, 1]
 fp_1f_target_index = 9
+fp_1f_zero_post = true
 ```
 
-For training with kisekaeichi, set `fp_1f_clean_indices` to `[0, 10]` and `fp_1f_target_index` to `1`. This allows you to use the starting image (the image just before the generation section) and the image following the generation section to train the first image of the generated video. The control images will be two in this case.
+For training with kisekaeichi, set `fp_1f_clean_indices` to `[0, 10]` and `fp_1f_target_index` to `1`. This allows you to use the starting image (the image just before the generation section) and the image following the generation section (equivalent to `clean_latent_post`) to train the first image of the generated video. The control images will be two in this case. `fp_1f_zero_post` should be set to `false`.
 
 ```toml
 [[datasets]]
 fp_1f_clean_indices = [0, 10]
 fp_1f_target_index = 1
+fp_1f_zero_post = false
 ```
 
 With `fp_1f_clean_indices` and `fp_1f_target_index`, you can specify any number of control images and any index of the target image for training.
 
+If you set `fp_1f_zero_post` to `true`, the `clean_latent_post_index` will be `1 + fp1_latent_window_size`.
+
+You can also set the `no_2x` and `no_4x` options for cache scripts to disable the clean latents 2x and 4x.
+
+The 2x indices are `1 + fp1_latent_window_size + 1` for two indices (usually `11, 12`), and the 4x indices are `1 + fp1_latent_window_size + 1 + 2` for sixteen indices (usually `13, 14, ..., 28`).
+
 <details>
 <summary>日本語</summary>
-デフォルトの1フレーム学習を行う場合、`fp_1f_clean_indices`に`[0]`を、`fp_1f_target_index`に`9`（または5から15程度の値）を設定してください。（記述例は英語版ドキュメントを参照、以降同じ。）
+※ 以下のパラメータは研究中で最適値はまだ不明です。またパラメータ自体も変更される可能性があります。
+
+デフォルトの1フレーム学習を行う場合、`fp_1f_clean_indices`に`[0]`を、`fp_1f_target_index`に`9`（または5から15程度の値）を、`zero_post`に`true`を設定してください。（記述例は英語版ドキュメントを参照、以降同じ。）
 
 **より高度な設定：**
 
-`fp_1f_clean_indices`は、FramePackモデルに渡される `clean_indices` の値を設定します。複数指定が可能です。`fp_1f_target_index`は、学習（生成）対象のフレームのインデックスを設定します。制御画像の枚数は`fp_1f_clean_indices`に指定したインデックスの数とあわせてください。
+`fp_1f_clean_indices`は、FramePackモデルに渡される `clean_indices` の値を設定します。複数指定が可能です。`fp_1f_target_index`は、学習（生成）対象のフレームのインデックスを設定します。`fp_1f_zero_post`は、`clean_latent_post` をゼロ値で追加するかどうかを設定します（デフォルトは`true`です）。
+
+制御画像の枚数は`fp_1f_clean_indices`に指定したインデックスの数とあわせてください。
 
 デフォルトの1フレーム学習では、開始画像（制御画像）1枚をインデックス`0`、生成対象の画像（変化後の画像）をインデックス`9`に設定しています。
 
 1f-mcの学習を行う場合は、`fp_1f_clean_indices`に `[0, 1]`を、`fp_1f_target_index`に`9`を設定してください。これにより動画の先頭の2枚の制御画像を使用して、後続の1枚の生成画像を学習します。制御画像は2枚になります。
 
-kisekaeichiの学習を行う場合は、`fp_1f_clean_indices`に `[0, 10]`を、`fp_1f_target_index`に`1`を設定してください。これは、開始画像（生成セクションの直前の画像）（`clean_latent_pre`に相当）と、生成セクションに続く1枚の画像（`clean_latent_post`に相当）を使用して、生成動画の先頭の画像を学習します。制御画像は2枚になります。
+kisekaeichiの学習を行う場合は、`fp_1f_clean_indices`に `[0, 10]`を、`fp_1f_target_index`に`1`を設定してください。これは、開始画像（生成セクションの直前の画像）（`clean_latent_pre`に相当）と、生成セクションに続く1枚の画像（`clean_latent_post`に相当）を使用して、生成動画の先頭の画像を学習します。制御画像は2枚になります。`f1_1f_zero_post`は`false`に設定してください。
 
 `fp_1f_clean_indices`と`fp_1f_target_index`を応用することで、任意の枚数の制御画像を、任意のインデックスを指定して学習することが可能です。
+
+`fp_1f_zero_post`を`true`に設定すると、`clean_latent_post_index`は `1 + fp1_latent_window_size` になります。
+
+推論時の `no_2x`、`no_4x`に対応する設定は、キャッシュスクリプトの引数で行えます。なお、2xのindexは `1 + fp1_latent_window_size + 1` からの2個（通常は`11, 12`）、4xのindexは `1 + fp1_latent_window_size + 1 + 2` からの16個になります（通常は`13, 14, ..., 28`）です。
 
 </details>
 
