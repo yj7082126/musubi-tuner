@@ -392,19 +392,24 @@ class FramePackNetworkTrainer(NetworkTrainer):
         #         print(f"{k}: {v.shape} {v.dtype} {v.device}")
         with accelerator.autocast():
             clean_latent_2x_indices = batch["clean_latent_2x_indices"] if "clean_latent_2x_indices" in batch else None
-            clean_latent_4x_indices = batch["clean_latent_4x_indices"] if "clean_latent_4x_indices" in batch else None
             if clean_latent_2x_indices is not None:
                 clean_latent_2x = batch["latents_clean_2x"] if "latents_clean_2x" in batch else None
                 if clean_latent_2x is None:
                     clean_latent_2x = torch.zeros(
                         (batch_size, 16, 2, latents.shape[3], latents.shape[4]), dtype=latents.dtype, device=latents.device
                     )
+            else:
+                clean_latent_2x = None
+            
+            clean_latent_4x_indices = batch["clean_latent_4x_indices"] if "clean_latent_4x_indices" in batch else None
             if clean_latent_4x_indices is not None:
                 clean_latent_4x = batch["latents_clean_4x"] if "latents_clean_4x" in batch else None
                 if clean_latent_4x is None:
                     clean_latent_4x = torch.zeros(
                         (batch_size, 16, 16, latents.shape[3], latents.shape[4]), dtype=latents.dtype, device=latents.device
                     )
+            else:
+                clean_latent_4x = None
 
             model_pred = model(
                 hidden_states=noisy_model_input,

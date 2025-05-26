@@ -257,9 +257,11 @@ def save_latent_cache_framepack(
     sd[f"latents_clean_{F}x{H}x{W}_{dtype_str}"] = clean_latents.detach().cpu().contiguous()
     if clean_latent_2x_indices is not None:
         sd[f"clean_latent_2x_indices_{indices_dtype_str}"] = clean_latent_2x_indices.detach().cpu()
+    if clean_latents_2x is not None:
         sd[f"latents_clean_2x_{F}x{H}x{W}_{dtype_str}"] = clean_latents_2x.detach().cpu().contiguous()
     if clean_latent_4x_indices is not None:
         sd[f"clean_latent_4x_indices_{indices_dtype_str}"] = clean_latent_4x_indices.detach().cpu()
+    if clean_latents_4x is not None:
         sd[f"latents_clean_4x_{F}x{H}x{W}_{dtype_str}"] = clean_latents_4x.detach().cpu().contiguous()
 
     # for key, value in sd.items():

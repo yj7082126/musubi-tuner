@@ -259,14 +259,14 @@ def encode_and_save_batch_one_frame(
     contents = contents.to(vae.device, dtype=vae.dtype)
     contents = contents / 127.5 - 1.0  # normalize to [-1, 1]
 
-    height, width = contents.shape[3], contents.shape[4]
+    height, width = contents.shape[-2], contents.shape[-1]
     if height < 8 or width < 8:
         item = batch[0]  # other items should have the same size
         raise ValueError(f"Image or video size too small: {item.item_key} and {len(batch) - 1} more, size: {item.original_size}")
 
     # VAE encode: we need to encode one frame at a time because VAE encoder has stride=4 for the time dimension except for the first frame.
     latents = [hunyuan.vae_encode(contents[:, :, idx : idx + 1], vae).to("cpu") for idx in range(contents.shape[2])]
-    latents = torch.stack(latents, dim=2)  # B, C, F, H/8, W/8
+    latents = torch.cat(latents, dim=2)  # B, C, F, H/8, W/8
 
     # Vision encoding per‑item (once): use control content because it is the start image
     images = [item.control_content[0] for item in batch]  # list of [H, W, C]
@@ -284,6 +284,12 @@ def encode_and_save_batch_one_frame(
     for b, item in enumerate(batch):
         # indices generation (same as inference): each item may have different clean_latent_indices, so we generate them per item
         clean_latent_indices = item.fp_1f_clean_indices  # list of indices for clean latents
+        if clean_latent_indices is None or len(clean_latent_indices) == 0:
+            logger.warning(
+                f"Item {item.item_key} has no clean_latent_indices defined, using default indices for one frame training."
+            )
+            clean_latent_indices = [0]
+
         if item.fp_1f_zero_post:
             clean_latent_indices = clean_latent_indices + [1 + item.fp_latent_window_size]
         clean_latent_indices = torch.Tensor(clean_latent_indices).long()  #  N
@@ -310,12 +316,12 @@ def encode_and_save_batch_one_frame(
         clean_latents = latents[b, :, :-1]  # C, F, H, W
         if item.fp_1f_zero_post:
             # If zero post is enabled, we need to add a zero frame at the end
-            clean_latents = F.pad(clean_latents, (0, 0, 0, 1, 0, 0), value=0.0)  # C, F+1, H, W
+            clean_latents = F.pad(clean_latents, (0, 0, 0, 0, 0, 1), value=0.0)  # C, F+1, H, W
 
         # Target latents for this section (ground truth)
         target_latents = latents[b, :, -1:]  # C, 1, H, W
 
-        print(f"Saving cache for item {item.item_key} at {item.latent_cache_path}")
+        print(f"Saving cache for item {item.item_key} at {item.latent_cache_path}. zero_post: {item.fp_1f_zero_post}")
         print(f"  Clean latent indices: {clean_latent_indices}, latent index: {latent_index}")
         print(f"  Clean latents: {clean_latents.shape}, target latents: {target_latents.shape}")
         print(f"  Clean latents 2x indices: {clean_latent_2x_indices}, clean latents 4x indices: {clean_latent_4x_indices}")
