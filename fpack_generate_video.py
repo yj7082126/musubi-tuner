@@ -1169,7 +1169,17 @@ def generate(
             if control_latents is not None and len(control_latents) > 0:
                 # kisekaeichi and 1f-mc: both are using control images, but indices are different
                 # start latent -> control_latents -> zero out history latents
-                clean_latents = torch.cat([clean_latents[:, :, :1, :, :], control_latents, clean_latents[:, :, 1:, :, :]], dim=2)
+                clean_latents = torch.cat([clean_latents[:, :, :1, :, :], *control_latents, clean_latents[:, :, 1:, :, :]], dim=2)
+                clean_latent_indices = torch.cat(
+                    [
+                        clean_latent_indices[:, :1],
+                        torch.zeros(
+                            (1, len(control_latents)), dtype=clean_latent_indices.dtype, device=clean_latent_indices.device
+                        ),
+                        clean_latent_indices[:, 1:],
+                    ],
+                    dim=1,
+                )
 
             if args.control_image_mask_path is not None and len(args.control_image_mask_path) > 0:
                 # # apply mask for clean latents 1x (end image)
@@ -1216,7 +1226,7 @@ def generate(
                 logger.info(f"Remove clean_latents post (last frame)")
             elif "zero_post" in one_frame_inference:
                 # zero out the history latents. this seems to prevent the images from corrupting. This is not necessary except for multi-time inference.
-                clean_latents[:, :, 1:, :, :] = torch.zeros_like(clean_latents[:, :, 1:, :, :])
+                clean_latents[:, :, -1:, :, :] = torch.zeros_like(clean_latents[:, :, -1:, :, :])
                 logger.info(f"Zero out clean_latents post")
 
             logger.info(
