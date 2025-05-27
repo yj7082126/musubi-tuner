@@ -124,23 +124,21 @@ def resize_image_to_bucket(image: Union[Image.Image, np.ndarray], bucket_reso: t
         return np.array(image) if is_pil_image else image
 
     bucket_width, bucket_height = bucket_reso
-    if bucket_width == image_width or bucket_height == image_height:
-        image = np.array(image) if is_pil_image else image
-    else:
-        # resize the image to the bucket resolution to match the short side
-        scale_width = bucket_width / image_width
-        scale_height = bucket_height / image_height
-        scale = max(scale_width, scale_height)
-        image_width = int(image_width * scale + 0.5)
-        image_height = int(image_height * scale + 0.5)
 
-        if scale > 1:
-            image = Image.fromarray(image) if not is_pil_image else image
-            image = image.resize((image_width, image_height), Image.LANCZOS)
-            image = np.array(image)
-        else:
-            image = np.array(image) if is_pil_image else image
-            image = cv2.resize(image, (image_width, image_height), interpolation=cv2.INTER_AREA)
+    # resize the image to the bucket resolution to match the short side
+    scale_width = bucket_width / image_width
+    scale_height = bucket_height / image_height
+    scale = max(scale_width, scale_height)
+    image_width = int(image_width * scale + 0.5)
+    image_height = int(image_height * scale + 0.5)
+
+    if scale > 1:
+        image = Image.fromarray(image) if not is_pil_image else image
+        image = image.resize((image_width, image_height), Image.LANCZOS)
+        image = np.array(image)
+    else:
+        image = np.array(image) if is_pil_image else image
+        image = cv2.resize(image, (image_width, image_height), interpolation=cv2.INTER_AREA)
 
     # crop the image to the bucket resolution
     crop_left = (image_width - bucket_width) // 2
