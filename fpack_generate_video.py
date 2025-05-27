@@ -1000,304 +1000,230 @@ def generate(
         for mode in args.one_frame_inference.split(","):
             one_frame_inference.add(mode.strip())
 
-    # prepare history latents
-    history_latents = torch.zeros((1, 16, 1 + 2 + 16, height // 8, width // 8), dtype=torch.float32)
-    if end_latent is not None and not f1_mode:
-        logger.info(f"Use end image(s): {args.end_image_path}")
-        history_latents[:, :, :1] = end_latent.to(history_latents)
-
-    # prepare clean latents and indices
-    if not f1_mode:
-        # Inverted Anti-drifting
-        total_generated_latent_frames = 0
-        latent_paddings = reversed(range(total_latent_sections))
-
-        if total_latent_sections > 4 and one_frame_inference is None:
-            # In theory the latent_paddings should follow the above sequence, but it seems that duplicating some
-            # items looks better than expanding it when total_latent_sections > 4
-            # One can try to remove below trick and just
-            # use `latent_paddings = list(reversed(range(total_latent_sections)))` to compare
-            # 4 sections: 3, 2, 1, 0. 50 sections: 3, 2, 2, ... 2, 1, 0
-            latent_paddings = [3] + [2] * (total_latent_sections - 3) + [1, 0]
-
-        if args.latent_paddings is not None:
-            # parse user defined latent paddings
-            user_latent_paddings = [int(x) for x in args.latent_paddings.split(",")]
-            if len(user_latent_paddings) < total_latent_sections:
-                print(
-                    f"User defined latent paddings length {len(user_latent_paddings)} does not match total sections {total_latent_sections}."
-                )
-                print(f"Use default paddings instead for unspecified sections.")
-                latent_paddings[: len(user_latent_paddings)] = user_latent_paddings
-            elif len(user_latent_paddings) > total_latent_sections:
-                print(
-                    f"User defined latent paddings length {len(user_latent_paddings)} is greater than total sections {total_latent_sections}."
-                )
-                print(f"Use only first {total_latent_sections} paddings instead.")
-                latent_paddings = user_latent_paddings[:total_latent_sections]
-            else:
-                latent_paddings = user_latent_paddings
-    else:
-        start_latent = context_img[0]["start_latent"]
-        history_latents = torch.cat([history_latents, start_latent], dim=2)
-        total_generated_latent_frames = 1  # a bit hacky, but we employ the same logic as in official code
-        latent_paddings = [0] * total_latent_sections  # dummy paddings for F1 mode
-
-    latent_paddings = list(latent_paddings)  # make sure it's a list
-    for loop_index in range(total_latent_sections):
-        latent_padding = latent_paddings[loop_index]
-
-        if not f1_mode:
-            # Inverted Anti-drifting
-            section_index_reverse = loop_index  # 0, 1, 2, 3
-            section_index = total_latent_sections - 1 - section_index_reverse  # 3, 2, 1, 0
-            section_index_from_last = -(section_index_reverse + 1)  # -1, -2, -3, -4
-
-            is_last_section = section_index == 0
-            is_first_section = section_index_reverse == 0
-            latent_padding_size = latent_padding * latent_window_size
-
-            logger.info(f"latent_padding_size = {latent_padding_size}, is_last_section = {is_last_section}")
-        else:
-            section_index = loop_index  # 0, 1, 2, 3
-            section_index_from_last = section_index - total_latent_sections  # -4, -3, -2, -1
-            is_last_section = loop_index == total_latent_sections - 1
-            is_first_section = loop_index == 0
-            latent_padding_size = 0  # dummy padding for F1 mode
-
-        # select start latent
-        if section_index_from_last in context_img:
-            image_index = section_index_from_last
-        elif section_index in context_img:
-            image_index = section_index
-        else:
-            image_index = 0
-
-        start_latent = context_img[image_index]["start_latent"]
-        image_path = context_img[image_index]["image_path"]
-        if image_index != 0:  # use section image other than section 0
-            logger.info(f"Apply experimental section image, latent_padding_size = {latent_padding_size}, image_path = {image_path}")
-
-        if not f1_mode:
-            # Inverted Anti-drifting
-            indices = torch.arange(0, sum([1, latent_padding_size, latent_window_size, 1, 2, 16])).unsqueeze(0)
-            (
-                clean_latent_indices_pre,
-                blank_indices,
-                latent_indices,
-                clean_latent_indices_post,
-                clean_latent_2x_indices,
-                clean_latent_4x_indices,
-            ) = indices.split([1, latent_padding_size, latent_window_size, 1, 2, 16], dim=1)
-
-            clean_latent_indices = torch.cat([clean_latent_indices_pre, clean_latent_indices_post], dim=1)
-
-            clean_latents_pre = start_latent.to(history_latents)
-            clean_latents_post, clean_latents_2x, clean_latents_4x = history_latents[:, :, : 1 + 2 + 16, :, :].split(
-                [1, 2, 16], dim=2
-            )
-            clean_latents = torch.cat([clean_latents_pre, clean_latents_post], dim=2)
-
-        else:
-            # F1 mode
-            indices = torch.arange(0, sum([1, 16, 2, 1, latent_window_size])).unsqueeze(0)
-            (
-                clean_latent_indices_start,
-                clean_latent_4x_indices,
-                clean_latent_2x_indices,
-                clean_latent_1x_indices,
-                latent_indices,
-            ) = indices.split([1, 16, 2, 1, latent_window_size], dim=1)
-            clean_latent_indices = torch.cat([clean_latent_indices_start, clean_latent_1x_indices], dim=1)
-
-            clean_latents_4x, clean_latents_2x, clean_latents_1x = history_latents[:, :, -sum([16, 2, 1]) :, :, :].split(
-                [16, 2, 1], dim=2
-            )
-            clean_latents = torch.cat([start_latent.to(history_latents), clean_latents_1x], dim=2)
-
-        # if use_teacache:
-        #     transformer.initialize_teacache(enable_teacache=True, num_steps=steps)
-        # else:
-        #     transformer.initialize_teacache(enable_teacache=False)
-
-        # prepare conditioning inputs
-        if section_index_from_last in context:
-            prompt_index = section_index_from_last
-        elif section_index in context:
-            prompt_index = section_index
-        else:
-            prompt_index = 0
-
-        context_for_index = context[prompt_index]
-        # if args.section_prompts is not None:
-        logger.info(f"Section {section_index}: {context_for_index['prompt']}")
-
-        llama_vec = context_for_index["llama_vec"].to(device, dtype=torch.bfloat16)
-        llama_attention_mask = context_for_index["llama_attention_mask"].to(device)
-        clip_l_pooler = context_for_index["clip_l_pooler"].to(device, dtype=torch.bfloat16)
-
-        image_encoder_last_hidden_state = context_img[image_index]["image_encoder_last_hidden_state"].to(
-            device, dtype=torch.bfloat16
-        )
-
-        llama_vec_n = context_null["llama_vec"].to(device, dtype=torch.bfloat16)
-        llama_attention_mask_n = context_null["llama_attention_mask"].to(device)
-        clip_l_pooler_n = context_null["clip_l_pooler"].to(device, dtype=torch.bfloat16)
-
-        # call DiT model to generate latents
-        sample_num_frames = num_frames
-        if one_frame_inference is not None:
-            # one frame inference
-            latent_indices = latent_indices[:, -1:]  # only use the last frame (default)
-            sample_num_frames = 1
-
-            def get_latent_mask(mask_path: str):
-                mask_image = Image.open(mask_path).convert("L")  # grayscale
-                mask_image = mask_image.resize((width // 8, height // 8), Image.LANCZOS)
-                mask_image = np.array(mask_image)  # PIL to numpy, HWC
-                mask_image = torch.from_numpy(mask_image).float() / 255.0  # 0 to 1.0, HWC
-                mask_image = mask_image.squeeze(-1)  # HWC -> HW
-                mask_image = mask_image.unsqueeze(0).unsqueeze(0)  # HW -> 11HW
-                mask_image = mask_image.to(clean_latents)
-                return mask_image
-
-            if args.image_mask_path is not None:
-                mask_image = get_latent_mask(args.image_mask_path)
-                logger.info(f"Apply mask for clean latents (start image): {args.image_mask_path}, shape: {mask_image.shape}")
-                clean_latents[:, :, 0, :, :] = clean_latents[:, :, 0, :, :] * mask_image
-
-            if control_latents is not None and len(control_latents) > 0:
-                # kisekaeichi and 1f-mc: both are using control images, but indices are different
-                # start latent -> control_latents -> zero out history latents
-                clean_latents = torch.cat([clean_latents[:, :, :1, :, :], *control_latents, clean_latents[:, :, 1:, :, :]], dim=2)
-                clean_latent_indices = torch.cat(
-                    [
-                        clean_latent_indices[:, :1],
-                        torch.zeros(
-                            (1, len(control_latents)), dtype=clean_latent_indices.dtype, device=clean_latent_indices.device
-                        ),
-                        clean_latent_indices[:, 1:],
-                    ],
-                    dim=1,
-                )
-
-            if args.control_image_mask_path is not None and len(args.control_image_mask_path) > 0:
-                # # apply mask for clean latents 1x (end image)
-                count = min(len(args.control_image_mask_path), len(control_latents))
-                for i in range(count):
-                    mask_image = get_latent_mask(args.control_image_mask_path[i])
-                    logger.info(
-                        f"Apply mask for clean latents 1x (end image) for {i+1}: {args.control_image_mask_path[i]}, shape: {mask_image.shape}"
-                    )
-                    clean_latents[:, :, i + 1 : i + 2, :, :] = clean_latents[:, :, i + 1 : i + 2, :, :] * mask_image
-
-            for one_frame_param in one_frame_inference:
-                if one_frame_param.startswith("target_index="):
-                    target_index = int(one_frame_param.split("=")[1])
-                    latent_indices[:, 0] = target_index
-                    logger.info(f"Set index for target: {target_index}")
-                elif one_frame_param.startswith("start_index="):
-                    start_index = int(one_frame_param.split("=")[1])
-                    clean_latent_indices[:, 0] = start_index
-                    logger.info(f"Set index for clean latent pre (start image): {start_index}")
-                elif one_frame_param.startswith("control_index="):
-                    control_indices = one_frame_param.split("=")[1].split(";")
-                    i = 0
-                    while i < len(control_indices) and i < len(control_latents):
-                        control_index = int(control_indices[i])
-                        clean_latent_indices[:, 1 + i] = control_index
-                        i += 1
-                    while i < len(control_indices):
-                        clean_latent_indices[:, 1 + i] = control_index
-                        i += 1
-                    logger.info(f"Set index for clean latent post (control image): {control_indices}")
-
-            if "no_2x" in one_frame_inference:
-                clean_latents_2x = None
-                clean_latent_2x_indices = None
-                logger.info(f"No clean_latents_2x")
-            if "no_4x" in one_frame_inference:
-                clean_latents_4x = None
-                clean_latent_4x_indices = None
-                logger.info(f"No clean_latents_4x")
-            if "no_post" in one_frame_inference:
-                clean_latents = clean_latents[:, :, :-1, :, :]
-                clean_latent_indices = clean_latent_indices[:, :-1]
-                logger.info(f"Remove clean_latents post (last frame)")
-            elif "zero_post" in one_frame_inference:
-                # zero out the history latents. this seems to prevent the images from corrupting. This is not necessary except for multi-time inference.
-                clean_latents[:, :, -1:, :, :] = torch.zeros_like(clean_latents[:, :, -1:, :, :])
-                logger.info(f"Zero out clean_latents post")
-
-            logger.info(
-                f"One frame inference. clean_latent: {clean_latents.shape} latent_indices: {latent_indices}, clean_latent_indices: {clean_latent_indices}, num_frames: {sample_num_frames}"
-            )
-
-        generated_latents = sample_hunyuan(
-            transformer=model,
-            sampler=args.sample_solver,
-            width=width,
-            height=height,
-            frames=sample_num_frames,
-            real_guidance_scale=args.guidance_scale,
-            distilled_guidance_scale=args.embedded_cfg_scale,
-            guidance_rescale=args.guidance_rescale,
-            # shift=3.0,
-            num_inference_steps=args.infer_steps,
-            generator=seed_g,
-            prompt_embeds=llama_vec,
-            prompt_embeds_mask=llama_attention_mask,
-            prompt_poolers=clip_l_pooler,
-            negative_prompt_embeds=llama_vec_n,
-            negative_prompt_embeds_mask=llama_attention_mask_n,
-            negative_prompt_poolers=clip_l_pooler_n,
-            device=device,
-            dtype=torch.bfloat16,
-            image_embeddings=image_encoder_last_hidden_state,
-            latent_indices=latent_indices,
-            clean_latents=clean_latents,
-            clean_latent_indices=clean_latent_indices,
-            clean_latents_2x=clean_latents_2x,
-            clean_latent_2x_indices=clean_latent_2x_indices,
-            clean_latents_4x=clean_latents_4x,
-            clean_latent_4x_indices=clean_latent_4x_indices,
-        )
-
-        # concatenate generated latents
-        total_generated_latent_frames += int(generated_latents.shape[2])
-        if not f1_mode:
-            # Inverted Anti-drifting: prepend generated latents to history latents
-            if is_last_section:
-                generated_latents = torch.cat([start_latent.to(generated_latents), generated_latents], dim=2)
-                total_generated_latent_frames += 1
-
-            history_latents = torch.cat([generated_latents.to(history_latents), history_latents], dim=2)
-            real_history_latents = history_latents[:, :, :total_generated_latent_frames, :, :]
-        else:
-            # F1 mode: append generated latents to history latents
-            history_latents = torch.cat([history_latents, generated_latents.to(history_latents)], dim=2)
-            real_history_latents = history_latents[:, :, -total_generated_latent_frames:, :, :]
-
-        logger.info(f"Generated. Latent shape {real_history_latents.shape}")
-
-        # # TODO support saving intermediate video
-        # clean_memory_on_device(device)
-        # vae.to(device)
-        # if history_pixels is None:
-        #     history_pixels = hunyuan.vae_decode(real_history_latents, vae).cpu()
-        # else:
-        #     section_latent_frames = (latent_window_size * 2 + 1) if is_last_section else (latent_window_size * 2)
-        #     overlapped_frames = latent_window_size * 4 - 3
-        #     current_pixels = hunyuan.vae_decode(real_history_latents[:, :, :section_latent_frames], vae).cpu()
-        #     history_pixels = soft_append_bcthw(current_pixels, history_pixels, overlapped_frames)
-        # vae.to("cpu")
-        # # if not is_last_section:
-        # #     # save intermediate video
-        # #     save_video(history_pixels[0], args, total_generated_latent_frames)
-        # print(f"Decoded. Current latent shape {real_history_latents.shape}; pixel shape {history_pixels.shape}")
-
     if one_frame_inference is not None:
-        real_history_latents = real_history_latents[:, :, 1:, :, :]  # remove the first frame (start_latent)
+        real_history_latents = generate_with_one_frame_inference(
+            args,
+            model,
+            context,
+            context_null,
+            context_img,
+            control_latents,
+            latent_window_size,
+            height,
+            width,
+            device,
+            seed_g,
+            one_frame_inference,
+        )
+    else:
+        # prepare history latents
+        history_latents = torch.zeros((1, 16, 1 + 2 + 16, height // 8, width // 8), dtype=torch.float32)
+        if end_latent is not None and not f1_mode:
+            logger.info(f"Use end image(s): {args.end_image_path}")
+            history_latents[:, :, :1] = end_latent.to(history_latents)
+
+        # prepare clean latents and indices
+        if not f1_mode:
+            # Inverted Anti-drifting
+            total_generated_latent_frames = 0
+            latent_paddings = reversed(range(total_latent_sections))
+
+            if total_latent_sections > 4 and one_frame_inference is None:
+                # In theory the latent_paddings should follow the above sequence, but it seems that duplicating some
+                # items looks better than expanding it when total_latent_sections > 4
+                # One can try to remove below trick and just
+                # use `latent_paddings = list(reversed(range(total_latent_sections)))` to compare
+                # 4 sections: 3, 2, 1, 0. 50 sections: 3, 2, 2, ... 2, 1, 0
+                latent_paddings = [3] + [2] * (total_latent_sections - 3) + [1, 0]
+
+            if args.latent_paddings is not None:
+                # parse user defined latent paddings
+                user_latent_paddings = [int(x) for x in args.latent_paddings.split(",")]
+                if len(user_latent_paddings) < total_latent_sections:
+                    print(
+                        f"User defined latent paddings length {len(user_latent_paddings)} does not match total sections {total_latent_sections}."
+                    )
+                    print(f"Use default paddings instead for unspecified sections.")
+                    latent_paddings[: len(user_latent_paddings)] = user_latent_paddings
+                elif len(user_latent_paddings) > total_latent_sections:
+                    print(
+                        f"User defined latent paddings length {len(user_latent_paddings)} is greater than total sections {total_latent_sections}."
+                    )
+                    print(f"Use only first {total_latent_sections} paddings instead.")
+                    latent_paddings = user_latent_paddings[:total_latent_sections]
+                else:
+                    latent_paddings = user_latent_paddings
+        else:
+            start_latent = context_img[0]["start_latent"]
+            history_latents = torch.cat([history_latents, start_latent], dim=2)
+            total_generated_latent_frames = 1  # a bit hacky, but we employ the same logic as in official code
+            latent_paddings = [0] * total_latent_sections  # dummy paddings for F1 mode
+
+        latent_paddings = list(latent_paddings)  # make sure it's a list
+        for loop_index in range(total_latent_sections):
+            latent_padding = latent_paddings[loop_index]
+
+            if not f1_mode:
+                # Inverted Anti-drifting
+                section_index_reverse = loop_index  # 0, 1, 2, 3
+                section_index = total_latent_sections - 1 - section_index_reverse  # 3, 2, 1, 0
+                section_index_from_last = -(section_index_reverse + 1)  # -1, -2, -3, -4
+
+                is_last_section = section_index == 0
+                is_first_section = section_index_reverse == 0
+                latent_padding_size = latent_padding * latent_window_size
+
+                logger.info(f"latent_padding_size = {latent_padding_size}, is_last_section = {is_last_section}")
+            else:
+                section_index = loop_index  # 0, 1, 2, 3
+                section_index_from_last = section_index - total_latent_sections  # -4, -3, -2, -1
+                is_last_section = loop_index == total_latent_sections - 1
+                is_first_section = loop_index == 0
+                latent_padding_size = 0  # dummy padding for F1 mode
+
+            # select start latent
+            if section_index_from_last in context_img:
+                image_index = section_index_from_last
+            elif section_index in context_img:
+                image_index = section_index
+            else:
+                image_index = 0
+
+            start_latent = context_img[image_index]["start_latent"]
+            image_path = context_img[image_index]["image_path"]
+            if image_index != 0:  # use section image other than section 0
+                logger.info(
+                    f"Apply experimental section image, latent_padding_size = {latent_padding_size}, image_path = {image_path}"
+                )
+
+            if not f1_mode:
+                # Inverted Anti-drifting
+                indices = torch.arange(0, sum([1, latent_padding_size, latent_window_size, 1, 2, 16])).unsqueeze(0)
+                (
+                    clean_latent_indices_pre,
+                    blank_indices,
+                    latent_indices,
+                    clean_latent_indices_post,
+                    clean_latent_2x_indices,
+                    clean_latent_4x_indices,
+                ) = indices.split([1, latent_padding_size, latent_window_size, 1, 2, 16], dim=1)
+
+                clean_latent_indices = torch.cat([clean_latent_indices_pre, clean_latent_indices_post], dim=1)
+
+                clean_latents_pre = start_latent.to(history_latents)
+                clean_latents_post, clean_latents_2x, clean_latents_4x = history_latents[:, :, : 1 + 2 + 16, :, :].split(
+                    [1, 2, 16], dim=2
+                )
+                clean_latents = torch.cat([clean_latents_pre, clean_latents_post], dim=2)
+
+            else:
+                # F1 mode
+                indices = torch.arange(0, sum([1, 16, 2, 1, latent_window_size])).unsqueeze(0)
+                (
+                    clean_latent_indices_start,
+                    clean_latent_4x_indices,
+                    clean_latent_2x_indices,
+                    clean_latent_1x_indices,
+                    latent_indices,
+                ) = indices.split([1, 16, 2, 1, latent_window_size], dim=1)
+                clean_latent_indices = torch.cat([clean_latent_indices_start, clean_latent_1x_indices], dim=1)
+
+                clean_latents_4x, clean_latents_2x, clean_latents_1x = history_latents[:, :, -sum([16, 2, 1]) :, :, :].split(
+                    [16, 2, 1], dim=2
+                )
+                clean_latents = torch.cat([start_latent.to(history_latents), clean_latents_1x], dim=2)
+
+            # if use_teacache:
+            #     transformer.initialize_teacache(enable_teacache=True, num_steps=steps)
+            # else:
+            #     transformer.initialize_teacache(enable_teacache=False)
+
+            # prepare conditioning inputs
+            if section_index_from_last in context:
+                prompt_index = section_index_from_last
+            elif section_index in context:
+                prompt_index = section_index
+            else:
+                prompt_index = 0
+
+            context_for_index = context[prompt_index]
+            # if args.section_prompts is not None:
+            logger.info(f"Section {section_index}: {context_for_index['prompt']}")
+
+            llama_vec = context_for_index["llama_vec"].to(device, dtype=torch.bfloat16)
+            llama_attention_mask = context_for_index["llama_attention_mask"].to(device)
+            clip_l_pooler = context_for_index["clip_l_pooler"].to(device, dtype=torch.bfloat16)
+
+            image_encoder_last_hidden_state = context_img[image_index]["image_encoder_last_hidden_state"].to(
+                device, dtype=torch.bfloat16
+            )
+
+            llama_vec_n = context_null["llama_vec"].to(device, dtype=torch.bfloat16)
+            llama_attention_mask_n = context_null["llama_attention_mask"].to(device)
+            clip_l_pooler_n = context_null["clip_l_pooler"].to(device, dtype=torch.bfloat16)
+
+            generated_latents = sample_hunyuan(
+                transformer=model,
+                sampler=args.sample_solver,
+                width=width,
+                height=height,
+                frames=num_frames,
+                real_guidance_scale=args.guidance_scale,
+                distilled_guidance_scale=args.embedded_cfg_scale,
+                guidance_rescale=args.guidance_rescale,
+                # shift=3.0,
+                num_inference_steps=args.infer_steps,
+                generator=seed_g,
+                prompt_embeds=llama_vec,
+                prompt_embeds_mask=llama_attention_mask,
+                prompt_poolers=clip_l_pooler,
+                negative_prompt_embeds=llama_vec_n,
+                negative_prompt_embeds_mask=llama_attention_mask_n,
+                negative_prompt_poolers=clip_l_pooler_n,
+                device=device,
+                dtype=torch.bfloat16,
+                image_embeddings=image_encoder_last_hidden_state,
+                latent_indices=latent_indices,
+                clean_latents=clean_latents,
+                clean_latent_indices=clean_latent_indices,
+                clean_latents_2x=clean_latents_2x,
+                clean_latent_2x_indices=clean_latent_2x_indices,
+                clean_latents_4x=clean_latents_4x,
+                clean_latent_4x_indices=clean_latent_4x_indices,
+            )
+
+            # concatenate generated latents
+            total_generated_latent_frames += int(generated_latents.shape[2])
+            if not f1_mode:
+                # Inverted Anti-drifting: prepend generated latents to history latents
+                if is_last_section:
+                    generated_latents = torch.cat([start_latent.to(generated_latents), generated_latents], dim=2)
+                    total_generated_latent_frames += 1
+
+                history_latents = torch.cat([generated_latents.to(history_latents), history_latents], dim=2)
+                real_history_latents = history_latents[:, :, :total_generated_latent_frames, :, :]
+            else:
+                # F1 mode: append generated latents to history latents
+                history_latents = torch.cat([history_latents, generated_latents.to(history_latents)], dim=2)
+                real_history_latents = history_latents[:, :, -total_generated_latent_frames:, :, :]
+
+            logger.info(f"Generated. Latent shape {real_history_latents.shape}")
+
+            # # TODO support saving intermediate video
+            # clean_memory_on_device(device)
+            # vae.to(device)
+            # if history_pixels is None:
+            #     history_pixels = hunyuan.vae_decode(real_history_latents, vae).cpu()
+            # else:
+            #     section_latent_frames = (latent_window_size * 2 + 1) if is_last_section else (latent_window_size * 2)
+            #     overlapped_frames = latent_window_size * 4 - 3
+            #     current_pixels = hunyuan.vae_decode(real_history_latents[:, :, :section_latent_frames], vae).cpu()
+            #     history_pixels = soft_append_bcthw(current_pixels, history_pixels, overlapped_frames)
+            # vae.to("cpu")
+            # # if not is_last_section:
+            # #     # save intermediate video
+            # #     save_video(history_pixels[0], args, total_generated_latent_frames)
+            # print(f"Decoded. Current latent shape {real_history_latents.shape}; pixel shape {history_pixels.shape}")
 
     # Only clean up shared models if they were created within this function
     if shared_models is None:
@@ -1308,13 +1234,152 @@ def generate(
         model.to("cpu")
 
     # wait for 5 seconds until block swap is done
-    logger.info("Waiting for 5 seconds to finish block swap")
-    time.sleep(5)
+    if args.blocks_to_swap > 0:
+        logger.info("Waiting for 5 seconds to finish block swap")
+        time.sleep(5)
 
     gc.collect()
     clean_memory_on_device(device)
 
     return vae, real_history_latents
+
+
+def generate_with_one_frame_inference(
+    args: argparse.Namespace,
+    model: HunyuanVideoTransformer3DModelPacked,
+    context: Dict[int, Dict[str, torch.Tensor]],
+    context_null: Dict[str, torch.Tensor],
+    context_img: Dict[int, Dict[str, torch.Tensor]],
+    control_latents: Optional[List[torch.Tensor]],
+    latent_window_size: int,
+    height: int,
+    width: int,
+    device: torch.device,
+    seed_g: torch.Generator,
+    one_frame_inference: set[str],
+) -> torch.Tensor:
+    # one frame inference
+    sample_num_frames = 1
+    latent_indices = torch.zeros((1, 1), dtype=torch.int64)  # 1x1 latent index for target image
+    latent_indices[:, 0] = latent_window_size  # last of latent_window
+
+    def get_latent_mask(mask_path: str):
+        mask_image = Image.open(mask_path).convert("L")  # grayscale
+        mask_image = mask_image.resize((width // 8, height // 8), Image.LANCZOS)
+        mask_image = np.array(mask_image)  # PIL to numpy, HWC
+        mask_image = torch.from_numpy(mask_image).float() / 255.0  # 0 to 1.0, HWC
+        mask_image = mask_image.squeeze(-1)  # HWC -> HW
+        mask_image = mask_image.unsqueeze(0).unsqueeze(0)  # HW -> 11HW
+        mask_image = mask_image.to(clean_latents)
+        return mask_image
+
+    if control_latents is None or len(control_latents) == 0:
+        logger.info(f"No control images provided for one frame inference. Use zero latents for control images.")
+        control_latents = [torch.zeros(1, 16, 1, height // 8, width // 8, dtype=torch.float32)]
+
+    if "zero_post" in one_frame_inference:
+        # add zero latents as clean latents post
+        control_latents.append(torch.zeros((1, 16, 1, height // 8, width // 8), dtype=torch.float32))
+        logger.info(f"Add zero latents as clean latents post for one frame inference.")
+
+    # kisekaeichi and 1f-mc: both are using control images, but indices are different
+    clean_latents = torch.cat(control_latents, dim=2)  # (1, 16, num_control_images, H//8, W//8)
+    clean_latent_indices = torch.zeros((1, len(control_latents)), dtype=torch.int64)
+    if "zero_post" in one_frame_inference:
+        clean_latent_indices[:, -1] = 1 + latent_window_size  # default index for clean latents post
+
+    if args.control_image_mask_path is not None and len(args.control_image_mask_path) > 0:
+        # apply mask for clean latents 1x
+        count = min(len(args.control_image_mask_path), len(control_latents))
+        for i in range(count):
+            mask_image = get_latent_mask(args.control_image_mask_path[i])
+            logger.info(f"Apply mask for clean latents 1x for {i+1}: {args.control_image_mask_path[i]}, shape: {mask_image.shape}")
+            clean_latents[:, :, i : i + 1, :, :] = clean_latents[:, :, i : i + 1, :, :] * mask_image
+
+    for one_frame_param in one_frame_inference:
+        if one_frame_param.startswith("target_index="):
+            target_index = int(one_frame_param.split("=")[1])
+            latent_indices[:, 0] = target_index
+            logger.info(f"Set index for target: {target_index}")
+        elif one_frame_param.startswith("control_index="):
+            control_indices = one_frame_param.split("=")[1].split(";")
+            i = 0
+            while i < len(control_indices) and i < clean_latent_indices.shape[1]:
+                control_index = int(control_indices[i])
+                clean_latent_indices[:, i] = control_index
+                i += 1
+            logger.info(f"Set index for clean latent 1x: {control_indices}")
+
+    if "no_2x" in one_frame_inference:
+        clean_latents_2x = None
+        clean_latent_2x_indices = None
+        logger.info(f"No clean_latents_2x")
+    else:
+        clean_latents_2x = torch.zeros((1, 16, 2, height // 8, width // 8), dtype=torch.float32)
+        index = 1 + latent_window_size + 1
+        clean_latent_2x_indices = torch.arange(index, index + 2)  #  2
+
+    if "no_4x" in one_frame_inference:
+        clean_latents_4x = None
+        clean_latent_4x_indices = None
+        logger.info(f"No clean_latents_4x")
+    else:
+        index = 1 + latent_window_size + 1 + 2
+        clean_latent_4x_indices = torch.arange(index, index + 16)  #  16
+
+    logger.info(
+        f"One frame inference. clean_latent: {clean_latents.shape} latent_indices: {latent_indices}, clean_latent_indices: {clean_latent_indices}, num_frames: {sample_num_frames}"
+    )
+
+    # prepare conditioning inputs
+    prompt_index = 0
+    image_index = 0
+
+    context_for_index = context[prompt_index]
+    logger.info(f"Prompt: {context_for_index['prompt']}")
+
+    llama_vec = context_for_index["llama_vec"].to(device, dtype=torch.bfloat16)
+    llama_attention_mask = context_for_index["llama_attention_mask"].to(device)
+    clip_l_pooler = context_for_index["clip_l_pooler"].to(device, dtype=torch.bfloat16)
+
+    image_encoder_last_hidden_state = context_img[image_index]["image_encoder_last_hidden_state"].to(device, dtype=torch.bfloat16)
+
+    llama_vec_n = context_null["llama_vec"].to(device, dtype=torch.bfloat16)
+    llama_attention_mask_n = context_null["llama_attention_mask"].to(device)
+    clip_l_pooler_n = context_null["clip_l_pooler"].to(device, dtype=torch.bfloat16)
+
+    generated_latents = sample_hunyuan(
+        transformer=model,
+        sampler=args.sample_solver,
+        width=width,
+        height=height,
+        frames=1,
+        real_guidance_scale=args.guidance_scale,
+        distilled_guidance_scale=args.embedded_cfg_scale,
+        guidance_rescale=args.guidance_rescale,
+        # shift=3.0,
+        num_inference_steps=args.infer_steps,
+        generator=seed_g,
+        prompt_embeds=llama_vec,
+        prompt_embeds_mask=llama_attention_mask,
+        prompt_poolers=clip_l_pooler,
+        negative_prompt_embeds=llama_vec_n,
+        negative_prompt_embeds_mask=llama_attention_mask_n,
+        negative_prompt_poolers=clip_l_pooler_n,
+        device=device,
+        dtype=torch.bfloat16,
+        image_embeddings=image_encoder_last_hidden_state,
+        latent_indices=latent_indices,
+        clean_latents=clean_latents,
+        clean_latent_indices=clean_latent_indices,
+        clean_latents_2x=clean_latents_2x,
+        clean_latent_2x_indices=clean_latent_2x_indices,
+        clean_latents_4x=clean_latents_4x,
+        clean_latent_4x_indices=clean_latent_4x_indices,
+    )
+
+    real_history_latents = generated_latents.to(clean_latents)
+    return real_history_latents
 
 
 def save_latent(latent: torch.Tensor, args: argparse.Namespace, height: int, width: int) -> str:
