@@ -183,6 +183,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fp8", action="store_true", help="use fp8 for DiT model")
     parser.add_argument("--fp8_scaled", action="store_true", help="use scaled fp8 for DiT, only for fp8")
     # parser.add_argument("--fp8_fast", action="store_true", help="Enable fast FP8 arithmetic (RTX 4XXX+), only for fp8_scaled")
+    parser.add_argument(
+        "--rope_scaling_factor", type=float, default=0.5, help="RoPE scaling factor for high resolution (H/W), default is 0.5"
+    )
+    parser.add_argument(
+        "--rope_scaling_timestep_threshold",
+        type=int,
+        default=None,
+        help="RoPE scaling timestep threshold, default is None (disable), if set, RoPE scaling will be applied only for timesteps >= threshold, around 800 is good starting point",
+    )
+
     parser.add_argument("--fp8_llm", action="store_true", help="use fp8 for Text Encoder 1 (LLM)")
     parser.add_argument(
         "--device", type=str, default=None, help="device to use for inference. If None, use CUDA if available, otherwise use CPU"
@@ -371,6 +381,13 @@ def load_dit_model(args: argparse.Namespace, device: torch.device) -> HunyuanVid
 
     # do not fp8 optimize because we will merge LoRA weights
     model = load_packed_model(device, args.dit, args.attn_mode, loading_device)
+
+    # apply RoPE scaling factor
+    if args.rope_scaling_timestep_threshold is not None:
+        logger.info(
+            f"Applying RoPE scaling factor {args.rope_scaling_factor} for timesteps >= {args.rope_scaling_timestep_threshold}"
+        )
+        model.enable_rope_scaling(args.rope_scaling_timestep_threshold, args.rope_scaling_factor)
     return model
 
 
