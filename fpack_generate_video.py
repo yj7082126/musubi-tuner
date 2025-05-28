@@ -563,36 +563,44 @@ def prepare_i2v_inputs(
 
     # prepare image
     def preprocess_image(image_path: str):
-        image = Image.open(image_path).convert("RGB")
+        image = Image.open(image_path)
+        if image.mode == "RGBA":
+            alpha = image.split()[-1]
+        else:
+            alpha = None
+        image = image.convert("RGB")
 
         image_np = np.array(image)  # PIL to numpy, HWC
 
         image_np = image_video_dataset.resize_image_to_bucket(image_np, (width, height))
         image_tensor = torch.from_numpy(image_np).float() / 127.5 - 1.0  # -1 to 1.0, HWC
         image_tensor = image_tensor.permute(2, 0, 1)[None, :, None]  # HWC -> CHW -> NCFHW, N=1, C=3, F=1
-        return image_tensor, image_np
+        return image_tensor, image_np, alpha
 
     section_image_paths = parse_section_strings(args.image_path)
 
     section_images = {}
     for index, image_path in section_image_paths.items():
-        img_tensor, img_np = preprocess_image(image_path)
+        img_tensor, img_np, _ = preprocess_image(image_path)
         section_images[index] = (img_tensor, img_np)
 
     # check end image
     if args.end_image_path is not None:
-        end_image_tensor, _ = preprocess_image(args.end_image_path)
+        end_image_tensor, _, _ = preprocess_image(args.end_image_path)
     else:
         end_image_tensor = None
 
     # check end images
     if args.control_image_path is not None and len(args.control_image_path) > 0:
         control_image_tensors = []
+        control_mask_images = []
         for ctrl_image_path in args.control_image_path:
-            control_image_tensor, _ = preprocess_image(ctrl_image_path)
+            control_image_tensor, _, control_mask = preprocess_image(ctrl_image_path)
             control_image_tensors.append(control_image_tensor)
+            control_mask_images.append(control_mask)
     else:
         control_image_tensors = None
+        control_mask_images = None
 
     # configure negative prompt
     n_prompt = args.negative_prompt if args.negative_prompt else ""
@@ -722,7 +730,7 @@ def prepare_i2v_inputs(
         }
         arg_c_img[index] = arg_c_img_i
 
-    return height, width, video_seconds, arg_c, arg_null, arg_c_img, end_latent, control_latents
+    return height, width, video_seconds, arg_c, arg_null, arg_c_img, end_latent, control_latents, control_mask_images
 
 
 # def setup_scheduler(args: argparse.Namespace, config, device: torch.device) -> Tuple[Any, torch.Tensor]:
@@ -942,14 +950,14 @@ def generate(
     if shared_models is not None:
         # Use shared models and encoded data
         vae = shared_models.get("vae")
-        height, width, video_seconds, context, context_null, context_img, end_latent, control_latents = prepare_i2v_inputs(
-            args, device, vae, shared_models
+        height, width, video_seconds, context, context_null, context_img, end_latent, control_latents, control_mask_images = (
+            prepare_i2v_inputs(args, device, vae, shared_models)
         )
     else:
         # prepare inputs without shared models
         vae = load_vae(args.vae, args.vae_chunk_size, args.vae_spatial_tile_sample_min_size, device)
-        height, width, video_seconds, context, context_null, context_img, end_latent, control_latents = prepare_i2v_inputs(
-            args, device, vae
+        height, width, video_seconds, context, context_null, context_img, end_latent, control_latents, control_mask_images = (
+            prepare_i2v_inputs(args, device, vae)
         )
 
     if shared_models is None or "model" not in shared_models:
@@ -1008,6 +1016,7 @@ def generate(
             context_null,
             context_img,
             control_latents,
+            control_mask_images,
             latent_window_size,
             height,
             width,
@@ -1251,6 +1260,7 @@ def generate_with_one_frame_inference(
     context_null: Dict[str, torch.Tensor],
     context_img: Dict[int, Dict[str, torch.Tensor]],
     control_latents: Optional[List[torch.Tensor]],
+    control_mask_images: Optional[List[Optional[Image.Image]]],
     latent_window_size: int,
     height: int,
     width: int,
@@ -1263,8 +1273,7 @@ def generate_with_one_frame_inference(
     latent_indices = torch.zeros((1, 1), dtype=torch.int64)  # 1x1 latent index for target image
     latent_indices[:, 0] = latent_window_size  # last of latent_window
 
-    def get_latent_mask(mask_path: str):
-        mask_image = Image.open(mask_path).convert("L")  # grayscale
+    def get_latent_mask(mask_image: Image.Image) -> torch.Tensor:
         mask_image = mask_image.resize((width // 8, height // 8), Image.LANCZOS)
         mask_image = np.array(mask_image)  # PIL to numpy, HWC
         mask_image = torch.from_numpy(mask_image).float() / 255.0  # 0 to 1.0, HWC
@@ -1288,12 +1297,17 @@ def generate_with_one_frame_inference(
     if "no_post" not in one_frame_inference:
         clean_latent_indices[:, -1] = 1 + latent_window_size  # default index for clean latents post
 
-    if args.control_image_mask_path is not None and len(args.control_image_mask_path) > 0:
-        # apply mask for clean latents 1x
-        count = min(len(args.control_image_mask_path), len(control_latents))
-        for i in range(count):
-            mask_image = get_latent_mask(args.control_image_mask_path[i])
-            logger.info(f"Apply mask for clean latents 1x for {i+1}: {args.control_image_mask_path[i]}, shape: {mask_image.shape}")
+    for i in range(len(control_latents)):
+        mask_image = None
+        if args.control_image_mask_path is not None and i < len(args.control_image_mask_path):
+            mask_image = get_latent_mask(Image.open(args.control_image_mask_path[i]))
+            logger.info(
+                f"Apply mask for clean latents 1x for {i + 1}: {args.control_image_mask_path[i]}, shape: {mask_image.shape}"
+            )
+        elif control_mask_images[i] is not None:
+            mask_image = get_latent_mask(control_mask_images[i])
+            logger.info(f"Apply mask for clean latents 1x for {i + 1} with alpha channel: {mask_image.shape}")
+        if mask_image is not None:
             clean_latents[:, :, i : i + 1, :, :] = clean_latents[:, :, i : i + 1, :, :] * mask_image
 
     for one_frame_param in one_frame_inference:

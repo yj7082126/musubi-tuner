@@ -358,7 +358,7 @@ class FramePackNetworkTrainer(NetworkTrainer):
                 mask_image = np.array(mask_image)  # PIL to numpy, HWC
                 mask_image = torch.from_numpy(mask_image).float() / 255.0  # 0 to 1.0, HWC
                 mask_image = mask_image.squeeze(-1)  # HWC -> HW
-                mask_image = mask_image.unsqueeze(0).unsqueeze(0).unsquee(0)  # HW -> 111HW (BCFHW)
+                mask_image = mask_image.unsqueeze(0).unsqueeze(0).unsqueeze(0)  # HW -> 111HW (B, C, F, H, W)
                 mask_image = mask_image.to(torch.float32)
                 return mask_image
 
@@ -383,7 +383,7 @@ class FramePackNetworkTrainer(NetworkTrainer):
                 if control_alpha is not None:
                     latent_mask = get_latent_mask(control_alpha)
                     logger.info(
-                        f"Apply mask for clean latents 1x for {i+1}: {args.control_image_mask_path[i]}, shape: {latent_mask.shape}"
+                        f"Apply mask for clean latents 1x for {i+1}: shape: {latent_mask.shape}"
                     )
                     clean_latents[:, :, i : i + 1, :, :] = clean_latents[:, :, i : i + 1, :, :] * latent_mask
 
