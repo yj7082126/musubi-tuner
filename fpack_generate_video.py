@@ -117,12 +117,6 @@ def parse_args() -> argparse.Namespace:
         help="one frame inference, default is None, comma separated values from 'no_2x', 'no_4x', 'no_post', 'control_indices' and 'target_index'.",
     )
     parser.add_argument(
-        "--image_mask_path",
-        type=str,
-        default=None,
-        help="path to image mask for one frame inference. If specified, it will be used as mask for input image.",
-    )
-    parser.add_argument(
         "--control_image_path", type=str, default=None, nargs="*", help="path to control (reference) image for one frame inference."
     )
     parser.add_argument(
@@ -289,8 +283,8 @@ def parse_prompt_line(line: str) -> Dict[str, Any]:
         #     overrides["flow_shift"] = float(value)
         elif option == "i":
             overrides["image_path"] = value
-        elif option == "im":
-            overrides["image_mask_path"] = value
+        # elif option == "im":
+        #     overrides["image_mask_path"] = value
         # elif option == "cn":
         #     overrides["control_path"] = value
         elif option == "n":
