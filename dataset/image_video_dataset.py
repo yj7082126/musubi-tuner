@@ -747,7 +747,9 @@ class ImageDirectoryDatasource(ImageDatasource):
         if self.has_control:
             controls = []
             for control_path in self.control_paths[image_path]:
-                control = Image.open(control_path).convert("RGB")
+                control = Image.open(control_path)
+                if control.mode != "RGB" and control.mode != "RGBA":
+                    control = control.convert("RGB")
                 controls.append(control)
 
         return image_path, image, caption, controls
@@ -850,7 +852,9 @@ class ImageJsonlDatasource(ImageDatasource):
             controls = []
             for i in range(self.control_count_per_image):
                 control_path = data[f"control_path_{i}"]
-                control = Image.open(control_path).convert("RGB")
+                control = Image.open(control_path)
+                if control.mode != "RGB" and control.mode != "RGBA":
+                    control = control.convert("RGB")
                 controls.append(control)
 
         return image_path, image, caption, controls
@@ -1452,11 +1456,11 @@ class ImageDataset(BaseDataset):
                 image_size = image.size
 
                 bucket_reso = buckset_selector.get_bucket_resolution(image_size)
-                image = resize_image_to_bucket(image, bucket_reso)
+                image = resize_image_to_bucket(image, bucket_reso) # returns np.ndarray
                 if controls is not None:
                     resized_controls = []
                     for control in controls:
-                        resized_control = resize_image_to_bucket(control, bucket_reso)
+                        resized_control = resize_image_to_bucket(control, bucket_reso) # returns np.ndarray
                         resized_controls.append(resized_control)
 
                 return image_size, image_key, image, caption, resized_controls

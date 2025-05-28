@@ -2,14 +2,14 @@ import argparse
 import logging
 import math
 import os
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
 from transformers import SiglipImageProcessor, SiglipVisionModel
-from torchvision.transforms import ToTensor
+from PIL import Image
 
 from dataset import config_utils
 from dataset.config_utils import BlueprintGenerator, ConfigSanitizer
@@ -253,10 +253,34 @@ def encode_and_save_batch_one_frame(
 
     # Stack batch into tensor (B,F,H,W,C) in RGB order. The numbers of control content for each item are the same.
     contents = []
+    content_masks: list[list[Optional[torch.Tensor]]] = []
     for item in batch:
         item_contents = item.control_content + [item.content]
+
+        item_masks = []
+        for i, c in enumerate(item_contents):
+            if c.shape[-1] == 4:  # RGBA
+                item_contents[i] = c[..., :3]  # remove alpha channel from content
+
+                alpha = c[..., 3]  # extract alpha channel
+                mask_image = Image.fromarray(alpha, mode="L")
+                width, height = mask_image.size
+                mask_image = mask_image.resize((width // 8, height // 8), Image.LANCZOS)
+                mask_image = np.array(mask_image)  # PIL to numpy, HWC
+                mask_image = torch.from_numpy(mask_image).float() / 255.0  # 0 to 1.0, HWC
+                mask_image = mask_image.squeeze(-1)  # HWC -> HW
+                mask_image = mask_image.unsqueeze(0).unsqueeze(0).unsqueeze(0)  # HW -> 111HW (BCFHW)
+                mask_image = mask_image.to(torch.float32)
+                content_mask = mask_image
+            else:
+                content_mask = None
+
+            item_masks.append(content_mask)
+
         item_contents = [torch.from_numpy(c) for c in item_contents]
         contents.append(torch.stack(item_contents, dim=0))  # list of [F, H, W, C]
+        content_masks.append(item_masks)
+
     contents = torch.stack(contents, dim=0)  # B, F, H, W, C. F is control frames + target frame
 
     contents = contents.permute(0, 4, 1, 2, 3).contiguous()  # B, C, F, H, W
@@ -271,6 +295,14 @@ def encode_and_save_batch_one_frame(
     # VAE encode: we need to encode one frame at a time because VAE encoder has stride=4 for the time dimension except for the first frame.
     latents = [hunyuan.vae_encode(contents[:, :, idx : idx + 1], vae).to("cpu") for idx in range(contents.shape[2])]
     latents = torch.cat(latents, dim=2)  # B, C, F, H/8, W/8
+
+    # apply alphas to latents
+    for b, item in enumerate(batch):
+        for i, content_mask in enumerate(content_masks[b]):
+            if content_mask is not None:
+                # apply mask to the latents
+                # print(f"Applying content mask for item {item.item_key}, frame {i}")
+                latents[b : b + 1, :, i : i + 1] *= content_mask
 
     # Vision encoding per‑item (once): use control content because it is the start image
     images = [item.control_content[0] for item in batch]  # list of [H, W, C]
