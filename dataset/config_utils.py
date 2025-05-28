@@ -47,7 +47,7 @@ class ImageDatasetParams(BaseDatasetParams):
     fp_latent_window_size: Optional[int] = 9
     fp_1f_clean_indices: Optional[Sequence[int]] = None
     fp_1f_target_index: Optional[int] = None
-    fp_1f_zero_post: Optional[bool] = True
+    fp_1f_no_post: Optional[bool] = False
 
 
 @dataclass
@@ -116,7 +116,7 @@ class ConfigSanitizer:
         "fp_latent_window_size": int,
         "fp_1f_clean_indices": [int],
         "fp_1f_target_index": int,
-        "fp_1f_zero_post": bool,
+        "fp_1f_no_post": bool,
     }
     VIDEO_DATASET_DISTINCT_SCHEMA = {
         "video_directory": str,
@@ -301,7 +301,7 @@ def generate_dataset_group_by_blueprint(dataset_group_blueprint: DatasetGroupBlu
         fp_latent_window_size: {dataset.fp_latent_window_size}
         fp_1f_clean_indices: {dataset.fp_1f_clean_indices}
         fp_1f_target_index: {dataset.fp_1f_target_index}
-        fp_1f_zero_post: {dataset.fp_1f_zero_post}
+        fp_1f_no_post: {dataset.fp_1f_no_post}
     \n"""
                 ),
                 "    ",

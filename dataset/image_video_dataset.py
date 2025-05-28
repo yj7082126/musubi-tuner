@@ -176,7 +176,7 @@ class ItemInfo:
         self.fp_latent_window_size: Optional[int] = None
         self.fp_1f_clean_indices: Optional[list[int]] = None  # indices of clean latents for 1f
         self.fp_1f_target_index: Optional[int] = None  # target index for 1f clean latents
-        self.fp_1f_zero_post: Optional[bool] = None  # whether to add zero values as clean latent post
+        self.fp_1f_no_post: Optional[bool] = None  # whether to add zero values as clean latent post
 
     def __str__(self) -> str:
         return (
@@ -1327,7 +1327,7 @@ class ImageDataset(BaseDataset):
         fp_latent_window_size: Optional[int] = 9,
         fp_1f_clean_indices: Optional[list[int]] = None,
         fp_1f_target_index: Optional[int] = None,
-        fp_1f_zero_post: Optional[bool] = True,
+        fp_1f_no_post: Optional[bool] = False,
         debug_dataset: bool = False,
         architecture: str = "no_default",
     ):
@@ -1348,7 +1348,7 @@ class ImageDataset(BaseDataset):
         self.fp_latent_window_size = fp_latent_window_size
         self.fp_1f_clean_indices = fp_1f_clean_indices
         self.fp_1f_target_index = fp_1f_target_index
-        self.fp_1f_zero_post = fp_1f_zero_post
+        self.fp_1f_no_post = fp_1f_no_post
 
         control_count_per_image = 1
         if fp_1f_clean_indices is not None:
@@ -1412,14 +1412,14 @@ class ImageDataset(BaseDataset):
                     item_info.fp_latent_window_size = self.fp_latent_window_size
                     item_info.fp_1f_clean_indices = self.fp_1f_clean_indices
                     item_info.fp_1f_target_index = self.fp_1f_target_index
-                    item_info.fp_1f_zero_post = self.fp_1f_zero_post
+                    item_info.fp_1f_no_post = self.fp_1f_no_post
 
                     if self.architecture == ARCHITECTURE_FRAMEPACK:
                         # we need to split the bucket with latent window size and optional 1f clean indices, zero post
                         bucket_reso = list(bucket_reso) + [self.fp_latent_window_size]
                         if self.fp_1f_clean_indices is not None:
                             bucket_reso.append(len(self.fp_1f_clean_indices))
-                            bucket_reso.append(self.fp_1f_zero_post)
+                            bucket_reso.append(self.fp_1f_no_post)
                         bucket_reso = tuple(bucket_reso)
 
                     if controls is not None:
@@ -1510,7 +1510,7 @@ class ImageDataset(BaseDataset):
                 bucket_reso = list(bucket_reso) + [self.fp_latent_window_size]
                 if self.fp_1f_clean_indices is not None:
                     bucket_reso.append(len(self.fp_1f_clean_indices))
-                    bucket_reso.append(self.fp_1f_zero_post)
+                    bucket_reso.append(self.fp_1f_no_post)
                 bucket_reso = tuple(bucket_reso)
 
             item_info = ItemInfo(item_key, "", image_size, bucket_reso, latent_cache_path=cache_file)

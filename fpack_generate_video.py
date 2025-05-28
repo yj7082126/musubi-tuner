@@ -114,7 +114,7 @@ def parse_args() -> argparse.Namespace:
         "--one_frame_inference",
         type=str,
         default=None,
-        help="one frame inference, default is None, comma separated values from 'zero_post', 'no_2x', 'no_4x' and 'no_post'.",
+        help="one frame inference, default is None, comma separated values from 'no_2x', 'no_4x', 'no_post', 'control_indices' and 'target_index'.",
     )
     parser.add_argument(
         "--image_mask_path",
@@ -1269,15 +1269,15 @@ def generate_with_one_frame_inference(
         mask_image = np.array(mask_image)  # PIL to numpy, HWC
         mask_image = torch.from_numpy(mask_image).float() / 255.0  # 0 to 1.0, HWC
         mask_image = mask_image.squeeze(-1)  # HWC -> HW
-        mask_image = mask_image.unsqueeze(0).unsqueeze(0)  # HW -> 11HW
-        mask_image = mask_image.to(clean_latents)
+        mask_image = mask_image.unsqueeze(0).unsqueeze(0).unsqueeze(0)  # HW -> 111HW (BCFHW)
+        mask_image = mask_image.to(torch.float32)
         return mask_image
 
     if control_latents is None or len(control_latents) == 0:
         logger.info(f"No control images provided for one frame inference. Use zero latents for control images.")
         control_latents = [torch.zeros(1, 16, 1, height // 8, width // 8, dtype=torch.float32)]
 
-    if "zero_post" in one_frame_inference:
+    if "no_post" not in one_frame_inference:
         # add zero latents as clean latents post
         control_latents.append(torch.zeros((1, 16, 1, height // 8, width // 8), dtype=torch.float32))
         logger.info(f"Add zero latents as clean latents post for one frame inference.")
@@ -1285,7 +1285,7 @@ def generate_with_one_frame_inference(
     # kisekaeichi and 1f-mc: both are using control images, but indices are different
     clean_latents = torch.cat(control_latents, dim=2)  # (1, 16, num_control_images, H//8, W//8)
     clean_latent_indices = torch.zeros((1, len(control_latents)), dtype=torch.int64)
-    if "zero_post" in one_frame_inference:
+    if "no_post" not in one_frame_inference:
         clean_latent_indices[:, -1] = 1 + latent_window_size  # default index for clean latents post
 
     if args.control_image_mask_path is not None and len(args.control_image_mask_path) > 0:

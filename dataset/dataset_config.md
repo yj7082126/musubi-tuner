@@ -350,6 +350,7 @@ The dataset configuration with metadata JSONL file is  same as the video dataset
 
 <details>
 <summary>日本語</summary>
+
 制御動画を持つデータセットです。ControlNetモデルの学習に使用します。
 
 キャプションを用いる場合のデータセット設定は動画データセットと似ていますが、`control_directory`パラメータが追加されています。上にある例を参照してください。ある動画に対する制御用動画として、動画と同じファイル名（または拡張子のみが異なるファイル名）の、`control_directory`にある動画が使用されます（例：`video_dir/video1.mp4`と`control_dir/video1.mp4`または`control_dir/video1.mov`）。また、拡張子なしのディレクトリ内の、複数枚の画像を制御用動画として使用することもできます（例：`video_dir/video1.mp4`と`control_dir/video1`）。
@@ -383,14 +384,14 @@ For the default single frame training of FramePack, you need to set the followin
 [[datasets]]
 fp_1f_clean_indices = [0]
 fp_1f_target_index = 9
-fp_1f_zero_post = true
+fp_1f_no_post = false
 ```
 
 **Advanced Settings:**
 
-Note that these parameters are still experimental, and the optimal values are not yet known. The parameters may also change in the future.
+**Note that these parameters are still experimental, and the optimal values are not yet known.** The parameters may also change in the future.
 
-`fp_1f_clean_indices` sets the `clean_indices` value passed to the FramePack model. You can specify multiple indices. `fp_1f_target_index` sets the index of the frame to be trained (generated). `fp_1f_zero_post` sets whether to add a zero value as `clean_latent_post`, default is `true`.
+`fp_1f_clean_indices` sets the `clean_indices` value passed to the FramePack model. You can specify multiple indices. `fp_1f_target_index` sets the index of the frame to be trained (generated). `fp_1f_no_post` sets whether to add a zero value as `clean_latent_post`, default is `false` (add zero value).
 
 The number of control images should match the number of indices specified in `fp_1f_clean_indices`.
 
@@ -402,35 +403,36 @@ For training with 1f-mc, set `fp_1f_clean_indices` to `[0, 1]` and `fp_1f_target
 [[datasets]]
 fp_1f_clean_indices = [0, 1]
 fp_1f_target_index = 9
-fp_1f_zero_post = true
+fp_1f_no_post = false
 ```
 
-For training with kisekaeichi, set `fp_1f_clean_indices` to `[0, 10]` and `fp_1f_target_index` to `1`. This allows you to use the starting image (the image just before the generation section) and the image following the generation section (equivalent to `clean_latent_post`) to train the first image of the generated video. The control images will be two in this case. `fp_1f_zero_post` should be set to `false`.
+For training with kisekaeichi, set `fp_1f_clean_indices` to `[0, 10]` and `fp_1f_target_index` to `1` (or another value). This allows you to use the starting image (the image just before the generation section) and the image following the generation section (equivalent to `clean_latent_post`) to train the first image of the generated video. The control images will be two in this case. `fp_1f_no_post` should be set to `true`.
 
 ```toml
 [[datasets]]
 fp_1f_clean_indices = [0, 10]
 fp_1f_target_index = 1
-fp_1f_zero_post = false
+fp_1f_no_post = true
 ```
 
 With `fp_1f_clean_indices` and `fp_1f_target_index`, you can specify any number of control images and any index of the target image for training.
 
-If you set `fp_1f_zero_post` to `true`, the `clean_latent_post_index` will be `1 + fp1_latent_window_size`.
+If you set `fp_1f_no_post` to `false`, the `clean_latent_post_index` will be `1 + fp1_latent_window_size`.
 
 You can also set the `no_2x` and `no_4x` options for cache scripts to disable the clean latents 2x and 4x.
 
-The 2x indices are `1 + fp1_latent_window_size + 1` for two indices (usually `11, 12`), and the 4x indices are `1 + fp1_latent_window_size + 1 + 2` for sixteen indices (usually `13, 14, ..., 28`).
+The 2x indices are `1 + fp1_latent_window_size + 1` for two indices (usually `11, 12`), and the 4x indices are `1 + fp1_latent_window_size + 1 + 2` for sixteen indices (usually `13, 14, ..., 28`), regardless of `fp_1f_no_post` and `no_2x`, `no_4x` settings.
 
 <details>
 <summary>日本語</summary>
-※ 以下のパラメータは研究中で最適値はまだ不明です。またパラメータ自体も変更される可能性があります。
 
-デフォルトの1フレーム学習を行う場合、`fp_1f_clean_indices`に`[0]`を、`fp_1f_target_index`に`9`（または5から15程度の値）を、`zero_post`に`true`を設定してください。（記述例は英語版ドキュメントを参照、以降同じ。）
+※ **以下のパラメータは研究中で最適値はまだ不明です。** またパラメータ自体も変更される可能性があります。
+
+デフォルトの1フレーム学習を行う場合、`fp_1f_clean_indices`に`[0]`を、`fp_1f_target_index`に`9`（または5から15程度の値）を、`no_post`に`false`を設定してください。（記述例は英語版ドキュメントを参照、以降同じ。）
 
 **より高度な設定：**
 
-`fp_1f_clean_indices`は、FramePackモデルに渡される `clean_indices` の値を設定します。複数指定が可能です。`fp_1f_target_index`は、学習（生成）対象のフレームのインデックスを設定します。`fp_1f_zero_post`は、`clean_latent_post` をゼロ値で追加するかどうかを設定します（デフォルトは`true`です）。
+`fp_1f_clean_indices`は、FramePackモデルに渡される `clean_indices` の値を設定します。複数指定が可能です。`fp_1f_target_index`は、学習（生成）対象のフレームのインデックスを設定します。`fp_1f_no_post`は、`clean_latent_post` をゼロ値で追加するかどうかを設定します（デフォルトは`false`で、ゼロ値で追加します）。
 
 制御画像の枚数は`fp_1f_clean_indices`に指定したインデックスの数とあわせてください。
 
@@ -438,13 +440,13 @@ The 2x indices are `1 + fp1_latent_window_size + 1` for two indices (usually `11
 
 1f-mcの学習を行う場合は、`fp_1f_clean_indices`に `[0, 1]`を、`fp_1f_target_index`に`9`を設定してください。これにより動画の先頭の2枚の制御画像を使用して、後続の1枚の生成画像を学習します。制御画像は2枚になります。
 
-kisekaeichiの学習を行う場合は、`fp_1f_clean_indices`に `[0, 10]`を、`fp_1f_target_index`に`1`を設定してください。これは、開始画像（生成セクションの直前の画像）（`clean_latent_pre`に相当）と、生成セクションに続く1枚の画像（`clean_latent_post`に相当）を使用して、生成動画の先頭の画像を学習します。制御画像は2枚になります。`f1_1f_zero_post`は`false`に設定してください。
+kisekaeichiの学習を行う場合は、`fp_1f_clean_indices`に `[0, 10]`を、`fp_1f_target_index`に`1`（または他の値）を設定してください。これは、開始画像（生成セクションの直前の画像）（`clean_latent_pre`に相当）と、生成セクションに続く1枚の画像（`clean_latent_post`に相当）を使用して、生成動画の先頭の画像（`target_index=1`）を学習します。制御画像は2枚になります。`f1_1f_no_post`は`true`に設定してください。
 
 `fp_1f_clean_indices`と`fp_1f_target_index`を応用することで、任意の枚数の制御画像を、任意のインデックスを指定して学習することが可能です。
 
-`fp_1f_zero_post`を`true`に設定すると、`clean_latent_post_index`は `1 + fp1_latent_window_size` になります。
+`fp_1f_no_post`を`false`に設定すると、`clean_latent_post_index`は `1 + fp1_latent_window_size` になります。
 
-推論時の `no_2x`、`no_4x`に対応する設定は、キャッシュスクリプトの引数で行えます。なお、2xのindexは `1 + fp1_latent_window_size + 1` からの2個（通常は`11, 12`）、4xのindexは `1 + fp1_latent_window_size + 1 + 2` からの16個になります（通常は`13, 14, ..., 28`）です。
+推論時の `no_2x`、`no_4x`に対応する設定は、キャッシュスクリプトの引数で行えます。なお、2xのindexは `1 + fp1_latent_window_size + 1` からの2個（通常は`11, 12`）、4xのindexは `1 + fp1_latent_window_size + 1 + 2` からの16個になります（通常は`13, 14, ..., 28`）です。これらの値は`fp_1f_no_post`や`no_2x`, `no_4x`の設定に関わらず、常に同じです。
 
 </details>
 

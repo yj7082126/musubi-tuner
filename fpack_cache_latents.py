@@ -294,7 +294,7 @@ def encode_and_save_batch_one_frame(
             )
             clean_latent_indices = [0]
 
-        if item.fp_1f_zero_post:
+        if not item.fp_1f_no_post:
             clean_latent_indices = clean_latent_indices + [1 + item.fp_latent_window_size]
         clean_latent_indices = torch.Tensor(clean_latent_indices).long()  #  N
 
@@ -318,14 +318,14 @@ def encode_and_save_batch_one_frame(
 
         # clean latents preparation (emulating inference)
         clean_latents = latents[b, :, :-1]  # C, F, H, W
-        if item.fp_1f_zero_post:
+        if not item.fp_1f_no_post:
             # If zero post is enabled, we need to add a zero frame at the end
             clean_latents = F.pad(clean_latents, (0, 0, 0, 0, 0, 1), value=0.0)  # C, F+1, H, W
 
         # Target latents for this section (ground truth)
         target_latents = latents[b, :, -1:]  # C, 1, H, W
 
-        print(f"Saving cache for item {item.item_key} at {item.latent_cache_path}. zero_post: {item.fp_1f_zero_post}")
+        print(f"Saving cache for item {item.item_key} at {item.latent_cache_path}. no_post: {item.fp_1f_no_post}")
         print(f"  Clean latent indices: {clean_latent_indices}, latent index: {latent_index}")
         print(f"  Clean latents: {clean_latents.shape}, target latents: {target_latents.shape}")
         print(f"  Clean latents 2x indices: {clean_latent_2x_indices}, clean latents 4x indices: {clean_latent_4x_indices}")
