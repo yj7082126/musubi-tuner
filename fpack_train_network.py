@@ -192,7 +192,7 @@ class FramePackNetworkTrainer(NetworkTrainer):
         frame_count = actual_frame_count
         num_frames = latent_window_size * 4 - 3
 
-        # parepare start and control latent
+        # prepare start and control latent
         def encode_image(path):
             image = Image.open(path)
             if image.mode == "RGBA":
