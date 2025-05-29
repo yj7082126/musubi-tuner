@@ -1285,6 +1285,8 @@ def generate_with_one_frame_inference(
     latent_indices[:, 0] = latent_window_size  # last of latent_window
 
     def get_latent_mask(mask_image: Image.Image) -> torch.Tensor:
+        if mask_image.mode != "L":
+            mask_image = mask_image.convert("L")
         mask_image = mask_image.resize((width // 8, height // 8), Image.LANCZOS)
         mask_image = np.array(mask_image)  # PIL to numpy, HWC
         mask_image = torch.from_numpy(mask_image).float() / 255.0  # 0 to 1.0, HWC
@@ -1334,6 +1336,10 @@ def generate_with_one_frame_inference(
                 clean_latent_indices[:, i] = control_index
                 i += 1
             logger.info(f"Set index for clean latent 1x: {control_indices}")
+    
+    # "default" option does nothing, so we can skip it
+    if "default" in one_frame_inference:
+        pass
 
     if "no_2x" in one_frame_inference:
         clean_latents_2x = None
