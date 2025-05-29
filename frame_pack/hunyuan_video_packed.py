@@ -1674,12 +1674,12 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
         if timestep_threshold is not None and rope_scaling_factor > 0:
             self.rope_scaling_timestep_threshold = timestep_threshold
             self.rope_scaling_factor = rope_scaling_factor
-            print(f"RoPE scaling enabled: threshold={timestep_threshold}, scaling_factor={rope_scaling_factor}.")
+            logger.info(f"RoPE scaling enabled: threshold={timestep_threshold}, scaling_factor={rope_scaling_factor}.")
         else:
             self.rope_scaling_timestep_threshold = None
             self.rope_scaling_factor = 1.0
             self.rope.h_w_scaling_factor = 1.0  # reset to default
-            print("RoPE scaling disabled.")
+            logger.info("RoPE scaling disabled.")
 
     def process_input_hidden_states(
         self,
