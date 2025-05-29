@@ -291,7 +291,7 @@ video3: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx (trimmed to 31 frames)
 
 ### Sample for Image Dataset with Control Images
 
-The dataset with control images. This is used for training the single frame training for FramePack.
+The dataset with control images. This is used for training the one frame training for FramePack.
 
 The dataset configuration with caption text files is similar to the image dataset, but with an additional `control_directory` parameter.
 
@@ -307,21 +307,26 @@ The metadata JSONL file format is the same as the image dataset, but with an add
 
 If multiple control images are specified, the attribute names should be `control_path_0`, `control_path_1`, etc.
 
-
 ```json
 {"image_path": "/path/to/image1.jpg", "control_path_0": "/path/to/control1_0.png", "control_path_1": "/path/to/control1_1.png", "caption": "A caption for image1"}
 {"image_path": "/path/to/image2.jpg", "control_path_0": "/path/to/control2_0.png", "control_path_1": "/path/to/control2_1.png", "caption": "A caption for image2"}
 ```
 
+The control images can also have an alpha channel. In this case, the alpha channel of the image is used as a mask for the latent.
+
 <details>
 <summary>日本語</summary>
+
 制御画像を持つデータセットです。現時点ではFramePackの単一フレーム学習に使用します。
 
-キャプションファイルを用いる場合は`control_directory`を追加で指定してください。制御用画像は、画像と同じファイル名（または拡張子のみが異なるファイル名）の、`control_directory`にある画像が使用されます（例：`image_dir/image1.jpg`と`control_dir/image1.png`）。`image_directory`の画像は学習対象の画像（推論時に生成する画像、変化後の画像）としてください。`control_directory`には推論時の開始画像を格納してください。キャプションは`image_directory`へ格納してください。
+キャプションファイルを用いる場合は`control_directory`を追加で指定してください。制御画像は、画像と同じファイル名（または拡張子のみが異なるファイル名）の、`control_directory`にある画像が使用されます（例：`image_dir/image1.jpg`と`control_dir/image1.png`）。`image_directory`の画像は学習対象の画像（推論時に生成する画像、変化後の画像）としてください。`control_directory`には推論時の開始画像を格納してください。キャプションは`image_directory`へ格納してください。
 
-複数枚の制御用画像が指定可能です。この場合、制御用画像のファイル名（拡張子を除く）へ数字を付与してください。例えば、`image_dir/image1.jpg`と`control_dir/image1_0.png`, `control_dir/image1_1.png`のように指定します。`image1_0000.png`, `image1_0001.png`のように数字を4桁で指定することもできます。
+複数枚の制御画像が指定可能です。この場合、制御画像のファイル名（拡張子を除く）へ数字を付与してください。例えば、`image_dir/image1.jpg`と`control_dir/image1_0.png`, `control_dir/image1_1.png`のように指定します。`image1_0000.png`, `image1_0001.png`のように数字を4桁で指定することもできます。
 
-メタデータJSONLファイルを使用する場合は、`control_path`を追加してください。複数枚の制御用画像を指定する場合は、`control_path_0`, `control_path_1`のように数字を付与してください。
+メタデータJSONLファイルを使用する場合は、`control_path`を追加してください。複数枚の制御画像を指定する場合は、`control_path_0`, `control_path_1`のように数字を付与してください。
+
+制御画像はアルファチャンネルを持つこともできます。この場合、画像のアルファチャンネルはlatentへのマスクとして使用されます。
+
 </details>
 
 ### Sample for Video Dataset with Control Images
@@ -356,6 +361,7 @@ The dataset configuration with metadata JSONL file is  same as the video dataset
 キャプションを用いる場合のデータセット設定は動画データセットと似ていますが、`control_directory`パラメータが追加されています。上にある例を参照してください。ある動画に対する制御用動画として、動画と同じファイル名（または拡張子のみが異なるファイル名）の、`control_directory`にある動画が使用されます（例：`video_dir/video1.mp4`と`control_dir/video1.mp4`または`control_dir/video1.mov`）。また、拡張子なしのディレクトリ内の、複数枚の画像を制御用動画として使用することもできます（例：`video_dir/video1.mp4`と`control_dir/video1`）。
 
 データセット設定でメタデータJSONLファイルを使用する場合は、動画と制御用動画のパスを含める必要があります。制御用動画のパスは、複数枚の画像を含むディレクトリのパスでも構いません。
+
 </details>
 
 ## Architecture-specific Settings / アーキテクチャ固有の設定
@@ -373,12 +379,14 @@ fp_latent_window_size = 9
 
 <details>
 <summary>日本語</summary>
+
 学習時のlatent window sizeを指定できます。FramePackの学習においては、9を指定することを推奨します。省略時は9が使用されますので、通常は省略して構いません。
+
 </details>
 
-### FramePack Single Frame Training
+### FramePack One Frame Training
 
-For the default single frame training of FramePack, you need to set the following parameters in the dataset configuration:
+For the default one frame training of FramePack, you need to set the following parameters in the dataset configuration:
 
 ```toml
 [[datasets]]
