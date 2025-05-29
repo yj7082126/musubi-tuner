@@ -170,7 +170,7 @@ class ItemInfo:
         self.text_encoder_output_cache_path: Optional[str] = None
 
         # np.ndarray for video, list[np.ndarray] for image with multiple controls
-        self.control_content: Optional[Union[np.adarry, list[np.ndarray]]] = None
+        self.control_content: Optional[Union[np.ndarray, list[np.ndarray]]] = None
 
         # FramePack architecture specific
         self.fp_latent_window_size: Optional[int] = None
