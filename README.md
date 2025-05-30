@@ -62,6 +62,8 @@ If you find this project helpful, please consider supporting its development via
 - GitHub Discussions Enabled: We've enabled GitHub Discussions for community Q&A, knowledge sharing, and technical information exchange. Please use Issues for bug reports and feature requests, and Discussions for questions and sharing experiences. [Join the conversation →](https://github.com/kohya-ss/musubi-tuner/discussions)
 
 - May 30, 2025:
+    - Fixed a bug where the resizing of images and videos during dataset loading was not performed correctly. Please recreate the cache.  Thank you sdbds for PR [#312](https://github.com/kohya-ss/musubi-tuner/issues/312). 
+        - The bug occurred when the width or height of the image before resizing matched the bucket's width or height, but the other dimension was different (for example, if the original image was 640x480 and the bucket was 640x360).
     - Updated the code for FramePack's one frame inference and training. The code has been significantly improved. See [FramePack's one frame inference documentation](./docs/framepack_1f.md) for details.
         - **Breaking change**: The dataset format, training options, and inference options for one frame training have changed. Please follow the documentation to update your dataset configuration, recreate the cache, and modify your training and inference options.
     - Added documentation for FramePack's one frame inference and training. See the [documentation](./docs/framepack_1f.md) for details.
