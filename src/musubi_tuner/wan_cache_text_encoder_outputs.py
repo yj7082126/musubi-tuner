@@ -6,20 +6,20 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from dataset import config_utils
-from dataset.config_utils import BlueprintGenerator, ConfigSanitizer
+from musubi_tuner.dataset import config_utils
+from musubi_tuner.dataset.config_utils import BlueprintGenerator, ConfigSanitizer
 import accelerate
 
-from dataset.image_video_dataset import ARCHITECTURE_WAN, ItemInfo, save_text_encoder_output_cache_wan
+from musubi_tuner.dataset.image_video_dataset import ARCHITECTURE_WAN, ItemInfo, save_text_encoder_output_cache_wan
 
 # for t5 config: all Wan2.1 models have the same config for t5
-from wan.configs import wan_t2v_14B
+from musubi_tuner.wan.configs import wan_t2v_14B
 
-import cache_text_encoder_outputs
+import musubi_tuner.cache_text_encoder_outputs
 import logging
 
-from utils.model_utils import str_to_dtype
-from wan.modules.t5 import T5EncoderModel
+from musubi_tuner.utils.model_utils import str_to_dtype
+from musubi_tuner.wan.modules.t5 import T5EncoderModel
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)

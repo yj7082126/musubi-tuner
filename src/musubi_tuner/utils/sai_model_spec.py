@@ -7,7 +7,7 @@ from typing import List, Optional, Tuple, Union
 import safetensors
 import logging
 
-from dataset.image_video_dataset import ARCHITECTURE_HUNYUAN_VIDEO, ARCHITECTURE_WAN, ARCHITECTURE_FRAMEPACK
+from musubi_tuner.dataset.image_video_dataset import ARCHITECTURE_HUNYUAN_VIDEO, ARCHITECTURE_WAN, ARCHITECTURE_FRAMEPACK
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

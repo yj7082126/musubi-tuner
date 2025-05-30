@@ -20,26 +20,26 @@ import torchvision.transforms.functional as TF
 from transformers import LlamaModel
 from tqdm import tqdm
 
-from networks import lora_framepack
-from hunyuan_model.autoencoder_kl_causal_3d import AutoencoderKLCausal3D
-from frame_pack import hunyuan
-from frame_pack.hunyuan_video_packed import HunyuanVideoTransformer3DModelPacked, load_packed_model
-from frame_pack.utils import crop_or_pad_yield_mask, resize_and_center_crop, soft_append_bcthw
-from frame_pack.bucket_tools import find_nearest_bucket
-from frame_pack.clip_vision import hf_clip_vision_encode
-from frame_pack.k_diffusion_hunyuan import sample_hunyuan
-from dataset import image_video_dataset
+from musubi_tuner.networks import lora_framepack
+from musubi_tuner.hunyuan_model.autoencoder_kl_causal_3d import AutoencoderKLCausal3D
+from musubi_tuner.frame_pack import hunyuan
+from musubi_tuner.frame_pack.hunyuan_video_packed import HunyuanVideoTransformer3DModelPacked, load_packed_model
+from musubi_tuner.frame_pack.utils import crop_or_pad_yield_mask, resize_and_center_crop, soft_append_bcthw
+from musubi_tuner.frame_pack.bucket_tools import find_nearest_bucket
+from musubi_tuner.frame_pack.clip_vision import hf_clip_vision_encode
+from musubi_tuner.frame_pack.k_diffusion_hunyuan import sample_hunyuan
+from musubi_tuner.dataset import image_video_dataset
 
 try:
     from lycoris.kohya import create_network_from_weights
 except:
     pass
 
-from utils.device_utils import clean_memory_on_device
-from hv_generate_video import save_images_grid, save_videos_grid, synchronize_device
-from wan_generate_video import merge_lora_weights
-from frame_pack.framepack_utils import load_vae, load_text_encoder1, load_text_encoder2, load_image_encoders
-from dataset.image_video_dataset import load_video
+from musubi_tuner.utils.device_utils import clean_memory_on_device
+from musubi_tuner.hv_generate_video import save_images_grid, save_videos_grid, synchronize_device
+from musubi_tuner.wan_generate_video import merge_lora_weights
+from musubi_tuner.frame_pack.framepack_utils import load_vae, load_text_encoder1, load_text_encoder2, load_image_encoders
+from musubi_tuner.dataset.image_video_dataset import load_video
 
 import logging
 

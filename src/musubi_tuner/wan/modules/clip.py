@@ -10,11 +10,11 @@ import torch.nn.functional as F
 import torchvision.transforms as T
 from accelerate import init_empty_weights
 
-from .attention import flash_attention
-from .tokenizers import HuggingfaceTokenizer
-from .xlm_roberta import XLMRoberta
+from musubi_tuner.wan.modules.attention import flash_attention
+from musubi_tuner.wan.modules.tokenizers import HuggingfaceTokenizer
+from musubi_tuner.wan.modules.xlm_roberta import XLMRoberta
 
-from utils.safetensors_utils import load_safetensors
+from musubi_tuner.utils.safetensors_utils import load_safetensors
 
 __all__ = [
     "XLMRobertaCLIP",

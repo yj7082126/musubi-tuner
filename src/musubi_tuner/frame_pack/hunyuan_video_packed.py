@@ -14,9 +14,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
-from modules.custom_offloading_utils import ModelOffloader
-from utils.safetensors_utils import load_split_weights
-from modules.fp8_optimization_utils import apply_fp8_monkey_patch, optimize_state_dict_with_fp8
+from musubi_tuner.modules.custom_offloading_utils import ModelOffloader
+from musubi_tuner.utils.safetensors_utils import load_split_weights
+from musubi_tuner.modules.fp8_optimization_utils import apply_fp8_monkey_patch, optimize_state_dict_with_fp8
 from accelerate import init_empty_weights
 
 try:

@@ -9,17 +9,17 @@ from accelerate import init_empty_weights
 
 import logging
 
-from utils.safetensors_utils import MemoryEfficientSafeOpen, load_safetensors
+from musubi_tuner.utils.safetensors_utils import MemoryEfficientSafeOpen, load_safetensors
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-from utils.device_utils import clean_memory_on_device
+from musubi_tuner.utils.device_utils import clean_memory_on_device
 
-from .attention import flash_attention
-from utils.device_utils import clean_memory_on_device
-from modules.custom_offloading_utils import ModelOffloader
-from modules.fp8_optimization_utils import apply_fp8_monkey_patch, optimize_state_dict_with_fp8
+from musubi_tuner.wan.modules.attention import flash_attention
+from musubi_tuner.utils.device_utils import clean_memory_on_device
+from musubi_tuner.modules.custom_offloading_utils import ModelOffloader
+from musubi_tuner.modules.fp8_optimization_utils import apply_fp8_monkey_patch, optimize_state_dict_with_fp8
 
 __all__ = ["WanModel"]
 
