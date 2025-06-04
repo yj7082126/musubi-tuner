@@ -11,6 +11,7 @@ toml==0.10.2
 tqdm==4.67.1
 transformers==4.46.3
 voluptuous==0.15.2
+prompt-toolkit==3.0.51
 
 # Wan2.1
 ftfy==6.3.1
