@@ -20,3 +20,4 @@ easydict==1.13
 # ascii-magic==2.3.0
 # matplotlib==3.10.0
 # tensorboard
+# prompt-toolkit==3.0.51
