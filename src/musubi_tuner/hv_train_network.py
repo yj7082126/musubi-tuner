@@ -2684,7 +2684,7 @@ def hv_setup_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     return parser
 
 
-if __name__ == "__main__":
+def main():
     parser = setup_parser_common()
     parser = hv_setup_parser(parser)
 
@@ -2695,3 +2695,7 @@ if __name__ == "__main__":
 
     trainer = NetworkTrainer()
     trainer.train(args)
+
+
+if __name__ == "__main__":
+    main()
