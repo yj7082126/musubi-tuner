@@ -47,7 +47,7 @@ from musubi_tuner.hv_generate_video import save_images_grid, save_videos_grid, r
 
 import logging
 
-from utils import huggingface_utils, model_utils, train_utils, sai_model_spec
+from musubi_tuner.utils import huggingface_utils, model_utils, train_utils, sai_model_spec
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
