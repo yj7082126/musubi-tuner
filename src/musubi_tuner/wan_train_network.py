@@ -11,7 +11,14 @@ from accelerate import Accelerator, init_empty_weights
 
 from musubi_tuner.dataset.image_video_dataset import ARCHITECTURE_WAN, ARCHITECTURE_WAN_FULL, load_video
 from musubi_tuner.hv_generate_video import resize_image_to_bucket
-from musubi_tuner.hv_train_network import NetworkTrainer, load_prompts, clean_memory_on_device, setup_parser_common, read_config_from_file
+from musubi_tuner.hv_train_network import (
+    NetworkTrainer,
+    load_prompts,
+    clean_memory_on_device,
+    setup_parser_common,
+    read_config_from_file,
+)
+from musubi_tuner.wan_generate_video import parse_one_frame_inference_args
 
 import logging
 
@@ -113,6 +120,8 @@ class WanNetworkTrainer(NetworkTrainer):
         for prompt_dict in prompts:
             if prompt_dict.get("image_path", None) is not None and self.i2v_training:
                 sample_prompts_image_embs[prompt_dict["image_path"]] = None  # this will be replaced with CLIP context
+            if prompt_dict.get("end_image_path", None) is not None and self.i2v_training:
+                sample_prompts_image_embs[prompt_dict["end_image_path"]] = None
 
         if len(sample_prompts_image_embs) > 0:
             logger.info(f"loading CLIP: {clip_path}")
@@ -148,6 +157,10 @@ class WanNetworkTrainer(NetworkTrainer):
             if p is not None and self.i2v_training:
                 prompt_dict_copy["clip_embeds"] = sample_prompts_image_embs[p]
 
+            p = prompt_dict.get("end_image_path", None)
+            if p is not None and self.i2v_training:
+                prompt_dict_copy["end_image_clip_embeds"] = sample_prompts_image_embs[p]
+
             sample_parameters.append(prompt_dict_copy)
 
         clean_memory_on_device(accelerator.device)
@@ -181,8 +194,18 @@ class WanNetworkTrainer(NetworkTrainer):
             cfg_scale = 5.0
         do_classifier_free_guidance = do_classifier_free_guidance and cfg_scale != 1.0
 
-        # Calculate latent video length based on VAE version
-        latent_video_length = (frame_count - 1) // self.config["vae_stride"][0] + 1
+        # prepare parameters
+        one_frame_mode = args.one_frame
+        if one_frame_mode:
+            target_index, control_indices, f_indices, one_frame_inference_index = parse_one_frame_inference_args(
+                sample_parameter["one_frame"]
+            )
+            latent_video_length = len(f_indices)  # number of frames in the video
+        else:
+            target_index, control_indices, f_indices, one_frame_inference_index = None, None, None, None
+
+            # Calculate latent video length based on VAE version
+            latent_video_length = (frame_count - 1) // self.config["vae_stride"][0] + 1
 
         # Get embeddings
         context = sample_parameter["t5_embeds"].to(device=device)
@@ -204,7 +227,51 @@ class WanNetworkTrainer(NetworkTrainer):
         latents = torch.cat(latents, dim=2)
 
         image_latents = None
-        if self.i2v_training or self.control_training:
+
+        if one_frame_mode:
+            # One frame inference mode
+            vae.to(device)
+            vae.eval()
+
+            # prepare start and control latent
+            def encode_image(path):
+                image = Image.open(path)
+                if image.mode == "RGBA":
+                    alpha = image.split()[-1]
+                    image = image.convert("RGB")
+                else:
+                    alpha = None
+                image = resize_image_to_bucket(image, (width, height))  # returns a numpy array
+                image = torch.from_numpy(image).permute(2, 0, 1).unsqueeze(1).unsqueeze(0).float()  # 1, C, 1, H, W
+                image = image / 127.5 - 1  # -1 to 1
+                with torch.amp.autocast(device_type=device.type, dtype=vae.dtype), torch.no_grad():
+                    image = image.to(device=device)
+                    latent = vae.encode([image])[0]
+                return latent, alpha
+
+            control_latents = []
+            control_alphas = []
+            if "control_image_path" in sample_parameter:
+                for control_image_path in sample_parameter["control_image_path"]:
+                    control_latent, control_alpha = encode_image(control_image_path)
+                    control_latents.append(control_latent)
+                    control_alphas.append(control_alpha)
+
+            # Create latent and mask for the required number of frames
+            image_latents = torch.zeros(4 + 16, len(f_indices), lat_h, lat_w, dtype=torch.float32, device=device)
+            ci = 0
+            for j, index in enumerate(f_indices):
+                if index == target_index:
+                    pass
+                else:
+                    image_latents[:4, j, :, :] = 1.0  # set mask to 1.0 for the clean latent frames
+                    image_latents[4:, j : j + 1, :, :] = control_latents[ci]  # set control latent
+                    ci += 1
+
+            vae.to("cpu")
+            clean_memory_on_device(device)
+
+        elif self.i2v_training or self.control_training:
             # Move VAE to the appropriate device for sampling: consider to cache image latents in CPU in advance
             vae.to(device)
             vae.eval()
@@ -272,9 +339,19 @@ class WanNetworkTrainer(NetworkTrainer):
         arg_c = {"context": [context], "seq_len": max_seq_len}
         arg_null = {"context": [context_null], "seq_len": max_seq_len}
 
-        if self.i2v_training:
+        if self.i2v_training and not one_frame_mode:
             arg_c["clip_fea"] = sample_parameter["clip_embeds"].to(device=device, dtype=dit_dtype)
             arg_null["clip_fea"] = arg_c["clip_fea"]
+        if one_frame_mode:
+            if "end_image_clip_embeds" in sample_parameter:
+                arg_c["clip_fea"] = torch.cat(
+                    [sample_parameter["clip_embeds"], sample_parameter["end_image_clip_embeds"]], dim=0
+                ).to(device=device, dtype=dit_dtype)
+            else:
+                arg_c["clip_fea"] = sample_parameter["clip_embeds"].to(device=device, dtype=dit_dtype)
+            arg_null["clip_fea"] = arg_c["clip_fea"]
+            arg_c["f_indices"] = [f_indices]
+            arg_null["f_indices"] = arg_c["f_indices"]
         if self.i2v_training or self.control_training:
             arg_c["y"] = image_latents
             arg_null["y"] = image_latents
@@ -311,6 +388,8 @@ class WanNetworkTrainer(NetworkTrainer):
         latent = latent.unsqueeze(0)  # add batch dim
         latent = latent.to(device=device)
 
+        if one_frame_mode:
+            latent = latent[:, :, one_frame_inference_index : one_frame_inference_index + 1, :, :]  # select the one frame
         with torch.amp.autocast(device_type=device.type, dtype=vae.dtype), torch.no_grad():
             video = vae.decode(latent)[0]  # vae returns list
         video = video.unsqueeze(0)  # add batch dim
@@ -426,6 +505,7 @@ def wan_setup_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser
         help="text encoder (CLIP) checkpoint path, optional. If training I2V model, this is required",
     )
     parser.add_argument("--vae_cache_cpu", action="store_true", help="cache features in VAE on CPU")
+    parser.add_argument("--one_frame", action="store_true", help="Use one frame sampling method for sample generation")
     return parser
 
 

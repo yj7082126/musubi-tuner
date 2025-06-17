@@ -24,7 +24,11 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 
-def encode_and_save_batch(vae: WanVAE, clip: Optional[CLIPModel], batch: list[ItemInfo]):
+def encode_and_save_batch(vae: WanVAE, clip: Optional[CLIPModel], batch: list[ItemInfo], one_frame: bool = False):
+    if one_frame:
+        encode_and_save_batch_one_frame(vae, clip, batch)
+        return
+
     contents = torch.stack([torch.from_numpy(item.content) for item in batch])
     if len(contents.shape) == 4:
         contents = contents.unsqueeze(1)  # B, H, W, C -> B, F, H, W, C
@@ -117,6 +121,64 @@ def encode_and_save_batch(vae: WanVAE, clip: Optional[CLIPModel], batch: list[It
         save_latent_cache_wan(item, l, cctx, y_i, control_latent_i)
 
 
+def encode_and_save_batch_one_frame(vae: WanVAE, clip: Optional[CLIPModel], batch: list[ItemInfo]):
+    # item.content: target image (H, W, C)
+    # item.control_content: list of images (H, W, C)
+    assert clip is not None, "clip is required for one frame training"
+
+    # contents: control_content + content
+    _, _, contents, content_masks = cache_latents.preprocess_contents(batch)
+    contents = contents.to(vae.device, dtype=vae.dtype)  # B, C, F, H, W
+    assert contents.shape[2] >= 2, "One frame training requires at least 1 control frame and 1 target frame"
+
+    # print(f"encode batch: {contents.shape}")
+    with torch.amp.autocast(device_type=vae.device.type, dtype=vae.dtype), torch.no_grad():
+        # VAE encode: we need to encode one frame at a time because VAE encoder has stride=4 for the time dimension except for the first frame.
+        latent = [vae.encode(contents[:, :, f : f + 1, :, :]) for f in range(contents.shape[2])]
+        latent = torch.cat(latent, dim=2)  # B, C, F, H/8, W/8
+    latent = latent.to(vae.dtype)  # convert to bfloat16, we are not sure if this is correct
+    control_latent = latent[:, :, :-1, :, :]
+    target_latent = latent[:, :, -1:, :, :]
+
+    # Vision encoding per‑item (once): use first content (first control content) because it is the start image
+    images = contents[:, :, 0:1, :, :]  # B, C, F, H, W
+    with torch.amp.autocast(device_type=clip.device.type, dtype=torch.float16), torch.no_grad():
+        clip_context = clip.visual(images)
+    clip_context = clip_context.to(torch.float16)  # convert to fp16
+
+    B, C, _, lat_h, lat_w = latent.shape
+    for i, item in enumerate(batch):
+        latent = target_latent[i]  # B, C, H, W
+        F = contents.shape[2]  # number of frames
+        y = torch.zeros((4 + C, F, lat_h, lat_w), dtype=vae.dtype, device=vae.device)  # conditioning
+        l = torch.zeros((C, F, lat_h, lat_w), dtype=vae.dtype, device=vae.device)  # training latent
+
+        # Create latent and mask for the required number of frames
+        control_latent_indices = item.clean_latent_indices  # list of indices
+        target_and_control_latent_indices = control_latent_indices + [item.fp_1f_target_index]
+        f_indices = sorted(target_and_control_latent_indices)
+
+        ci = 0
+        for j, index in enumerate(f_indices):
+            if index == item.fp_1f_target_index:
+                # This is the target frame, do not set control latent
+                l[:, j, :, :] = latent[0]  # set target latent
+            else:
+                y[:4, j, :, :] = 1.0  # set mask to 1.0 for the clean latent frames
+                y[4:, j, :, :] = control_latent[i, :, ci, :, :]  # set control latent
+                l[:, j, :, :] = control_latent[i, :, ci, :, :]  # also set control latent to training latent
+                ci += 1  # increment control latent index
+
+        cctx = clip_context[i]
+
+        print(f"Saving cache for item: {item.item_key} at {item.latent_cache_path}")
+        print(f"  control_latent_indices: {control_latent_indices}, fp_1f_target_index: {item.fp_1f_target_index}")
+        print(f"  y shape: {y.shape}, mask: {y[0, :,0,0]}, l shape: {l.shape}, clip_context shape: {cctx.shape}")
+        print(f"  f_indices: {f_indices}")
+
+        save_latent_cache_wan(item, l, cctx, y, None, f_indices=f_indices)
+
+
 def main():
     parser = cache_latents.setup_parser_common()
     parser = wan_setup_parser(parser)
@@ -158,7 +220,7 @@ def main():
 
     # Encode images
     def encode(one_batch: list[ItemInfo]):
-        encode_and_save_batch(vae, clip, one_batch)
+        encode_and_save_batch(vae, clip, one_batch, args.one_frame)
 
     cache_latents.encode_datasets(datasets, encode, args)
 
@@ -170,6 +232,11 @@ def wan_setup_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser
         type=str,
         default=None,
         help="text encoder (CLIP) checkpoint path, optional. If training I2V model, this is required",
+    )
+    parser.add_argument(
+        "--one_frame",
+        action="store_true",
+        help="Generate cache for one frame training (single frame, single section).",
     )
     return parser
 

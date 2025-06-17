@@ -208,6 +208,7 @@ def save_latent_cache_wan(
     clip_embed: Optional[torch.Tensor],
     image_latent: Optional[torch.Tensor],
     control_latent: Optional[torch.Tensor],
+    f_indices: Optional[list[int]] = None,
 ):
     """Wan architecture only"""
     assert latent.dim() == 4, "latent should be 4D tensor (frame, channel, height, width)"
@@ -224,6 +225,10 @@ def save_latent_cache_wan(
 
     if control_latent is not None:
         sd[f"latents_control_{F}x{H}x{W}_{dtype_str}"] = control_latent.detach().cpu()
+
+    if f_indices is not None:
+        dtype_str = dtype_to_str(torch.int32)
+        sd[f"f_indices_{dtype_str}"] = torch.tensor(f_indices, dtype=torch.int32)
 
     save_latent_cache_common(item_info, sd, ARCHITECTURE_WAN_FULL)
 
