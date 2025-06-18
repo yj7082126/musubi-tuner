@@ -134,8 +134,16 @@ def encode_and_save_batch_one_frame(vae: WanVAE, clip: Optional[CLIPModel], batc
     # print(f"encode batch: {contents.shape}")
     with torch.amp.autocast(device_type=vae.device.type, dtype=vae.dtype), torch.no_grad():
         # VAE encode: we need to encode one frame at a time because VAE encoder has stride=4 for the time dimension except for the first frame.
-        latent = [vae.encode(contents[:, :, f : f + 1, :, :]) for f in range(contents.shape[2])]
-        latent = torch.cat(latent, dim=2)  # B, C, F, H/8, W/8
+        latent = []
+        for bi in range(contents.shape[0]):
+            c = contents[bi : bi + 1]  # B, C, F, H, W, b=1
+            l = []
+            for f in range(c.shape[2]):  # iterate over frames
+                cf = c[:, :, f : f + 1, :, :]  # B, C, 1, H, W
+                l.append(vae.encode(cf)[0].unsqueeze(0)) # list of [C, 1, H, W] to [1, C, 1, H, W]
+            latent.append(torch.cat(l, dim=2))  # B, C, F, H, W
+        latent = torch.cat(latent, dim=0)  # B, C, F, H, W
+
     latent = latent.to(vae.dtype)  # convert to bfloat16, we are not sure if this is correct
     control_latent = latent[:, :, :-1, :, :]
     target_latent = latent[:, :, -1:, :, :]
@@ -154,7 +162,7 @@ def encode_and_save_batch_one_frame(vae: WanVAE, clip: Optional[CLIPModel], batc
         l = torch.zeros((C, F, lat_h, lat_w), dtype=vae.dtype, device=vae.device)  # training latent
 
         # Create latent and mask for the required number of frames
-        control_latent_indices = item.clean_latent_indices  # list of indices
+        control_latent_indices = item.fp_1f_clean_indices
         target_and_control_latent_indices = control_latent_indices + [item.fp_1f_target_index]
         f_indices = sorted(target_and_control_latent_indices)
 

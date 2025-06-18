@@ -246,7 +246,7 @@ class WanNetworkTrainer(NetworkTrainer):
                 image = image / 127.5 - 1  # -1 to 1
                 with torch.amp.autocast(device_type=device.type, dtype=vae.dtype), torch.no_grad():
                     image = image.to(device=device)
-                    latent = vae.encode([image])[0]
+                    latent = vae.encode(image)[0]
                 return latent, alpha
 
             control_latents = []
@@ -267,6 +267,7 @@ class WanNetworkTrainer(NetworkTrainer):
                     image_latents[:4, j, :, :] = 1.0  # set mask to 1.0 for the clean latent frames
                     image_latents[4:, j : j + 1, :, :] = control_latents[ci]  # set control latent
                     ci += 1
+            image_latents = image_latents.unsqueeze(0)  # add batch dim
 
             vae.to("cpu")
             clean_memory_on_device(device)
@@ -352,6 +353,7 @@ class WanNetworkTrainer(NetworkTrainer):
             arg_null["clip_fea"] = arg_c["clip_fea"]
             arg_c["f_indices"] = [f_indices]
             arg_null["f_indices"] = arg_c["f_indices"]
+            # print(f"One arg_c: {arg_c}, arg_null: {arg_null}")
         if self.i2v_training or self.control_training:
             arg_c["y"] = image_latents
             arg_null["y"] = image_latents
