@@ -140,7 +140,7 @@ def encode_and_save_batch_one_frame(vae: WanVAE, clip: Optional[CLIPModel], batc
             l = []
             for f in range(c.shape[2]):  # iterate over frames
                 cf = c[:, :, f : f + 1, :, :]  # B, C, 1, H, W
-                l.append(vae.encode(cf)[0].unsqueeze(0)) # list of [C, 1, H, W] to [1, C, 1, H, W]
+                l.append(vae.encode(cf)[0].unsqueeze(0))  # list of [C, 1, H, W] to [1, C, 1, H, W]
             latent.append(torch.cat(l, dim=2))  # B, C, F, H, W
         latent = torch.cat(latent, dim=0)  # B, C, F, H, W
 

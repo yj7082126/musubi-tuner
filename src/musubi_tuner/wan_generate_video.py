@@ -823,6 +823,9 @@ def prepare_one_frame_inference(
 
     # TODO mask is not supported yet
 
+    with accelerator.autocast(), torch.no_grad():
+        black_image_latent = vae.encode([torch.zeros((3, 1, height, width), dtype=torch.float32, device=device)])[0]
+
     control_latents = []
     if control_image_tensors is not None:
         # encode image to latent space with VAE
@@ -844,7 +847,7 @@ def prepare_one_frame_inference(
     ci = 0
     for j, index in enumerate(f_indices):
         if index == target_index:
-            pass
+            y[4:, j : j + 1, :, :] = black_image_latent  # set target latent to black image
         else:
             y[:4, j, :, :] = 1.0  # set mask to 1.0 for the clean latent frames
             y[4:, j : j + 1, :, :] = control_latents[ci]  # set control latent
@@ -1295,13 +1298,6 @@ def generate(
         gen_settings.vae_dtype,
     )
 
-    # one frame inference
-    one_frame_inference = None
-    if args.one_frame_inference is not None:
-        one_frame_inference = set()
-        for mode in args.one_frame_inference.split(","):
-            one_frame_inference.add(mode.strip())
-
     # prepare accelerator
     mixed_precision = "bf16" if dit_dtype == torch.bfloat16 else "fp16"
     accelerator = accelerate.Accelerator(mixed_precision=mixed_precision)
@@ -1377,8 +1373,9 @@ def generate(
         synchronize_device(device)
 
         # wait for 5 seconds until block swap is done
-        logger.info("Waiting for 5 seconds to finish block swap")
-        time.sleep(5)
+        if args.blocks_to_swap > 0:
+            logger.info("Waiting for 5 seconds to finish block swap")
+            time.sleep(5)
 
         gc.collect()
         clean_memory_on_device(device)
@@ -1519,7 +1516,8 @@ def save_images(sample: torch.Tensor, args: argparse.Namespace, original_base_na
     original_name = "" if original_base_name is None else f"_{original_base_name}"
     image_name = f"{time_flag}_{seed}{original_name}"
     sample = sample.unsqueeze(0)
-    save_images_grid(sample, save_path, image_name, rescale=True)
+    one_frame_inference = sample.shape[2] == 1  # check if one frame inference is used
+    save_images_grid(sample, save_path, image_name, rescale=True, create_subdir=not one_frame_inference)
     logger.info(f"Sample images saved to: {save_path}/{image_name}")
 
     return f"{save_path}/{image_name}"
@@ -1715,8 +1713,9 @@ def process_batch_prompts(prompts_data: List[Dict], args: argparse.Namespace) ->
     synchronize_device(device)
 
     # wait for 5 seconds until block swap is done
-    logger.info("Waiting for 5 seconds to finish block swap")
-    time.sleep(5)
+    if args.blocks_to_swap > 0:
+        logger.info("Waiting for 5 seconds to finish block swap")
+        time.sleep(5)
 
     gc.collect()
     clean_memory_on_device(device)

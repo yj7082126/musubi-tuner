@@ -257,12 +257,15 @@ class WanNetworkTrainer(NetworkTrainer):
                     control_latents.append(control_latent)
                     control_alphas.append(control_alpha)
 
+            with torch.amp.autocast(device_type=device.type, dtype=vae.dtype), torch.no_grad():
+                black_image_latent = vae.encode([torch.zeros((3, 1, height, width), dtype=torch.float32, device=device)])[0]
+
             # Create latent and mask for the required number of frames
             image_latents = torch.zeros(4 + 16, len(f_indices), lat_h, lat_w, dtype=torch.float32, device=device)
             ci = 0
             for j, index in enumerate(f_indices):
                 if index == target_index:
-                    pass
+                    image_latents[4:, j : j + 1, :, :] = black_image_latent  # set black latent for the target frame
                 else:
                     image_latents[:4, j, :, :] = 1.0  # set mask to 1.0 for the clean latent frames
                     image_latents[4:, j : j + 1, :, :] = control_latents[ci]  # set control latent
