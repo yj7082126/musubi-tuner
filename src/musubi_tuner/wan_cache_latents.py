@@ -23,6 +23,8 @@ import musubi_tuner.cache_latents as cache_latents
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
+black_image_latent = None  # global variable for black image latent, used in encode_and_save_batch_one_frame
+
 
 def encode_and_save_batch(vae: WanVAE, clip: Optional[CLIPModel], batch: list[ItemInfo], one_frame: bool = False):
     if one_frame:
@@ -148,6 +150,14 @@ def encode_and_save_batch_one_frame(vae: WanVAE, clip: Optional[CLIPModel], batc
     control_latent = latent[:, :, :-1, :, :]
     target_latent = latent[:, :, -1:, :, :]
 
+    # Create black image latent for the target frame
+    global black_image_latent
+    if black_image_latent is None:
+        with torch.amp.autocast(device_type=vae.device.type, dtype=vae.dtype), torch.no_grad():
+            black_image_latent = vae.encode(torch.zeros_like(contents[0:1, :, 0:1, :, :], device=vae.device, dtype=vae.dtype))[0]
+        black_image_latent = black_image_latent.to(vae.dtype)  # C, 1, H, W
+        black_image_latent = black_image_latent.cpu()  # move to CPU for saving
+
     # Vision encoding per‑item (once): use first content (first control content) because it is the start image
     images = contents[:, :, 0:1, :, :]  # B, C, F, H, W
     with torch.amp.autocast(device_type=clip.device.type, dtype=torch.float16), torch.no_grad():
@@ -156,7 +166,7 @@ def encode_and_save_batch_one_frame(vae: WanVAE, clip: Optional[CLIPModel], batc
 
     B, C, _, lat_h, lat_w = latent.shape
     for i, item in enumerate(batch):
-        latent = target_latent[i]  # B, C, H, W
+        latent = target_latent[i]  # C, 1, H, W
         F = contents.shape[2]  # number of frames
         y = torch.zeros((4 + C, F, lat_h, lat_w), dtype=vae.dtype, device=vae.device)  # conditioning
         l = torch.zeros((C, F, lat_h, lat_w), dtype=vae.dtype, device=vae.device)  # training latent
@@ -169,9 +179,11 @@ def encode_and_save_batch_one_frame(vae: WanVAE, clip: Optional[CLIPModel], batc
         ci = 0
         for j, index in enumerate(f_indices):
             if index == item.fp_1f_target_index:
-                # This is the target frame, do not set control latent
-                l[:, j, :, :] = latent[0]  # set target latent
+                # print(f"Set target latent. latent shape: {latent.shape}, black_image_latent shape: {black_image_latent.shape}")
+                y[4:, j : j + 1, :, :] = black_image_latent
+                l[:, j : j + 1, :, :] = latent  # set target latent
             else:
+                # print(f"Set control latent. control_latent shape: {control_latent[i, :, ci, :, :].shape}")
                 y[:4, j, :, :] = 1.0  # set mask to 1.0 for the clean latent frames
                 y[4:, j, :, :] = control_latent[i, :, ci, :, :]  # set control latent
                 l[:, j, :, :] = control_latent[i, :, ci, :, :]  # also set control latent to training latent
