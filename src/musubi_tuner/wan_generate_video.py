@@ -249,6 +249,9 @@ def parse_prompt_line(line: str) -> Dict[str, Any]:
 
     # Create dictionary of overrides
     overrides = {"prompt": prompt}
+    # Initialize control_image_path and control_image_mask_path as a list to accommodate multiple paths
+    overrides["control_image_path"] = []
+    overrides["control_image_mask_path"] = []
 
     for part in parts[1:]:
         if not part.strip():
@@ -285,6 +288,12 @@ def parse_prompt_line(line: str) -> Dict[str, Any]:
             overrides["control_image_mask_path"].append(value)
         elif option == "of":  # one_frame_inference
             overrides["one_frame_inference"] = value
+
+    # If no control_image_path was provided, remove the empty list
+    if not overrides["control_image_path"]:
+        del overrides["control_image_path"]
+    if not overrides["control_image_mask_path"]:
+        del overrides["control_image_mask_path"]
 
     return overrides
 
@@ -823,6 +832,8 @@ def prepare_one_frame_inference(
 
     # TODO mask is not supported yet
 
+    vae.to_device(device)
+
     with accelerator.autocast(), torch.no_grad():
         black_image_latent = vae.encode([torch.zeros((3, 1, height, width), dtype=torch.float32, device=device)])[0]
 
@@ -830,7 +841,6 @@ def prepare_one_frame_inference(
     if control_image_tensors is not None:
         # encode image to latent space with VAE
         logger.info(f"Encoding image to latent space")
-        vae.to_device(device)
 
         for ctrl_image_tensor in control_image_tensors:
             # encode image one by one
@@ -838,7 +848,7 @@ def prepare_one_frame_inference(
                 control_latent = vae.encode([ctrl_image_tensor.to(device)])[0]
             control_latents.append(control_latent)
 
-        vae.to_device("cpu")
+    vae.to_device("cpu")
 
     lat_f = 1 + (len(control_latents) if control_latents is not None else 0)
 
