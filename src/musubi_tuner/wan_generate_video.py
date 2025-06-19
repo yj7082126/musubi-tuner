@@ -1374,6 +1374,7 @@ def generate(
     latent = run_sampling(model, noise, scheduler, timesteps, args, inputs, device, seed_g, accelerator, is_i2v)
     if one_frame_inference_index is not None:
         latent = latent[:, one_frame_inference_index : one_frame_inference_index + 1, :]
+        latent = latent.contiguous()  # safetensors requires contiguous tensors :(
 
     # Only clean up shared models if they were created within this function
     if shared_models is None:
