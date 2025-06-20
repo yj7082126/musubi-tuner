@@ -53,7 +53,7 @@ The optimal training settings are currently unknown. Feedback is welcome.
 
 ### Example of prompt file description for sample generation
 
-The description is almost the same as for FramePack. The command line option `--one_frame_inference` corresponds to `--of`, and `--control_image_path` corresponds to `--ci`.
+The description is almost the same as for FramePack. The command line option `--one_frame_inference` corresponds to `--of`, and `--control_image_path` corresponds to `--ci`. `--ei` is used to specify the ending image.
 
 Note that while `--ci` can be specified multiple times, it should be specified as `--ci img1.png --ci img2.png`, unlike `--control_image_path` which is specified as `--control_image_path img1.png img2.png`.
 
@@ -64,7 +64,7 @@ The girl wears a school uniform. --i path/to/start.png --ci path/to/start.png --
 
 For intermediate frame one-frame training
 ```
-The girl wears a school uniform. --i path/to/start.png --ci path/to/reference.png --ci path/to/start.png --of target_index=5,control_index=0;10 --d 1111 --f 1 --s 10 --fs 7 --d 1234 --w 384 --h 576
+The girl wears a school uniform. --i path/to/start.png --ei path/to/end.png --ci path/to/start.png --ci path/to/end.png --of target_index=5,control_index=0;10 --d 1111 --f 1 --s 10 --fs 7 --d 1234 --w 384 --h 576
 ```
 
 <details>
@@ -89,18 +89,18 @@ The girl wears a school uniform. --i path/to/start.png --ci path/to/reference.pn
 
 **サンプル生成のプロンプトファイル記述例**
 
-FramePackとほぼ同様です。コマンドラインオプション`--one_frame_inference`に相当する `--of`と、`--control_image_path`に相当する`--ci`が用意されています。
+FramePackとほぼ同様です。コマンドラインオプション`--one_frame_inference`に相当する `--of`と、`--control_image_path`に相当する`--ci`が用意されています。`--ei`は終端画像を指定します。
 
-※ `--ci`は複数指定可能ですが、`--control_image_path`は`--control_image_path img1.png img2.png`のようにスペースで区切るのに対して、`--ci`は`--ci img1.png --ci img2.png`のように指定するので注意してください。
+※ `--control_image_path`は`--control_image_path img1.png img2.png`のようにスペースで区切るのに対して、`--ci`は`--ci img1.png --ci img2.png`のように指定するので注意してください。
 
 通常の1フレーム学習:
 ```
 The girl wears a school uniform. --i path/to/start.png --ci path/to/start.png --of target_index=1,control_index=0 --d 1111 --f 1 --s 10 --fs 7 --d 1234 --w 384 --h 576
 ```
 
-中間フレームの1フレーム学習:
+中間フレームの1フレーム学習（開始画像と終端画像の両方を指定）:
 ```
-The girl wears a school uniform. --i path/to/start.png --ci path/to/reference.png --ci path/to/start.png --of target_index=5,control_index=0;10 --d 1111 --f 1 --s 10 --fs 7 --d 1234 --w 384 --h 576
+The girl wears a school uniform. --i path/to/start.png --ei path/to/end.png --ci path/to/start.png --ci path/to/end.png --of target_index=5,control_index=0;10 --d 1111 --f 1 --s 10 --fs 7 --d 1234 --w 384 --h 576
 ```
 
 </details>
@@ -121,13 +121,15 @@ An example description is as follows:
 To perform one-frame inference for intermediate frames, specify multiple indices for `control_index` separated by semicolons. The description is as follows:
 
 ```bash
---output_type latent_images --image_path start_image.png --control_image_path start_image.png clean_latent_post_image.png \
+--output_type latent_images --image_path start_image.png --control_image_path start_image.png end_image.png \
 --one_frame_inference control_index=0;10,target_index=5
 ```
 
 When specifying `--output_type` as `latent_images`, both latent and image will be saved.
 
-The `--image_path` is used to obtain CLIP features for one-frame inference. Usually, the starting image should be specified. The `--control_image_path` is a newly added argument to specify the control image.
+The `--image_path` is used to obtain CLIP features for one-frame inference. Usually, the starting image should be specified. The `--end_image_path` is used to obtain CLIP features for the ending image. Usually, the ending image should be specified.
+
+The `--control_image_path` is a newly added argument to specify the control image. Usually, the starting image (and both starting and ending images for intermediate frame inference) should be specified.
 
 The options for `--one_frame_inference` are specified as comma-separated values. Here, the index represents the RoPE timestamp.
 
@@ -155,13 +157,15 @@ The optimal values for `target_index` and `control_index` are unknown. Please sp
 中間フレームの1フレーム推論を行うには、`control_index`にセミコロン区切りで複数のインデックスを指定します。以下のように記述します。
 
 ```bash
---output_type latent_images --image_path start_image.png --control_image_path start_image.png clean_latent_post_image.png \
---one_frame_inference control_index=0;10,target_index=5
+--output_type latent_images --image_path start_image.png --end_image_path end_image.png \
+--control_image_path start_image.png end_image.png --one_frame_inference control_index=0;10,target_index=5
 ```
 
 `--output_type`に`latent_images`を指定するとlatentと画像の両方が保存されます。
 
-`--image_path`は、1フレーム推論ではCLIPの特徴量を取得するために用いられます。通常は開始画像を指定してください。`--control_image_path`は新しく追加された引数で、制御用画像を指定するために用いられます。
+`--image_path`は、1フレーム推論ではCLIPの特徴量を取得するために用いられます。通常は開始画像を指定してください。`--end_image_path`は、終了画像のCLIP特徴量を取得するために用いられます。通常は終了画像を指定してください。
+
+`--control_image_path`は新しく追加された引数で、制御用画像を指定するために用いられます。通常は開始画像（中間フレーム推論の場合は開始画像と終了画像の両方）を指定してください。
 
 `--one_frame_inference`のオプションには、カンマ区切りで以下のオプションを指定します。ここでindexはRoPEのタイムスタンプを表します。
 
