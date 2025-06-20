@@ -161,9 +161,19 @@ def encode_and_save_batch_one_frame(vae: WanVAE, clip: Optional[CLIPModel], batc
     black_image_latent = black_image_latents[shape]  # [C, 1, H, W]
 
     # Vision encoding per‑item (once): use first content (first control content) because it is the start image
-    images = contents[:, :, 0:1, :, :]  # B, C, F, H, W
-    with torch.amp.autocast(device_type=clip.device.type, dtype=torch.float16), torch.no_grad():
-        clip_context = clip.visual(images)
+    num_control_images = contents.shape[2] - 1  # number of control images
+    if num_control_images > 2:
+        logger.error(f"One frame training requires 1 or 2 control images, but found {num_control_images} in {batch[0].item_key}. ")
+        raise ValueError(
+            f"One frame training requires 1 or 2 control images, but found {num_control_images} in {batch[0].item_key}."
+        )
+
+    images = contents[:, :, 0:num_control_images, :, :]  # B, C, F, H, W
+    clip_context = []
+    for i in range(images.shape[0]):
+        with torch.amp.autocast(device_type=clip.device.type, dtype=torch.float16), torch.no_grad():
+            clip_context.append(clip.visual(images[i : i + 1]))
+    clip_context = torch.stack(clip_context, dim=0) # B, num_control_images, N, D
     clip_context = clip_context.to(torch.float16)  # convert to fp16
 
     B, C, _, lat_h, lat_w = latent.shape

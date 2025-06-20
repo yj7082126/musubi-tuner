@@ -51,7 +51,8 @@ class WanNetworkTrainer(NetworkTrainer):
 
     def handle_model_specific_args(self, args):
         self.config = WAN_CONFIGS[args.task]
-        self._i2v_training = "i2v" in args.task  # we cannot use config.i2v because Fun-Control T2V has i2v flag TODO refactor this
+        # we cannot use config.i2v because Fun-Control T2V has i2v flag TODO refactor this
+        self._i2v_training = "i2v" in args.task or "flf2v" in args.task
         self._control_training = self.config.is_fun_control
 
         self.dit_dtype = detect_wan_sd_dtype(args.dit)
@@ -230,6 +231,7 @@ class WanNetworkTrainer(NetworkTrainer):
 
         if one_frame_mode:
             # One frame inference mode
+            print(f"One frame inference mode: target_index={target_index}, control_indices={control_indices}, f_indices={f_indices}")
             vae.to(device)
             vae.eval()
 
@@ -457,6 +459,13 @@ class WanNetworkTrainer(NetworkTrainer):
             image_latents = image_latents.to(device=accelerator.device, dtype=network_dtype)
             clip_fea = batch["clip"]
             clip_fea = clip_fea.to(device=accelerator.device, dtype=network_dtype)
+
+            # clip_fea is [B, 1, N, D]  for I2V, and [B, 2, N, D] for FLF2V, we need to reshape it to [B, N, D] for I2V and [B*2, N, D] for FLF2V
+            if clip_fea.shape[1] == 1:
+                clip_fea = clip_fea.squeeze(1)
+            elif clip_fea.shape[1] == 2:
+                clip_fea = clip_fea.view(-1, clip_fea.shape[2], clip_fea.shape[3])
+
         if self.control_training:
             control_latents = batch["latents_control"]
             control_latents = control_latents.to(device=accelerator.device, dtype=network_dtype)
