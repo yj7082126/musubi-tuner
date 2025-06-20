@@ -1421,7 +1421,7 @@ class ImageDataset(BaseDataset):
                     item_info.fp_1f_target_index = self.fp_1f_target_index
                     item_info.fp_1f_no_post = self.fp_1f_no_post
 
-                    if self.architecture == ARCHITECTURE_FRAMEPACK:
+                    if self.architecture == ARCHITECTURE_FRAMEPACK or self.architecture == ARCHITECTURE_WAN:
                         # we need to split the bucket with latent window size and optional 1f clean indices, zero post
                         bucket_reso = list(bucket_reso) + [self.fp_latent_window_size]
                         if self.fp_1f_clean_indices is not None:
@@ -1513,7 +1513,7 @@ class ImageDataset(BaseDataset):
 
             bucket_reso = bucket_selector.get_bucket_resolution(image_size)
 
-            if self.architecture == ARCHITECTURE_FRAMEPACK:
+            if self.architecture == ARCHITECTURE_FRAMEPACK or self.architecture == ARCHITECTURE_WAN:
                 # we need to split the bucket with latent window size and optional 1f clean indices, zero post
                 bucket_reso = list(bucket_reso) + [self.fp_latent_window_size]
                 if self.fp_1f_clean_indices is not None:

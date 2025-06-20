@@ -23,7 +23,7 @@ import musubi_tuner.cache_latents as cache_latents
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-black_image_latent = None  # global variable for black image latent, used in encode_and_save_batch_one_frame
+black_image_latents = {}  # global variable for black image latent, used in encode_and_save_batch_one_frame. key: tuple for shape
 
 
 def encode_and_save_batch(vae: WanVAE, clip: Optional[CLIPModel], batch: list[ItemInfo], one_frame: bool = False):
@@ -151,12 +151,14 @@ def encode_and_save_batch_one_frame(vae: WanVAE, clip: Optional[CLIPModel], batc
     target_latent = latent[:, :, -1:, :, :]
 
     # Create black image latent for the target frame
-    global black_image_latent
-    if black_image_latent is None:
+    global black_image_latents
+    shape = (1, contents.shape[1], 1, contents.shape[3], contents.shape[4])  # B=1, C, F=1, H, W
+    if shape not in black_image_latents:
         with torch.amp.autocast(device_type=vae.device.type, dtype=vae.dtype), torch.no_grad():
-            black_image_latent = vae.encode(torch.zeros_like(contents[0:1, :, 0:1, :, :], device=vae.device, dtype=vae.dtype))[0]
-        black_image_latent = black_image_latent.to(vae.dtype)  # C, 1, H, W
-        black_image_latent = black_image_latent.cpu()  # move to CPU for saving
+            black_image_latent = vae.encode(torch.zeros(shape, device=vae.device, dtype=vae.dtype))[0]
+        black_image_latent = black_image_latent.to(device="cpu", dtype=vae.dtype)
+        black_image_latents[shape] = black_image_latent  # store for future use
+    black_image_latent = black_image_latents[shape]  # [C, 1, H, W]
 
     # Vision encoding per‑item (once): use first content (first control content) because it is the start image
     images = contents[:, :, 0:1, :, :]  # B, C, F, H, W
