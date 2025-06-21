@@ -982,6 +982,7 @@ def prepare_i2v_inputs(
         one_frame_inference_index, y, f_indices = prepare_one_frame_inference(
             args, accelerator, vae, device, lat_h, lat_w, height, width
         )
+        max_seq_len = len(f_indices) * lat_h * lat_w // (config.patch_size[1] * config.patch_size[2])
     else:
         one_frame_inference_index, f_indices = None, None
 
@@ -1011,14 +1012,22 @@ def prepare_i2v_inputs(
 
         # encode image to latent space
         with accelerator.autocast(), torch.no_grad():
-            # padding to match the required number of frames
-            padding_frames = frames - 1  # the first frame is image
-            img_resized = torch.concat([img_resized, torch.zeros(3, padding_frames, height, width, device=device)], dim=1)
-            y = vae.encode([img_resized])[0]
+            if not config.flf2v or not has_end_image:
+                # padding to match the required number of frames
+                padding_frames = frames - 1  # the first frame is image
+                img_resized = torch.concat([img_resized, torch.zeros(3, padding_frames, height, width, device=device)], dim=1)
+                y = vae.encode([img_resized])[0]
 
-            if has_end_image:
-                y_end = vae.encode([end_img_resized])[0]
-                y = torch.concat([y, y_end], dim=1)  # add end frame
+                if has_end_image:
+                    y_end = vae.encode([end_img_resized])[0]
+                    y = torch.concat([y, y_end], dim=1)  # add end frame
+            else:
+                # FLF2V: encode image and end image together
+                padding_frames = frames - 2  # first and last frames are images
+                img_resized = torch.concat(
+                    [img_resized, torch.zeros(3, padding_frames, height, width, device=device), end_img_resized], dim=1
+                )
+                y = vae.encode([img_resized])[0]
 
         y = torch.concat([msk, y])
         logger.info(f"Encoding complete")

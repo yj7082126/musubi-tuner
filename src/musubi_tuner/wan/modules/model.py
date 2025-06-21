@@ -765,8 +765,8 @@ class WanModel(nn.Module):  # ModelMixin, ConfigMixin):
             y = None
 
         # embeddings
-        x = [self.patch_embedding(u.unsqueeze(0)) for u in x]
-        grid_sizes = torch.stack([torch.tensor(u.shape[2:], dtype=torch.long) for u in x])
+        x = [self.patch_embedding(u.unsqueeze(0)) for u in x] # x[0].shape = [1, 5120, F, H, W]
+        grid_sizes = torch.stack([torch.tensor(u.shape[2:], dtype=torch.long) for u in x]) # list of [F, H, W]
 
         freqs_list = []
         for i, fhw in enumerate(grid_sizes):
