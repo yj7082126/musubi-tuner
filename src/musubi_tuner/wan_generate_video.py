@@ -277,6 +277,8 @@ def parse_prompt_line(line: str) -> Dict[str, Any]:
             overrides["flow_shift"] = float(value)
         elif option == "i":
             overrides["image_path"] = value
+        elif option == "ei":
+            overrides["end_image_path"] = value
         elif option == "cn":
             overrides["control_path"] = value
         elif option == "n":
@@ -1676,6 +1678,12 @@ def process_batch_prompts(prompts_data: List[Dict], args: argparse.Namespace) ->
             with torch.amp.autocast(device_type=device.type, dtype=torch.float16), torch.no_grad():
                 clip_context = clip.visual([img_tensor[:, None, :, :]])
 
+            if prompt_args.end_image_path is not None and os.path.exists(prompt_args.end_image_path):
+                end_img = Image.open(prompt_args.end_image_path).convert("RGB")
+                end_img_tensor = TF.to_tensor(end_img).sub_(0.5).div_(0.5).to(device)
+                end_clip_context = clip.visual([end_img_tensor[:, None, :, :]])
+                clip_context = torch.concat([clip_context, end_clip_context], dim=0)
+
             encoded_contexts[prompt_data["prompt"]]["clip_context"] = clip_context
 
         # Free CLIP and clean memory
@@ -1782,7 +1790,7 @@ def process_interactive(args: argparse.Namespace) -> None:
         gen_settings.dit_weight_dtype,
         gen_settings.vae_dtype,
     )
-    is_i2v = "i2v" in args.task
+    is_i2v = "i2v" in args.task or "flf2v" in args.task
 
     # Initialize models to None
     text_encoder = None
@@ -1866,6 +1874,13 @@ def process_interactive(args: argparse.Namespace) -> None:
                         with torch.amp.autocast(device_type=device.type, dtype=torch.float16), torch.no_grad():
                             clip_context = clip.visual([img_tensor[:, None, :, :]])
 
+                        if prompt_args.end_image_path is not None and os.path.exists(prompt_args.end_image_path):
+                            end_img = Image.open(prompt_args.end_image_path).convert("RGB")
+                            end_img_tensor = TF.to_tensor(end_img).sub_(0.5).div_(0.5).to(device)
+                            with torch.amp.autocast(device_type=device.type, dtype=torch.float16), torch.no_grad():
+                                end_clip_context = clip.visual([end_img_tensor[:, None, :, :]])
+                            clip_context = torch.concat([clip_context, end_clip_context], dim=0)
+                            
                         encoded_context["clip_context"] = clip_context
 
                     # Move CLIP to CPU after use
