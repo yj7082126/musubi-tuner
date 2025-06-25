@@ -87,7 +87,7 @@ def calculate_freqs_i(fhw, c, freqs, f_indices=None):
     if f_indices is None:
         freqs_f = freqs[0][:f]
     else:
-        print(f"Using f_indices: {f_indices} for rotary embedding. fhw: {fhw}")
+        logger.info(f"Using f_indices: {f_indices} for rotary embedding. fhw: {fhw}")
         freqs_f = freqs[0][f_indices]
 
     freqs_i = torch.cat(
