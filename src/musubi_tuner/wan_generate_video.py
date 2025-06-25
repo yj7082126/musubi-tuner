@@ -963,11 +963,11 @@ def prepare_i2v_inputs(
         logger.info(f"Encoding image to CLIP context")
         with torch.amp.autocast(device_type=device.type, dtype=torch.float16), torch.no_grad():
             clip_context = clip.visual([img_tensor[:, None, :, :]])
-            if end_img is not None:
+            # I2V end image is not officially supported, so no additional CLIP context
+            if end_img is not None and config.flf2v: 
                 end_img_tensor = TF.to_tensor(end_img).sub_(0.5).div_(0.5).to(device)
                 end_clip_context = clip.visual([end_img_tensor[:, None, :, :]])
                 clip_context = torch.concat([clip_context, end_clip_context], dim=0)
-                print(f"CLIP context shape: {clip_context.shape}")
         logger.info(f"Encoding complete")
 
         # free CLIP model and clean memory
@@ -981,6 +981,8 @@ def prepare_i2v_inputs(
 
     # check if one frame inference is enabled
     if args.one_frame_inference is not None:
+        if has_end_image and not config.flf2v:
+            logger.warning("One frame inference with end image is not supported other than FLF2V")
         one_frame_inference_index, y, f_indices = prepare_one_frame_inference(
             args, accelerator, vae, device, lat_h, lat_w, height, width
         )
