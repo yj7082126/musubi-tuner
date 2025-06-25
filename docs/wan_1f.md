@@ -29,79 +29,6 @@ This document describes the application of "One Frame Inference" found in the Fr
 2.  **中間フレームの1フレーム推論**:
     *   kisekaeichi方式と似た、FLF2V (First and Last Frame to Video) 方式を利用し、中間のフレームを生成します。FLF2Vモデルを使用します。
     *   生成する画像のRoPEタイムスタンプを、開始画像のタイムスタンプと終端画像のタイムスタンプの中間的な値に設定します。
-    *   （理論的な提案、実装のみで現時点では未テストです。）
-
-</details>
-
-## One Frame (Single Frame) Training / 1フレーム学習
-
-**This feature is experimental.** It performs training in a manner similar to one-frame inference.
-
-This currently reuses the dataset settings of the FramePack model. Please refer to the [FramePack documentation](./framepack_1f.md#one-frame-single-frame-training--1フレーム学習) and the [FramePack dataset settings](../src/musubi_tuner/dataset/dataset_config.md#framepack-one-frame-training).
-
-`fp_1f_clean_indices` corresponds to the `control_index` described below.
-
-However, `fp_1f_no_post` is ignored in Wan2.1, and alpha masks are not yet supported.
-
-When performing one-frame training, please create the cache by specifying `--one_frame` in `wan_cache_latents.py`. Also, specify `--one_frame` in `wan_train_network.py` to change the inference method for sample image generation.
-
-In one-frame training, the I2V 14B model is used. Specify `--task i2v-14B` and the corresponding weights. For intermediate frame one-frame training, the FLF2V model is used. Specify `--task flf2v-14B` and the corresponding weights.
-
-**Note**: The training of the FLF2V model has not been tested.
-
-The optimal training settings are currently unknown. Feedback is welcome.
-
-### Example of prompt file description for sample generation
-
-The description is almost the same as for FramePack. The command line option `--one_frame_inference` corresponds to `--of`, and `--control_image_path` corresponds to `--ci`. `--ei` is used to specify the ending image.
-
-Note that while `--ci` can be specified multiple times, it should be specified as `--ci img1.png --ci img2.png`, unlike `--control_image_path` which is specified as `--control_image_path img1.png img2.png`.
-
-For normal one-frame training:
-```
-The girl wears a school uniform. --i path/to/start.png --ci path/to/start.png --of target_index=1,control_index=0 --d 1111 --f 1 --s 10 --fs 7 --d 1234 --w 384 --h 576
-```
-
-For intermediate frame one-frame training
-```
-The girl wears a school uniform. --i path/to/start.png --ei path/to/end.png --ci path/to/start.png --ci path/to/end.png --of target_index=5,control_index=0;10 --d 1111 --f 1 --s 10 --fs 7 --d 1234 --w 384 --h 576
-```
-
-<details>
-<summary>日本語</summary>
-
-**この機能は実験的なものです。** 1フレーム推論と同様の方法で学習を行います。
-
-現在は、FramePackモデルのデータセット設定を流用しています。[FramePackのドキュメント](./framepack_1f.md#one-frame-single-frame-training--1フレーム学習)および
-[FramePackのデータセット設定](../src/musubi_tuner/dataset/dataset_config.md#framepack-one-frame-training)を参照してください。
-
-`fp_1f_clean_indices` が後述の `control_index` に相当します。
-
-ただし、`fp_1f_no_post`はWan2.1では無視されます。またアルファ値によるマスクも未対応です。
-
-1フレーム学習時は、`wan_cache_latents.py`に`--one_frame`を指定してキャッシュを作成してください。また、`wan_train_network.py`に`--one_frame`を指定してサンプル画像生成時の推論方法を変更してください。
-
-1フレーム学習ではI2Vの14Bモデルを使用します。`--task i2v-14B`を指定し、該当する重みを指定してください。中間フレームの1フレーム学習では、FLF2Vモデルを使用します。`--task flf2v-14B`を指定し、該当する重みを指定してください。
-
-※FLF2Vモデルの学習は未テスト。
-
-最適な学習設定は今のところ不明です。フィードバックを歓迎します。
-
-**サンプル生成のプロンプトファイル記述例**
-
-FramePackとほぼ同様です。コマンドラインオプション`--one_frame_inference`に相当する `--of`と、`--control_image_path`に相当する`--ci`が用意されています。`--ei`は終端画像を指定します。
-
-※ `--control_image_path`は`--control_image_path img1.png img2.png`のようにスペースで区切るのに対して、`--ci`は`--ci img1.png --ci img2.png`のように指定するので注意してください。
-
-通常の1フレーム学習:
-```
-The girl wears a school uniform. --i path/to/start.png --ci path/to/start.png --of target_index=1,control_index=0 --d 1111 --f 1 --s 10 --fs 7 --d 1234 --w 384 --h 576
-```
-
-中間フレームの1フレーム学習（開始画像と終端画像の両方を指定）:
-```
-The girl wears a school uniform. --i path/to/start.png --ei path/to/end.png --ci path/to/start.png --ci path/to/end.png --of target_index=5,control_index=0;10 --d 1111 --f 1 --s 10 --fs 7 --d 1234 --w 384 --h 576
-```
 
 </details>
 
@@ -122,7 +49,7 @@ To perform one-frame inference for intermediate frames, specify multiple indices
 
 ```bash
 --output_type latent_images --image_path start_image.png --control_image_path start_image.png end_image.png \
---one_frame_inference control_index=0;10,target_index=5
+--one_frame_inference control_index=0;2,target_index=1
 ```
 
 When specifying `--output_type` as `latent_images`, both latent and image will be saved.
@@ -136,9 +63,7 @@ The options for `--one_frame_inference` are specified as comma-separated values.
 - `target_index=<integer>`: Specifies the index of the generated image.
 - `control_index=<integer or semicolon-separated integers>`: Specifies the index of the control image. Please specify the same number of indices as the number of control images specified in `--control_image_path`.
 
-The optimal values for `target_index` and `control_index` are unknown. Please specify `target_index` as 1 or greater. For one-frame inference, specify `control_index=0`. For intermediate frame one-frame inference, specify `control_index=0;10`, where 0 and a value greater than `target_index` are specified.
-
-**Note**: Inference with the FLF2V model has not been tested.
+The optimal values for `target_index` and `control_index` are unknown. Please specify `target_index` as 1 or greater. For one-frame inference, specify `control_index=0`. For intermediate frame one-frame inference, specify `control_index=0;2`, where 0 and a value greater than `target_index` are specified.
 
 <details>
 <summary>日本語</summary>
@@ -158,7 +83,7 @@ The optimal values for `target_index` and `control_index` are unknown. Please sp
 
 ```bash
 --output_type latent_images --image_path start_image.png --end_image_path end_image.png \
---control_image_path start_image.png end_image.png --one_frame_inference control_index=0;10,target_index=5
+--control_image_path start_image.png end_image.png --one_frame_inference control_index=0;2,target_index=1
 ```
 
 `--output_type`に`latent_images`を指定するとlatentと画像の両方が保存されます。
@@ -172,8 +97,79 @@ The optimal values for `target_index` and `control_index` are unknown. Please sp
 - `target_index=<整数>`: 生成する画像のindexを指定します。
 - `control_index=<整数またはセミコロン区切りの整数>`: 制御用画像のindexを指定します。`--control_image_path`で指定した制御用画像の数と同じ数のインデックスを指定してください。
 
-`target_index`、`control_index`の最適値は不明です。`target_index`は1以上を指定してください。`control_index`は、1フレーム推論では`control_index=0`を指定します。中間フレームの1フレーム推論では、`control_index=0;10`のように、0と`target_index`より大きい値を指定します。
-
-※FLF2Vモデルの推論は未テスト。
+`target_index`、`control_index`の最適値は不明です。`target_index`は1以上を指定してください。`control_index`は、1フレーム推論では`control_index=0`を指定します。中間フレームの1フレーム推論では、`control_index=0;2`のように、0と`target_index`より大きい値を指定します。
 
 </details>
+
+## One Frame (Single Frame) Training / 1フレーム学習
+
+**This feature is experimental.** It performs training in a manner similar to one-frame inference.
+
+This currently reuses the dataset settings of the FramePack model. Please refer to the [FramePack documentation](./framepack_1f.md#one-frame-single-frame-training--1フレーム学習) and the [FramePack dataset settings](../src/musubi_tuner/dataset/dataset_config.md#framepack-one-frame-training).
+
+`fp_1f_clean_indices` corresponds to the `control_index` described below.
+
+However, `fp_1f_no_post` is ignored in Wan2.1, and alpha masks are not yet supported.
+
+When performing one-frame training, please create the cache by specifying `--one_frame` in `wan_cache_latents.py`. Also, specify `--one_frame` in `wan_train_network.py` to change the inference method for sample image generation.
+
+In one-frame training, the I2V 14B model is used. Specify `--task i2v-14B` and the corresponding weights. For intermediate frame one-frame training, the FLF2V model is used. Specify `--task flf2v-14B` and the corresponding weights.
+
+In simple experiments for intermediate frame one-frame training, using `control_index=0;2`, `target_index=1` (in dataset settings, `fp_1f_clean_indices = [0, 2]`, `fp_1f_target_index = 1`), yielded better results than `0;10` and `5`.
+
+The optimal training settings are currently unknown. Feedback is welcome.
+
+### Example of prompt file description for sample generation
+
+The description is almost the same as for FramePack. The command line option `--one_frame_inference` corresponds to `--of`, and `--control_image_path` corresponds to `--ci`. `--ei` is used to specify the ending image.
+
+Note that while `--ci` can be specified multiple times, it should be specified as `--ci img1.png --ci img2.png`, unlike `--control_image_path` which is specified as `--control_image_path img1.png img2.png`.
+
+For normal one-frame training:
+```
+The girl wears a school uniform. --i path/to/start.png --ci path/to/start.png --of target_index=1,control_index=0 --d 1111 --f 1 --s 10 --fs 7 --d 1234 --w 384 --h 576
+```
+
+For intermediate frame one-frame training
+```
+The girl wears a school uniform. --i path/to/start.png --ei path/to/end.png --ci path/to/start.png --ci path/to/end.png --of target_index=1,control_index=0;2 --d 1111 --f 1 --s 10 --fs 7 --d 1234 --w 384 --h 576
+```
+
+<details>
+<summary>日本語</summary>
+
+**この機能は実験的なものです。** 1フレーム推論と同様の方法で学習を行います。
+
+現在は、FramePackモデルのデータセット設定を流用しています。[FramePackのドキュメント](./framepack_1f.md#one-frame-single-frame-training--1フレーム学習)および
+[FramePackのデータセット設定](../src/musubi_tuner/dataset/dataset_config.md#framepack-one-frame-training)を参照してください。
+
+`fp_1f_clean_indices` が後述の `control_index` に相当します。
+
+ただし、`fp_1f_no_post`はWan2.1では無視されます。またアルファ値によるマスクも未対応です。
+
+1フレーム学習時は、`wan_cache_latents.py`に`--one_frame`を指定してキャッシュを作成してください。また、`wan_train_network.py`に`--one_frame`を指定してサンプル画像生成時の推論方法を変更してください。
+
+1フレーム学習ではI2Vの14Bモデルを使用します。`--task i2v-14B`を指定し、該当する重みを指定してください。中間フレームの1フレーム学習では、FLF2Vモデルを使用します。`--task flf2v-14B`を指定し、該当する重みを指定してください。
+
+中間フレーム学習の簡単な実験では、`control_index=0;2`、`target_index=1`が（データセット設定では `fp_1f_clean_indices = [0, 2]`、`fp_1f_target_index = 1`）、`0;10`および`5`よりも良い結果を得られました。
+
+最適な学習設定は今のところ不明です。フィードバックを歓迎します。
+
+**サンプル生成のプロンプトファイル記述例**
+
+FramePackとほぼ同様です。コマンドラインオプション`--one_frame_inference`に相当する `--of`と、`--control_image_path`に相当する`--ci`が用意されています。`--ei`は終端画像を指定します。
+
+※ `--control_image_path`は`--control_image_path img1.png img2.png`のようにスペースで区切るのに対して、`--ci`は`--ci img1.png --ci img2.png`のように指定するので注意してください。
+
+通常の1フレーム学習:
+```
+The girl wears a school uniform. --i path/to/start.png --ci path/to/start.png --of target_index=1,control_index=0 --d 1111 --f 1 --s 10 --fs 7 --d 1234 --w 384 --h 576
+```
+
+中間フレームの1フレーム学習（開始画像と終端画像の両方を指定）:
+```
+The girl wears a school uniform. --i path/to/start.png --ei path/to/end.png --ci path/to/start.png --ci path/to/end.png --of target_index=1,control_index=0;2 --d 1111 --f 1 --s 10 --fs 7 --d 1234 --w 384 --h 576
+```
+
+</details>
+

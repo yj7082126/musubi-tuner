@@ -231,7 +231,9 @@ class WanNetworkTrainer(NetworkTrainer):
 
         if one_frame_mode:
             # One frame inference mode
-            print(f"One frame inference mode: target_index={target_index}, control_indices={control_indices}, f_indices={f_indices}")
+            logger.info(
+                f"One frame inference mode: target_index={target_index}, control_indices={control_indices}, f_indices={f_indices}"
+            )
             vae.to(device)
             vae.eval()
 
@@ -460,7 +462,7 @@ class WanNetworkTrainer(NetworkTrainer):
             clip_fea = batch["clip"]
             clip_fea = clip_fea.to(device=accelerator.device, dtype=network_dtype)
 
-            # clip_fea is [B, 1, N, D]  for I2V, and [B, 2, N, D] for FLF2V, we need to reshape it to [B, N, D] for I2V and [B*2, N, D] for FLF2V
+            # clip_fea is [B, N, D] (normal) or [B, 1, N, D] (one frame) for I2V, and [B, 2, N, D] for FLF2V, we need to reshape it to [B, N, D] for I2V and [B*2, N, D] for FLF2V
             if clip_fea.shape[1] == 1:
                 clip_fea = clip_fea.squeeze(1)
             elif clip_fea.shape[1] == 2:
