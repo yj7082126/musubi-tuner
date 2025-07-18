@@ -23,7 +23,7 @@ from tqdm import tqdm
 from musubi_tuner.networks import lora_framepack
 from musubi_tuner.hunyuan_model.autoencoder_kl_causal_3d import AutoencoderKLCausal3D
 from musubi_tuner.frame_pack import hunyuan
-from musubi_tuner.frame_pack.hunyuan_video_packed import load_packed_model
+from musubi_tuner.frame_pack.hunyuan_video_packed import load_packed_model, attn_cache
 from musubi_tuner.frame_pack.hunyuan_video_packed_inference import HunyuanVideoTransformer3DModelPackedInference
 from musubi_tuner.frame_pack.utils import crop_or_pad_yield_mask, resize_and_center_crop, soft_append_bcthw
 from musubi_tuner.frame_pack.bucket_tools import find_nearest_bucket
@@ -1371,6 +1371,7 @@ def generate(
 
             preprocess_magcache(args, model)
 
+            attn_cache.clear()
             generated_latents = sample_hunyuan(
                 transformer=model,
                 sampler=args.sample_solver,
@@ -1399,6 +1400,7 @@ def generate(
                 clean_latent_2x_indices=clean_latent_2x_indices,
                 clean_latents_4x=clean_latents_4x,
                 clean_latent_4x_indices=clean_latent_4x_indices,
+                cache_results=False
             )
             postprocess_magcache(args, model)
 

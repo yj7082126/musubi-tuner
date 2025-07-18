@@ -10,7 +10,7 @@ from musubi_tuner.hunyuan_model.text_encoder import PROMPT_TEMPLATE
 
 
 @torch.no_grad()
-def encode_prompt_conds(prompt, text_encoder, text_encoder_2, tokenizer, tokenizer_2, max_length=256, custom_system_prompt=None):
+def encode_prompt_conds(prompt, text_encoder, text_encoder_2, tokenizer, tokenizer_2, max_length=256, custom_system_prompt=None, return_tokendict=False):
     assert isinstance(prompt, str)
 
     prompt = [prompt]
@@ -65,6 +65,10 @@ def encode_prompt_conds(prompt, text_encoder, text_encoder_2, tokenizer, tokeniz
 
     assert torch.all(llama_attention_mask.bool())
 
+    llama_tokens = llama_inputs.input_ids[0,crop_start:llama_attention_length].cpu().numpy()
+    llama_strtokens = [x.replace('Ġ', '') for x in tokenizer.convert_ids_to_tokens(llama_tokens)]
+    llama_strtokens = {i: x for i,x in enumerate(llama_strtokens)}
+
     # CLIP
 
     clip_l_input_ids = tokenizer_2(
@@ -78,7 +82,10 @@ def encode_prompt_conds(prompt, text_encoder, text_encoder_2, tokenizer, tokeniz
     ).input_ids
     clip_l_pooler = text_encoder_2(clip_l_input_ids.to(text_encoder_2.device), output_hidden_states=False).pooler_output
 
-    return llama_vec, clip_l_pooler
+    if return_tokendict:
+        return llama_vec, clip_l_pooler, llama_strtokens
+    else:
+        return llama_vec, clip_l_pooler
 
 
 @torch.no_grad()
