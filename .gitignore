@@ -6,3 +6,4 @@ uv.lock
 main.exp
 main.lib
 main.obj
+outputs/
