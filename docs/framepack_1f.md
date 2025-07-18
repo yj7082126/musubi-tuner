@@ -330,13 +330,26 @@ kisekaeichi方式は学習なしでも動作しますが、専用のLoRAを使�
 サンプル画像と再現のためのコマンドラインは以下のようになります。
 
 ```bash
-python fpack_generate_video.py --video_size 832 480 --video_sections 1 --infer_steps 25 \
-    --prompt "The girl in a school blazer in a classroom." --save_path path/to/output --output_type latent_images \
-    --dit path/to/dit --vae path/to/vae --text_encoder1 path/to/text_encoder1 --text_encoder2 path/to/text_encoder2 \
-    --image_encoder path/to/image_encoder --attn_mode sdpa --vae_spatial_tile_sample_min_size 128 --vae_chunk_size 32 \
-    --image_path path/to/kisekaeichi_start.png --control_image_path path/to/kisekaeichi_start.png path/to/kisekaeichi_ref.png 
-    --one_frame_inference target_index=1,control_index=0;10,no_2x,no_4x,no_post 
-    --control_image_mask_path path/to/kisekaeichi_start_mask.png path/to/kisekaeichi_ref_mask.png --seed 1234
+python fpack_generate_video.py \
+    --video_size 832 480 \
+    --video_sections 1 \
+    --infer_steps 25 \
+    --prompt "The girl in a school blazer in a classroom." \
+    --save_path outputs/ \
+    --output_type latent_images \
+    --dit /data/stale/patrickkwon/video/stable-diffusion-webui/models/Hunyuan/FramePackI2V_HY_bf16.safetensors \
+    --vae /data/stale/patrickkwon/video/stable-diffusion-webui/models/VAE/hunyuan-video-t2v-720p-vae.pt \
+    --text_encoder1 /shared/video/ComfyUI/models/text_encoders/llava_llama3_fp16.safetensors \
+    --text_encoder2 /shared/video/ComfyUI/models/text_encoders/clip_l.safetensors \
+    --image_encoder /shared/video/ComfyUI/models/clip_vision/sigclip_vision_patch14_384.safetensors \
+    --attn_mode sageattn \
+    --vae_spatial_tile_sample_min_size 128 \
+    --vae_chunk_size 32 \
+    --image_path docs/kisekaeichi_start.png \
+    --control_image_path docs/kisekaeichi_start.png docs/kisekaeichi_ref.png \
+    --one_frame_inference 'target_index=1,control_index=0;10,no_2x,no_4x,no_post' \
+    --control_image_mask_path docs/kisekaeichi_start_mask.png docs/kisekaeichi_ref_mask.png \
+    --seed 1234
 ```
 
 VRAM容量に応じて、`--fp8_scaled`や`--blocks_to_swap`等のオプションを調整してください。
