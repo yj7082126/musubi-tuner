@@ -86,7 +86,8 @@ def encode_and_save_batch(
     latents = latents.to("cpu")  # (B, C, latent_f, H/8, W/8)
 
     # Vision encoding per‑item (once)
-    images = np.stack([item.content[0] for item in batch], axis=0)  # B, H, W, C
+    # images = np.stack([item.content[0] for item in batch], axis=0)  # B, H, W, C
+    images = np.stack([item.embed_content for item in batch], axis=0)
 
     # encode image with image encoder
     image_embeddings = []
@@ -305,7 +306,8 @@ def encode_and_save_batch_one_frame(
                 latents[b : b + 1, :, i : i + 1] *= content_mask
 
     # Vision encoding per‑item (once): use control content because it is the start image
-    images = [item.control_content[0] for item in batch]  # list of [H, W, C]
+    # images = [item.control_content[0] for item in batch]  # list of [H, W, C]
+    images = [item.embed_content for item in batch]
 
     # encode image with image encoder
     image_embeddings = []

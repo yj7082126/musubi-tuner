@@ -93,7 +93,8 @@ class FramePackNetworkTrainer(NetworkTrainer):
         # encode image with image encoder
         sample_prompts_image_embs = {}
         for prompt_dict in prompts:
-            image_path = prompt_dict.get("image_path", None)
+            # image_path = prompt_dict.get("image_path", None)
+            image_path = prompt_dict.get("control_image_path", [None])[0]
             assert image_path is not None, "image_path should be set for I2V training"
             if image_path in sample_prompts_image_embs:
                 continue
@@ -134,7 +135,8 @@ class FramePackNetworkTrainer(NetworkTrainer):
             prompt_dict_copy["negative_llama_attention_mask"] = llama_attention_mask
             prompt_dict_copy["negative_clip_l_pooler"] = clip_l_pooler
 
-            p = prompt_dict.get("image_path", None)
+            # p = prompt_dict.get("image_path", None)
+            p = prompt_dict.get("control_image_path", [None])[0]
             prompt_dict_copy["image_encoder_last_hidden_state"] = sample_prompts_image_embs[p]
 
             sample_parameters.append(prompt_dict_copy)

@@ -169,6 +169,8 @@ class ItemInfo:
 
         # np.ndarray for video, list[np.ndarray] for image with multiple controls
         self.control_content: Optional[Union[np.ndarray, list[np.ndarray]]] = None
+        # np.ndarray for image embedding if the first control content is not same as the image embedding input
+        self.embed_content: Optional[np.ndarray] = content
 
         # FramePack architecture specific
         self.fp_latent_window_size: Optional[int] = None
@@ -750,7 +752,7 @@ class ImageDirectoryDatasource(ImageDatasource):
                     control = control.convert("RGB")
                 controls.append(control)
 
-        return image_path, image, caption, controls
+        return image_path, image, caption, controls, None
 
     def get_caption(self, idx: int) -> tuple[str, str]:
         image_path = self.image_paths[idx]
@@ -832,6 +834,17 @@ class ImageJsonlDatasource(ImageDatasource):
                 raise ValueError(f"Some images do not have control paths in JSONL data: {missing_control_images}")
             logger.info(f"found {len(self.data)} images with {self.control_count_per_image} control images per image in JSONL data")
 
+        self.has_embed = any("embed_path" in item for item in self.data)
+        if self.has_embed:
+            missing_embed_images = [
+                item["image_path"]
+                for item in self.data
+                if "embed_path" not in item
+            ]
+            if missing_embed_images:
+                logger.error(f"Some images do not have embed paths in JSONL data: {missing_embed_images}")
+                raise ValueError(f"Some images do not have embed paths in JSONL data: {missing_embed_images}")    
+
     def is_indexable(self):
         return True
 
@@ -855,7 +868,14 @@ class ImageJsonlDatasource(ImageDatasource):
                     control = control.convert("RGB")
                 controls.append(control)
 
-        return image_path, image, caption, controls
+        embed = None
+        if self.has_embed:
+            embed_path = data['embed_path']
+            embed = Image.open(embed_path)
+            if embed.mode != "RGB" and embed.mode != "RGBA":
+                embed = embed.convert("RGB")
+
+        return image_path, image, caption, controls, embed
 
     def get_caption(self, idx: int) -> tuple[str, str]:
         data = self.data[idx]
@@ -1405,7 +1425,7 @@ class ImageDataset(BaseDataset):
                         break  # submit batch if possible
 
                 for future in completed_futures:
-                    original_size, item_key, image, caption, controls = future.result()
+                    original_size, item_key, image, caption, controls, embed = future.result()
                     bucket_height, bucket_width = image.shape[:2]
                     bucket_reso = (bucket_width, bucket_height)
 
@@ -1426,6 +1446,8 @@ class ImageDataset(BaseDataset):
 
                     if controls is not None:
                         item_info.control_content = controls
+                    if embed is not None:
+                        item_info.embed_content = embed
 
                     if bucket_reso not in batches:
                         batches[bucket_reso] = []
@@ -1449,7 +1471,7 @@ class ImageDataset(BaseDataset):
 
             # fetch and resize image in a separate thread
             def fetch_and_resize(op: callable) -> tuple[tuple[int, int], str, Image.Image, str, Optional[Image.Image]]:
-                image_key, image, caption, controls = op()
+                image_key, image, caption, controls, embed = op()
                 image: Image.Image
                 image_size = image.size
 
@@ -1461,8 +1483,12 @@ class ImageDataset(BaseDataset):
                     for control in controls:
                         resized_control = resize_image_to_bucket(control, bucket_reso)  # returns np.ndarray
                         resized_controls.append(resized_control)
+                resized_embed = None
+                if embed is not None:
+                    bucket_reso = buckset_selector.get_bucket_resolution(embed.size)
+                    resized_embed = resize_image_to_bucket(embed, bucket_reso)
 
-                return image_size, image_key, image, caption, resized_controls
+                return image_size, image_key, image, caption, resized_controls, resized_embed
 
             future = executor.submit(fetch_and_resize, fetch_op)
             futures.append(future)
