@@ -1802,6 +1802,7 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
         latent_indices=None,
         clean_latents=None,
         clean_latent_indices=None,
+        clean_latent_bbox=None,
         clean_latents_2x=None,
         clean_latent_2x_indices=None,
         clean_latents_4x=None,
@@ -1821,14 +1822,24 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
         if clean_latents is not None and clean_latent_indices is not None:
             clean_latents = clean_latents.to(hidden_states)
             clean_latents = self.gradient_checkpointing_method(self.clean_x_embedder.proj, clean_latents)
-            clean_latents = clean_latents.flatten(2).transpose(1, 2)
-
+            
             clean_latent_rope_freqs = self.rope(frame_indices=clean_latent_indices, height=H, width=W, device=clean_latents.device)
+            
+            if clean_latent_bbox is not None:
+                print(f"Cropping latents to {clean_latent_bbox}")
+                clean_latents = clean_latents[:,:,:,
+                                              int(clean_latent_bbox[1]//8):int(clean_latent_bbox[3]//8), 
+                                              int(clean_latent_bbox[0]//8):int(clean_latent_bbox[2]//8)]
+                clean_latent_rope_freqs = clean_latent_rope_freqs[:,:,:,
+                                              int(clean_latent_bbox[1]//8):int(clean_latent_bbox[3]//8), 
+                                              int(clean_latent_bbox[0]//8):int(clean_latent_bbox[2]//8)]
+
+            clean_latents = clean_latents.flatten(2).transpose(1, 2)
             clean_latent_rope_freqs = clean_latent_rope_freqs.flatten(2).transpose(1, 2)
 
             hidden_states = torch.cat([clean_latents, hidden_states], dim=1)
             rope_freqs = torch.cat([clean_latent_rope_freqs, rope_freqs], dim=1)
-
+            
         if clean_latents_2x is not None and clean_latent_2x_indices is not None:
             clean_latents_2x = clean_latents_2x.to(hidden_states)
             clean_latents_2x = pad_for_3d_conv(clean_latents_2x, (2, 4, 4))
@@ -1874,6 +1885,7 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
         latent_indices=None,
         clean_latents=None,
         clean_latent_indices=None,
+        clean_latent_bbox=None,
         clean_latents_2x=None,
         clean_latent_2x_indices=None,
         clean_latents_4x=None,
@@ -1883,6 +1895,7 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
         return_dict=True,
         cache_results=False,
         cache_layers=[],
+        **kwargs
     ):
         if cache_results and timestep.item() >= 1000.0:
             logging.info("Activate Attention Caching for Exp.")
@@ -1908,6 +1921,7 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
             latent_indices,
             clean_latents,
             clean_latent_indices,
+            clean_latent_bbox,
             clean_latents_2x,
             clean_latent_2x_indices,
             clean_latents_4x,
