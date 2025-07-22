@@ -22,24 +22,25 @@ logging.basicConfig(level=logging.INFO)
 from musubi_tuner.modules.custom_offloading_utils import ModelOffloader
 from musubi_tuner.utils.safetensors_utils import load_split_weights
 from musubi_tuner.modules.fp8_optimization_utils import apply_fp8_monkey_patch, optimize_state_dict_with_fp8
+from musubi_tuner.frame_pack.utils import repeat_to_batch_size
 from accelerate import init_empty_weights
 
 try:
     # raise NotImplementedError
     from xformers.ops import memory_efficient_attention as xformers_attn_func
 
-    print("Xformers is installed!")
+    logging.info("Xformers is installed!")
 except:
-    print("Xformers is not installed!")
+    logging.info("Xformers is not installed!")
     xformers_attn_func = None
 
 try:
     # raise NotImplementedError
     from flash_attn import flash_attn_varlen_func, flash_attn_func
 
-    print("Flash Attn is installed!")
+    logging.info("Flash Attn is installed!")
 except:
-    print("Flash Attn is not installed!")
+    logging.info("Flash Attn is not installed!")
     flash_attn_varlen_func = None
     flash_attn_func = None
 
@@ -47,9 +48,9 @@ try:
     # raise NotImplementedError
     from sageattention import sageattn_varlen, sageattn
 
-    print("Sage Attn is installed!")
+    logging.info("Sage Attn is installed!")
 except:
-    print("Sage Attn is not installed!")
+    logging.info("Sage Attn is not installed!")
     sageattn_varlen = None
     sageattn = None
 
@@ -780,7 +781,7 @@ def attn_wscore_func(q, k, v, attn_bias=None):
 
 def attn_varlen_func(q, k, v, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv, attn_mask=None, attn_mode=None, split_attn=False):
     if cu_seqlens_q is None and cu_seqlens_kv is None and max_seqlen_q is None and max_seqlen_kv is None:
-        if torch.all(attn_mask):
+        if torch.isneginf(attn_mask).any():
             if attn_mode in ["sageattn", "flash"]:
                 warnings.warn(f"You are using Attention Mask, but {attn_mode} does not support attention masking. Moving to normal SDPA")
             x = torch.nn.functional.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), attn_mask=attn_mask).transpose(
@@ -908,6 +909,7 @@ class HunyuanAttnProcessorFlashAttnDouble:
         key = torch.cat([key, encoder_key], dim=1)
         value = torch.cat([value, encoder_value], dim=1)
         del encoder_query, encoder_key, encoder_value  # free memory
+
         if print_results:
             logging.info(f"[{block_id}]\n\tQ : {query}\n\tK : {key}\n\tV : {value}")
             
@@ -1668,11 +1670,11 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
 
     def enable_gradient_checkpointing(self):
         self.use_gradient_checkpointing = True
-        print("Gradient checkpointing enabled for HunyuanVideoTransformer3DModelPacked.")  # Logging
+        logging.info("Gradient checkpointing enabled for HunyuanVideoTransformer3DModelPacked.")  # Logging
 
     def disable_gradient_checkpointing(self):
         self.use_gradient_checkpointing = False
-        print("Gradient checkpointing disabled for HunyuanVideoTransformer3DModelPacked.")  # Logging
+        logging.info("Gradient checkpointing disabled for HunyuanVideoTransformer3DModelPacked.")  # Logging
 
     def initialize_teacache(self, enable_teacache=True, num_steps=25, rel_l1_thresh=0.15):
         self.enable_teacache = enable_teacache
@@ -1684,9 +1686,9 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
         self.previous_residual = None
         self.teacache_rescale_func = np.poly1d([7.33226126e02, -4.01131952e02, 6.75869174e01, -3.14987800e00, 9.61237896e-02])
         if enable_teacache:
-            print(f"TeaCache enabled: num_steps={num_steps}, rel_l1_thresh={rel_l1_thresh}")
+            logging.info(f"TeaCache enabled: num_steps={num_steps}, rel_l1_thresh={rel_l1_thresh}")
         else:
-            print("TeaCache disabled.")
+            logging.info("TeaCache disabled.")
 
     def gradient_checkpointing_method(self, block, *args, **kwargs):
         if self.use_gradient_checkpointing:
@@ -1724,7 +1726,7 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
             supports_backward,
             device,  # , debug=True
         )
-        print(
+        logging.info(
             f"HunyuanVideoTransformer3DModelPacked: Block swap enabled. Swapping {num_blocks} blocks, "
             + f"double blocks: {double_blocks_to_swap}, single blocks: {single_blocks_to_swap}, supports_backward: {supports_backward}."
         )
@@ -1734,14 +1736,14 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
             self.offloader_double.set_forward_only(True)
             self.offloader_single.set_forward_only(True)
             self.prepare_block_swap_before_forward()
-            print(f"HunyuanVideoTransformer3DModelPacked: Block swap set to forward only.")
+            logging.info(f"HunyuanVideoTransformer3DModelPacked: Block swap set to forward only.")
 
     def switch_block_swap_for_training(self):
         if self.blocks_to_swap and self.blocks_to_swap > 0:
             self.offloader_double.set_forward_only(False)
             self.offloader_single.set_forward_only(False)
             self.prepare_block_swap_before_forward()
-            print(f"HunyuanVideoTransformer3DModelPacked: Block swap set to forward and backward.")
+            logging.info(f"HunyuanVideoTransformer3DModelPacked: Block swap set to forward and backward.")
 
     def move_to_device_except_swap_blocks(self, device: torch.device):
         # assume model is on cpu. do not move blocks to device to reduce temporary memory usage
@@ -1774,13 +1776,66 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
             self.rope.h_w_scaling_factor = 1.0  # reset to default
             logger.info("RoPE scaling disabled.")
 
-    def process_attention_mask(self, encoder_attention_mask, batch_size, image_seq_len):
+    @torch.no_grad()
+    def process_attention_mask(self, encoder_hidden_states, encoder_attention_mask, batch_size, hidden_order_dict, 
+                               use_attention_masking=[]):
+        ctrl_seq_len = hidden_order_dict['noise'][0][-1]
+        ctrl_and_img_seq_len = hidden_order_dict['image_embeddings'][0][-1]
+
+        if batch_size == 1:
+            # When batch size is 1, we do not need any masks or var-len funcs since cropping is mathematically same to what we want
+            # If they are not same, then their impls are wrong. Ours are always the correct one.
+            enc_seq_len = encoder_attention_mask.sum().item()
+            encoder_hidden_states = encoder_hidden_states[:, :enc_seq_len]
+            encoder_attention_mask = encoder_attention_mask[:, :enc_seq_len]
+            seqlen_attention_mask = None, None, None, None
+        else:
+            # img_seq_len = hidden_states.shape[1]
+            enc_seq_len = encoder_hidden_states.shape[1]
+
+            cu_seqlens_q = get_cu_seqlens(encoder_attention_mask, ctrl_seq_len)
+            cu_seqlens_kv = cu_seqlens_q
+            max_seqlen_q = ctrl_seq_len + enc_seq_len
+            max_seqlen_kv = max_seqlen_q
+
+            seqlen_attention_mask = cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv
+            del cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv  # free memory
+        hidden_order_dict['text_embeddings'] = [(ctrl_and_img_seq_len, ctrl_seq_len+enc_seq_len)]
+
         hidden_attention_mask = torch.ones(
-            (batch_size, image_seq_len), 
+            (batch_size, ctrl_seq_len), 
             dtype=encoder_attention_mask.dtype,
             device=encoder_attention_mask.device,
         )
         attention_mask = torch.cat([hidden_attention_mask, encoder_attention_mask], dim=1)
+
+        if len(use_attention_masking) > 0:
+            total_seq_len = attention_mask.shape[1]
+            attention_mask = attention_mask.unsqueeze(1)
+            attention_mask = attention_mask.repeat_interleave(
+                total_seq_len, dim=1, 
+                output_size=attention_mask.shape[1] * total_seq_len)
+
+            # Masking Logic
+            ## No Cross between clean_latents
+            if "no_cross_control_latents" in use_attention_masking:
+                for i, (start_i, end_i) in enumerate(hidden_order_dict['clean_latents']):
+                    for j, (start_j, end_j) in enumerate(hidden_order_dict['clean_latents']):
+                        if i != j:
+                            attention_mask[:, start_i:end_i, start_j:end_j] = False
+            ## No Cross between text embedding and image embedding
+            if "no_cross_img_text" in use_attention_masking:
+                (img_embed_start, img_embed_end) = hidden_order_dict['image_embeddings'][0]
+                (txt_embed_start, txt_embed_end) = hidden_order_dict['text_embeddings'][0]
+                attention_mask[:, img_embed_start:img_embed_end, txt_embed_start:txt_embed_end] = False
+                attention_mask[:, txt_embed_start:txt_embed_end, img_embed_start:img_embed_end] = False
+
+            ## Convert attention_mask type from bool to float
+            attention_mask = attention_mask.float()
+            attention_mask[attention_mask == 0] = float('-inf')
+            attention_mask[attention_mask == 1] = 0
+        
+        return encoder_hidden_states, attention_mask, seqlen_attention_mask, hidden_order_dict
 
     def process_input_hidden_states(
         self,
@@ -1798,9 +1853,9 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
         B, C, T, H, W = hidden_states.shape
 
         if latent_indices is None:
-            latent_indices = torch.arange(0, T).unsqueeze(0).expand(B, -1)
+            latent_indices = repeat_to_batch_size(torch.arange(0, T).unsqueeze(0), B)
         if latent_indices.shape[0] != B:
-            latent_indices = latent_indices.expand(B, -1)
+            latent_indices = repeat_to_batch_size(latent_indices, B)
 
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
 
@@ -1811,13 +1866,13 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
             clean_latents = clean_latents.to(hidden_states)
             clean_latents = self.gradient_checkpointing_method(self.clean_x_embedder.proj, clean_latents)
             if clean_latents.shape[0] != B:
-                clean_latents = clean_latents.expand(B, -1,-1,-1,-1)
+                clean_latents = repeat_to_batch_size(clean_latents, B)
             if clean_latent_indices.shape[0] != B:
-                clean_latent_indices = clean_latent_indices.expand(B, -1)
+                clean_latent_indices = repeat_to_batch_size(clean_latent_indices, B)
             clean_latent_rope_freqs = self.rope(frame_indices=clean_latent_indices, height=H, width=W, device=clean_latents.device)
             
             if clean_latent_bbox is not None:
-                print(f"Cropping latents to {clean_latent_bbox}")
+                logging.info(f"Cropping latents to {clean_latent_bbox}")
                 clean_latents = clean_latents[:,:,:,
                                               int(clean_latent_bbox[1]//8):int(clean_latent_bbox[3]//8), 
                                               int(clean_latent_bbox[0]//8):int(clean_latent_bbox[2]//8)]
@@ -1863,7 +1918,34 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
             hidden_states = torch.cat([clean_latents_4x, hidden_states], dim=1)
             rope_freqs = torch.cat([clean_latent_4x_rope_freqs, rope_freqs], dim=1)
 
-        return hidden_states, rope_freqs
+        # Indices corresponding to each latent type within attention mask
+        hidden_order_dict = {'clean_latents_4x': [], 'clean_latents_2x': [], 'clean_latents': [], 'noise': []}
+        clean_latents_start_ind = 0
+        clean_latents_2x_start_ind = 0
+        clean_latents_4x_start_ind = 0
+        if clean_latents_4x is not None:
+            clean_latents_2x_start_ind += clean_latents_4x.shape[1] 
+            clean_latents_start_ind += clean_latents_4x.shape[1] 
+        if clean_latents_2x is not None:
+            clean_latents_start_ind += clean_latents_2x.shape[1] 
+
+        if clean_latents is not None and clean_latent_indices is not None:
+            N = clean_latent_indices.shape[-1]
+            WH = clean_latents.shape[1] // N
+            hidden_order_dict['clean_latents'] = [(clean_latents_start_ind+i*WH, clean_latents_start_ind+(i+1)*WH) for i in range(N)]
+        if clean_latents_2x is not None and clean_latent_2x_indices is not None:
+            N = clean_latent_2x_indices.shape[-1]
+            WH = clean_latents_2x.shape[1] // N
+            hidden_order_dict['clean_latents_2x'] = [(clean_latents_2x_start_ind+i*WH, clean_latents_2x_start_ind+(i+1)*WH) for i in range(N)]
+        if clean_latents_4x is not None and clean_latent_4x_indices is not None:
+            N = clean_latent_4x_indices.shape[-1]
+            WH = clean_latents_4x.shape[1] // N
+            hidden_order_dict['clean_latents_4x'] = [(clean_latents_4x_start_ind+i*WH, clean_latents_4x_start_ind+(i+1)*WH) for i in range(N)]
+
+        noise_start_ind = clean_latents_start_ind + clean_latents.shape[1]
+        hidden_order_dict['noise'] = [(noise_start_ind, hidden_states.shape[1])]
+
+        return hidden_states, rope_freqs, hidden_order_dict
 
     def forward(
         self,
@@ -1884,6 +1966,7 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
         image_embeddings=None,
         attention_kwargs=None,
         return_dict=True,
+        use_attention_masking=[],
         cache_results=False,
         cache_layers=[],
         **kwargs
@@ -1907,7 +1990,7 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
         post_patch_width = width // p
         original_context_length = post_patch_num_frames * post_patch_height * post_patch_width
 
-        hidden_states, rope_freqs = self.process_input_hidden_states(
+        hidden_states, rope_freqs, hidden_order_dict = self.process_input_hidden_states(
             hidden_states,
             latent_indices,
             clean_latents,
@@ -1936,8 +2019,7 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
         if self.image_projection is not None:
             assert image_embeddings is not None, "You must use image embeddings!"
             extra_encoder_hidden_states = self.gradient_checkpointing_method(self.image_projection, image_embeddings)
-            if extra_encoder_hidden_states.shape[0] != batch_size:
-                extra_encoder_hidden_states = extra_encoder_hidden_states.expand(batch_size, -1,-1)
+            extra_encoder_hidden_states = repeat_to_batch_size(extra_encoder_hidden_states, batch_size)
             extra_attention_mask = torch.ones(
                 (batch_size, extra_encoder_hidden_states.shape[1]),
                 dtype=encoder_attention_mask.dtype,
@@ -1947,35 +2029,15 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
             # must cat before (not after) encoder_hidden_states, due to attn masking
             encoder_hidden_states = torch.cat([extra_encoder_hidden_states, encoder_hidden_states], dim=1)
             encoder_attention_mask = torch.cat([extra_attention_mask, encoder_attention_mask], dim=1)
+            hidden_order_dict['image_embeddings'] = [(hidden_states.shape[1], hidden_states.shape[1]+extra_encoder_hidden_states.shape[1])]
             del extra_encoder_hidden_states, extra_attention_mask  # free memory
 
-        with torch.no_grad():
-            if batch_size == 1:
-                # When batch size is 1, we do not need any masks or var-len funcs since cropping is mathematically same to what we want
-                # If they are not same, then their impls are wrong. Ours are always the correct one.
-                text_len = encoder_attention_mask.sum().item()
-                encoder_hidden_states = encoder_hidden_states[:, :text_len]
-                encoder_attention_mask = encoder_attention_mask[:, :text_len]
-                seqlen_attention_mask = None, None, None, None
-            else:
-                img_seq_len = hidden_states.shape[1]
-                txt_seq_len = encoder_hidden_states.shape[1]
-
-                cu_seqlens_q = get_cu_seqlens(encoder_attention_mask, img_seq_len)
-                cu_seqlens_kv = cu_seqlens_q
-                max_seqlen_q = img_seq_len + txt_seq_len
-                max_seqlen_kv = max_seqlen_q
-
-                seqlen_attention_mask = cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv
-                del cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv  # free memory
-        # del encoder_attention_mask  # free memory
-
-        hidden_attention_mask = torch.ones(
-            (batch_size, hidden_states.shape[1]), 
-            dtype=encoder_attention_mask.dtype,
-            device=encoder_attention_mask.device,
+        encoder_hidden_states, attention_mask, seqlen_attention_mask, hidden_order_dict = self.process_attention_mask(
+            encoder_hidden_states, encoder_attention_mask, batch_size, hidden_order_dict, 
+            use_attention_masking=use_attention_masking
         )
-        attention_mask = torch.cat([hidden_attention_mask, encoder_attention_mask], dim=1)
+        attention_mask = attention_mask.to(device=hidden_states.device, dtype=hidden_states.dtype)
+        del encoder_attention_mask
 
         if cache_results and timestep[0].item() >= 1000.0:
             logging.info(f"{timestep[0].item()}: hidden_states: {hidden_states}")
@@ -1983,7 +2045,7 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
             logging.info(f"{timestep[0].item()}: temb: {temb}")
             logging.info(f"{timestep[0].item()}: attention_mask: {attention_mask}")
             logging.info(f"{timestep[0].item()}: rope_freqs: {rope_freqs}")
-
+            logging.info(f"{timestep[0].item()}: {hidden_order_dict}")
 
         if self.enable_teacache:
             modulated_inp = self.transformer_blocks[0].norm1(hidden_states, emb=temb)[0]
