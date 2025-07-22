@@ -8,7 +8,7 @@ import os
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple, Union
 from collections import defaultdict
-
+import warnings
 import torch
 import einops
 import torch.nn as nn
@@ -763,11 +763,12 @@ def apply_rotary_emb_transposed(x, freqs_cis):
     return (x.float() * cos + x_rotated.float() * sin).to(x.dtype)
 
 
-def attn_wscore_func(q, k, v):
+def attn_wscore_func(q, k, v, attn_bias=None):
     q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
     L, S = q.size(-2), k.size(-2)
     scale_factor = 1 / math.sqrt(q.size(-1))
-    attn_bias = torch.zeros(L, S, dtype=q.dtype)
+    if attn_bias is None:
+        attn_bias = torch.zeros(L, S, dtype=q.dtype)
 
     attn_weight = q @ k.transpose(-2, -1) * scale_factor
     attn_weight += attn_bias.to(attn_weight.device)
@@ -777,24 +778,33 @@ def attn_wscore_func(q, k, v):
     return attn_result.transpose(1, 2), attn_weight
 
 
-def attn_varlen_func(q, k, v, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv, attn_mode=None, split_attn=False):
+def attn_varlen_func(q, k, v, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv, attn_mask=None, attn_mode=None, split_attn=False):
     if cu_seqlens_q is None and cu_seqlens_kv is None and max_seqlen_q is None and max_seqlen_kv is None:
-        if attn_mode == "sageattn" or attn_mode is None and sageattn is not None:
-            x = sageattn(q, k, v, tensor_layout="NHD")
+        if attn_mask is not None:
+            if attn_mode in ["sageattn", "flash"]:
+                warnings.warn(f"You are using Attention Mask, but {attn_mode} does not support attention masking. Moving to normal SDPA")
+            x = torch.nn.functional.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), attn_mask=attn_mask).transpose(
+                1, 2
+            )
             return x
+        else:
+            if attn_mode == "sageattn" or attn_mode is None and sageattn is not None:
+                x = sageattn(q, k, v, tensor_layout="NHD")
+                return x
 
-        if attn_mode == "flash" or attn_mode is None and flash_attn_func is not None:
-            x = flash_attn_func(q, k, v)
+            if attn_mode == "flash" or attn_mode is None and flash_attn_func is not None:
+                x = flash_attn_func(q, k, v)
+                return x
+
+            if attn_mode == "xformers" or attn_mode is None and xformers_attn_func is not None:
+                x = xformers_attn_func(q, k, v)
+                return x
+
+            x = torch.nn.functional.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)).transpose(
+                1, 2
+            )
             return x
-
-        if attn_mode == "xformers" or attn_mode is None and xformers_attn_func is not None:
-            x = xformers_attn_func(q, k, v)
-            return x
-
-        x = torch.nn.functional.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)).transpose(
-            1, 2
-        )
-        return x
+    
     if split_attn:
         if attn_mode == "sageattn" or attn_mode is None and sageattn is not None:
             x = torch.empty_like(q)
@@ -846,19 +856,25 @@ class HunyuanAttnProcessorFlashAttnDouble:
         hidden_states,
         encoder_hidden_states,
         attention_mask,
+        seqlen_attention_mask,
         image_rotary_emb,
         attn_mode: Optional[str] = None,
         split_attn: Optional[bool] = False,
         *args, **kwargs
     ):
+        print(hidden_states, encoder_hidden_states)
+        print(attention_mask, seqlen_attention_mask)
+        print(image_rotary_emb)
+        print(kwargs)
+
         cache_results = kwargs.get('cache_results', False)
         block_id = kwargs.get('block_id', '')
         timestep = kwargs.get('timestep', 0)
         print_results = cache_results and timestep >= 1000.0 and block_id.endswith('.0')
+        if print_results:
+            logging.info(f"[{block_id}]\n\t : hidden_states, encoder_hidden_states")
 
-        cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv = attention_mask
-        # if cache_results:
-        #     attn_cache[block_id][timestep] = hidden_states.clone().cpu()
+        cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv = seqlen_attention_mask
         if print_results:
             logging.info(f"[{block_id}]\n\tHs : {hidden_states} \n\tEhs : {encoder_hidden_states} \n\tIrs: {image_rotary_emb}")
 
@@ -867,25 +883,17 @@ class HunyuanAttnProcessorFlashAttnDouble:
         key = attn.to_k(hidden_states)
         value = attn.to_v(hidden_states)
         del hidden_states  # free memory
-        # if print_results:
-        #     logging.info(f"[{block_id}]\n\tQ : {query}\n\tK : {key}\n\tV : {value}")
 
         query = query.unflatten(2, (attn.heads, -1))
         key = key.unflatten(2, (attn.heads, -1))
         value = value.unflatten(2, (attn.heads, -1))
-        # if print_results:
-        #     logging.info(f"[{block_id}]\n\tQ : {query}\n\tK : {key}\n\tV : {value}")
 
         query = attn.norm_q(query)
         key = attn.norm_k(key)
-        # if print_results:
-        #     logging.info(f"[{block_id}]\n\tQ : {query}\n\tK : {key}")
 
         query = apply_rotary_emb_transposed(query, image_rotary_emb)
         key = apply_rotary_emb_transposed(key, image_rotary_emb)
         del image_rotary_emb  # free memory
-        # if print_results:
-        #     logging.info(f"[{block_id}]\n\tQ : {query}\n\tK : {key}")
 
         # Project context (text/encoder) embeddings
         encoder_query = attn.add_q_proj(encoder_hidden_states)
@@ -893,19 +901,13 @@ class HunyuanAttnProcessorFlashAttnDouble:
         encoder_value = attn.add_v_proj(encoder_hidden_states)
         txt_length = encoder_hidden_states.shape[1]  # store length before deleting
         del encoder_hidden_states  # free memory
-        # if print_results:
-        #     logging.info(f"[{block_id}]\n\tEQ : {encoder_query}\n\tEK : {encoder_key}\n\tEV: {encoder_value}\n\tTLength: {txt_length}")
 
         encoder_query = encoder_query.unflatten(2, (attn.heads, -1))
         encoder_key = encoder_key.unflatten(2, (attn.heads, -1))
         encoder_value = encoder_value.unflatten(2, (attn.heads, -1))
-        # if print_results:
-        #     logging.info(f"[{block_id}]\n\tEQ : {encoder_query}\n\tEK : {encoder_key}\n\tEV: {encoder_value}")
 
         encoder_query = attn.norm_added_q(encoder_query)
         encoder_key = attn.norm_added_k(encoder_key)
-        # if print_results:
-        #     logging.info(f"[{block_id}]\n\tEQ : {encoder_query}\n\tEK : {encoder_key}")
 
         # Concatenate image and context q, k, v
         query = torch.cat([query, encoder_query], dim=1)
@@ -916,17 +918,14 @@ class HunyuanAttnProcessorFlashAttnDouble:
             logging.info(f"[{block_id}]\n\tQ : {query}\n\tK : {key}\n\tV : {value}")
             
         if cache_results:
-                # attn_scores, _,_,_ = torch.linalg.lstsq(
-    #     value.clone().float().transpose(1, 2).T, 
-    #     hidden_states_attn.clone().float().transpose(1, 2).T)
             hidden_states_attn, attn_scores = attn_wscore_func(
-                query, key, value
+                query, key, value, attn_bias=attention_mask
             )
             attn_cache[block_id][timestep] = attn_scores.clone().cpu()
 
         else:
             hidden_states_attn = attn_varlen_func(
-                query, key, value, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv, attn_mode=attn_mode, split_attn=split_attn
+                query, key, value, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv, attn_mask=attention_mask, attn_mode=attn_mode, split_attn=split_attn
             )
 
         del query, key, value  # free memory
@@ -936,15 +935,10 @@ class HunyuanAttnProcessorFlashAttnDouble:
         hidden_states_attn = hidden_states_attn.flatten(-2)
         hidden_states, encoder_hidden_states = hidden_states_attn[:, :-txt_length], hidden_states_attn[:, -txt_length:]
         del hidden_states_attn  # free memory
-        # if print_results:
-        #     logging.info(f"[{block_id}]\n\thidden_states : {hidden_states}\n\tencoder_hidden_states: {encoder_hidden_states}")
-
         # Apply output projections
         hidden_states = attn.to_out[0](hidden_states)
         hidden_states = attn.to_out[1](hidden_states)  # Dropout/Identity
         encoder_hidden_states = attn.to_add_out(encoder_hidden_states)
-        # if print_results:
-        #     logging.info(f"[{block_id}]\n\thidden_states : {hidden_states}\n\tencoder_hidden_states: {encoder_hidden_states}")
 
         return hidden_states, encoder_hidden_states
 
@@ -956,6 +950,7 @@ class HunyuanAttnProcessorFlashAttnSingle:
         hidden_states,
         encoder_hidden_states,
         attention_mask,
+        seqlen_attention_mask,
         image_rotary_emb,
         attn_mode: Optional[str] = None,
         split_attn: Optional[bool] = False,
@@ -966,7 +961,7 @@ class HunyuanAttnProcessorFlashAttnSingle:
         timestep = kwargs.get('timestep', 0)
         print_results = cache_results and timestep >= 1000.0 and block_id.endswith('.0')
 
-        cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv = attention_mask
+        cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv = seqlen_attention_mask
         txt_length = encoder_hidden_states.shape[1]  # Store text length
         if print_results:
             logging.info(f"[{block_id}]\n\tHs : {hidden_states} \n\tEhs : {encoder_hidden_states} \n\tIrs: {image_rotary_emb}")
@@ -974,8 +969,6 @@ class HunyuanAttnProcessorFlashAttnSingle:
         # Concatenate image and context inputs
         hidden_states_cat = torch.cat([hidden_states, encoder_hidden_states], dim=1)
         del hidden_states, encoder_hidden_states  # free memory
-        # if cache_results:
-        #     attn_cache[block_id][timestep] = hidden_states_cat.clone().cpu()
 
         # Project concatenated inputs
         query = attn.to_q(hidden_states_cat)
@@ -995,17 +988,14 @@ class HunyuanAttnProcessorFlashAttnSingle:
         del image_rotary_emb  # free memory
 
         if cache_results:
-                # attn_scores, _,_,_ = torch.linalg.lstsq(
-    #     value.clone().float().transpose(1, 2).T, 
-    #     hidden_states_attn.clone().float().transpose(1, 2).T)
             hidden_states, attn_scores = attn_wscore_func(
-                query, key, value
+                query, key, value, attn_bias=attention_mask
             )
             attn_cache[block_id][timestep] = attn_scores.clone().cpu()
 
         else:
             hidden_states = attn_varlen_func(
-                query, key, value, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv, attn_mode=attn_mode, split_attn=split_attn
+                query, key, value, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv, attn_mask=attention_mask, attn_mode=attn_mode, split_attn=split_attn
             )
 
         del query, key, value  # free memory
@@ -1381,14 +1371,10 @@ class HunyuanVideoSingleTransformerBlock(nn.Module):
         encoder_hidden_states: torch.Tensor,
         temb: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
+        seqlen_attention_mask: Optional[Tuple[torch.Tensor]] = None,
         image_rotary_emb: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         *args, **kwargs
     ) -> torch.Tensor:
-        cache_results = kwargs.get('cache_results', False)
-        block_id = kwargs.get('block_id', '')
-        timestep = kwargs.get('timestep', 0)
-        print_results = cache_results and timestep >= 1000.0 and block_id.endswith('.0')
-
         text_seq_length = encoder_hidden_states.shape[1]
         hidden_states = torch.cat([hidden_states, encoder_hidden_states], dim=1)
         del encoder_hidden_states  # free memory
@@ -1409,6 +1395,7 @@ class HunyuanVideoSingleTransformerBlock(nn.Module):
             hidden_states=norm_hidden_states,
             encoder_hidden_states=norm_encoder_hidden_states,
             attention_mask=attention_mask,
+            seqlen_attention_mask=seqlen_attention_mask,
             image_rotary_emb=image_rotary_emb,
             attn_mode=self.attn_mode,
             split_attn=self.split_attn,
@@ -1476,14 +1463,10 @@ class HunyuanVideoTransformerBlock(nn.Module):
         encoder_hidden_states: torch.Tensor,
         temb: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
+        seqlen_attention_mask: Optional[Tuple[torch.Tensor]] = None,
         freqs_cis: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         *args, **kwargs
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        cache_results = kwargs.get('cache_results', False)
-        block_id = kwargs.get('block_id', '')
-        timestep = kwargs.get('timestep', 0)
-        print_results = cache_results and timestep >= 1000.0 and block_id.endswith('.0')
-
         # 1. Input normalization
         norm_hidden_states, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.norm1(hidden_states, emb=temb)
         norm_encoder_hidden_states, c_gate_msa, c_shift_mlp, c_scale_mlp, c_gate_mlp = self.norm1_context(
@@ -1494,6 +1477,7 @@ class HunyuanVideoTransformerBlock(nn.Module):
             hidden_states=norm_hidden_states,
             encoder_hidden_states=norm_encoder_hidden_states,
             attention_mask=attention_mask,
+            seqlen_attention_mask=seqlen_attention_mask,
             image_rotary_emb=freqs_cis,
             attn_mode=self.attn_mode,
             split_attn=self.split_attn,
@@ -1796,6 +1780,9 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
             self.rope.h_w_scaling_factor = 1.0  # reset to default
             logger.info("RoPE scaling disabled.")
 
+    def process_attention_mask(self, ):
+        pass
+
     def process_input_hidden_states(
         self,
         latents,
@@ -1942,11 +1929,6 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
             self.context_embedder, encoder_hidden_states, timestep, encoder_attention_mask
         )
 
-        if cache_results and timestep.item() >= 1000.0:
-            logging.info(f"{timestep.item()}: Input hidden_states: {hidden_states}")
-            logging.info(f"{timestep.item()}: Input encoder_hidden_states: {encoder_hidden_states}")
-            logging.info(f"{timestep.item()}: Input temb: {temb}")
-
         if self.image_projection is not None:
             assert image_embeddings is not None, "You must use image embeddings!"
             extra_encoder_hidden_states = self.gradient_checkpointing_method(self.image_projection, image_embeddings)
@@ -1967,7 +1949,8 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
                 # If they are not same, then their impls are wrong. Ours are always the correct one.
                 text_len = encoder_attention_mask.sum().item()
                 encoder_hidden_states = encoder_hidden_states[:, :text_len]
-                attention_mask = None, None, None, None
+                encoder_attention_mask = encoder_attention_mask[:, :text_len]
+                seqlen_attention_mask = None, None, None, None
             else:
                 img_seq_len = hidden_states.shape[1]
                 txt_seq_len = encoder_hidden_states.shape[1]
@@ -1977,12 +1960,25 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
                 max_seqlen_q = img_seq_len + txt_seq_len
                 max_seqlen_kv = max_seqlen_q
 
-                attention_mask = cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv
+                seqlen_attention_mask = cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv
                 del cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv  # free memory
-        del encoder_attention_mask  # free memory
+        # del encoder_attention_mask  # free memory
+
+        hidden_attention_mask = torch.ones(
+            (batch_size, hidden_states.shape[1]), 
+            dtype=encoder_attention_mask.dtype,
+            device=encoder_attention_mask.device,
+        )
+        attention_mask = torch.cat([hidden_attention_mask, encoder_attention_mask], dim=1)
+
         if cache_results and timestep.item() >= 1000.0:
-            logging.info(f"{timestep.item()}: Final encoder_hidden_states: {encoder_hidden_states}")
-            
+            logging.info(f"{timestep.item()}: hidden_states: {hidden_states}")
+            logging.info(f"{timestep.item()}: encoder_hidden_states: {encoder_hidden_states}")
+            logging.info(f"{timestep.item()}: temb: {temb}")
+            logging.info(f"{timestep.item()}: attention_mask: {attention_mask}")
+            logging.info(f"{timestep.item()}: rope_freqs: {rope_freqs}")
+
+
         if self.enable_teacache:
             modulated_inp = self.transformer_blocks[0].norm1(hidden_states, emb=temb)[0]
 
@@ -2014,12 +2010,12 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
 
                 for block_id, block in enumerate(self.transformer_blocks):
                     hidden_states, encoder_hidden_states = self.gradient_checkpointing_method(
-                        block, hidden_states, encoder_hidden_states, temb, attention_mask, rope_freqs
+                        block, hidden_states, encoder_hidden_states, temb, attention_mask, seqlen_attention_mask, rope_freqs
                     )
 
                 for block_id, block in enumerate(self.single_transformer_blocks):
                     hidden_states, encoder_hidden_states = self.gradient_checkpointing_method(
-                        block, hidden_states, encoder_hidden_states, temb, attention_mask, rope_freqs
+                        block, hidden_states, encoder_hidden_states, temb, attention_mask, seqlen_attention_mask, rope_freqs
                     )
 
                 self.previous_residual = hidden_states - ori_hidden_states
@@ -2031,7 +2027,7 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
                 block_str = f"transformer_blocks.{block_id}"
                 cache_results_layer = cache_results and block_str in cache_layers
                 hidden_states, encoder_hidden_states = self.gradient_checkpointing_method(
-                    block, hidden_states, encoder_hidden_states, temb, attention_mask, rope_freqs, 
+                    block, hidden_states, encoder_hidden_states, temb, attention_mask, seqlen_attention_mask, rope_freqs, 
                     cache_results=cache_results_layer, 
                     block_id=block_str, timestep=int(timestep.item())
                 )
@@ -2045,7 +2041,7 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
                 block_str = f"single_transformer_blocks.{block_id}"
                 cache_results_layer = cache_results and block_str in cache_layers
                 hidden_states, encoder_hidden_states = self.gradient_checkpointing_method(
-                    block, hidden_states, encoder_hidden_states, temb, attention_mask, rope_freqs, 
+                    block, hidden_states, encoder_hidden_states, temb, attention_mask, seqlen_attention_mask, rope_freqs, 
                     cache_results=cache_results_layer, 
                     block_id=block_str, timestep=int(timestep.item())
                 )
@@ -2053,7 +2049,7 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
                 if self.blocks_to_swap:
                     self.offloader_single.submit_move_blocks_forward(self.single_transformer_blocks, block_id)
 
-        del attention_mask, rope_freqs  # free memory
+        del attention_mask, seqlen_attention_mask, rope_freqs  # free memory
         del encoder_hidden_states  # free memory
 
         hidden_states = self.gradient_checkpointing_method(self.norm_out, hidden_states, temb)
