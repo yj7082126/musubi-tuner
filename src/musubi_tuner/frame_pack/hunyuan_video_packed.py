@@ -780,7 +780,7 @@ def attn_wscore_func(q, k, v, attn_bias=None):
 
 def attn_varlen_func(q, k, v, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv, attn_mask=None, attn_mode=None, split_attn=False):
     if cu_seqlens_q is None and cu_seqlens_kv is None and max_seqlen_q is None and max_seqlen_kv is None:
-        if attn_mask is not None:
+        if torch.all(attn_mask):
             if attn_mode in ["sageattn", "flash"]:
                 warnings.warn(f"You are using Attention Mask, but {attn_mode} does not support attention masking. Moving to normal SDPA")
             x = torch.nn.functional.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2), attn_mask=attn_mask).transpose(
@@ -799,7 +799,6 @@ def attn_varlen_func(q, k, v, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seq
             if attn_mode == "xformers" or attn_mode is None and xformers_attn_func is not None:
                 x = xformers_attn_func(q, k, v)
                 return x
-
             x = torch.nn.functional.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)).transpose(
                 1, 2
             )
@@ -845,7 +844,7 @@ def attn_varlen_func(q, k, v, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seq
         del q, k, v  # free memory
     else:
         raise NotImplementedError("No Attn Installed or batch_size > 1 is not supported in this configuration. Try `--split_attn`.")
-    x = x.view(batch_size, max_seqlen_q, *x.shape[2:])
+    x = x.view(batch_size, max_seqlen_q, *x.shape[1:])
     return x
 
 
@@ -862,11 +861,6 @@ class HunyuanAttnProcessorFlashAttnDouble:
         split_attn: Optional[bool] = False,
         *args, **kwargs
     ):
-        print(hidden_states, encoder_hidden_states)
-        print(attention_mask, seqlen_attention_mask)
-        print(image_rotary_emb)
-        print(kwargs)
-
         cache_results = kwargs.get('cache_results', False)
         block_id = kwargs.get('block_id', '')
         timestep = kwargs.get('timestep', 0)
@@ -1780,8 +1774,13 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
             self.rope.h_w_scaling_factor = 1.0  # reset to default
             logger.info("RoPE scaling disabled.")
 
-    def process_attention_mask(self, ):
-        pass
+    def process_attention_mask(self, encoder_attention_mask, batch_size, image_seq_len):
+        hidden_attention_mask = torch.ones(
+            (batch_size, image_seq_len), 
+            dtype=encoder_attention_mask.dtype,
+            device=encoder_attention_mask.device,
+        )
+        attention_mask = torch.cat([hidden_attention_mask, encoder_attention_mask], dim=1)
 
     def process_input_hidden_states(
         self,
@@ -1800,6 +1799,8 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
 
         if latent_indices is None:
             latent_indices = torch.arange(0, T).unsqueeze(0).expand(B, -1)
+        if latent_indices.shape[0] != B:
+            latent_indices = latent_indices.expand(B, -1)
 
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
 
@@ -1809,7 +1810,10 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
         if clean_latents is not None and clean_latent_indices is not None:
             clean_latents = clean_latents.to(hidden_states)
             clean_latents = self.gradient_checkpointing_method(self.clean_x_embedder.proj, clean_latents)
-            
+            if clean_latents.shape[0] != B:
+                clean_latents = clean_latents.expand(B, -1,-1,-1,-1)
+            if clean_latent_indices.shape[0] != B:
+                clean_latent_indices = clean_latent_indices.expand(B, -1)
             clean_latent_rope_freqs = self.rope(frame_indices=clean_latent_indices, height=H, width=W, device=clean_latents.device)
             
             if clean_latent_bbox is not None:
@@ -1884,7 +1888,7 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
         cache_layers=[],
         **kwargs
     ):
-        if cache_results and timestep.item() >= 1000.0:
+        if cache_results and timestep[0].item() >= 1000.0:
             logging.info("Activate Attention Caching for Exp.")
         if attention_kwargs is None:
             attention_kwargs = {}
@@ -1932,6 +1936,8 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
         if self.image_projection is not None:
             assert image_embeddings is not None, "You must use image embeddings!"
             extra_encoder_hidden_states = self.gradient_checkpointing_method(self.image_projection, image_embeddings)
+            if extra_encoder_hidden_states.shape[0] != batch_size:
+                extra_encoder_hidden_states = extra_encoder_hidden_states.expand(batch_size, -1,-1)
             extra_attention_mask = torch.ones(
                 (batch_size, extra_encoder_hidden_states.shape[1]),
                 dtype=encoder_attention_mask.dtype,
@@ -1971,12 +1977,12 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
         )
         attention_mask = torch.cat([hidden_attention_mask, encoder_attention_mask], dim=1)
 
-        if cache_results and timestep.item() >= 1000.0:
-            logging.info(f"{timestep.item()}: hidden_states: {hidden_states}")
-            logging.info(f"{timestep.item()}: encoder_hidden_states: {encoder_hidden_states}")
-            logging.info(f"{timestep.item()}: temb: {temb}")
-            logging.info(f"{timestep.item()}: attention_mask: {attention_mask}")
-            logging.info(f"{timestep.item()}: rope_freqs: {rope_freqs}")
+        if cache_results and timestep[0].item() >= 1000.0:
+            logging.info(f"{timestep[0].item()}: hidden_states: {hidden_states}")
+            logging.info(f"{timestep[0].item()}: encoder_hidden_states: {encoder_hidden_states}")
+            logging.info(f"{timestep[0].item()}: temb: {temb}")
+            logging.info(f"{timestep[0].item()}: attention_mask: {attention_mask}")
+            logging.info(f"{timestep[0].item()}: rope_freqs: {rope_freqs}")
 
 
         if self.enable_teacache:
@@ -2029,7 +2035,7 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
                 hidden_states, encoder_hidden_states = self.gradient_checkpointing_method(
                     block, hidden_states, encoder_hidden_states, temb, attention_mask, seqlen_attention_mask, rope_freqs, 
                     cache_results=cache_results_layer, 
-                    block_id=block_str, timestep=int(timestep.item())
+                    block_id=block_str, timestep=int(timestep[0].item())
                 )
 
                 if self.blocks_to_swap:
@@ -2043,7 +2049,7 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
                 hidden_states, encoder_hidden_states = self.gradient_checkpointing_method(
                     block, hidden_states, encoder_hidden_states, temb, attention_mask, seqlen_attention_mask, rope_freqs, 
                     cache_results=cache_results_layer, 
-                    block_id=block_str, timestep=int(timestep.item())
+                    block_id=block_str, timestep=int(timestep[0].item())
                 )
 
                 if self.blocks_to_swap:
