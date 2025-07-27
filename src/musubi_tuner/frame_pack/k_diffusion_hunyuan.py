@@ -50,6 +50,8 @@ def sample_hunyuan(
     prompt_embeds=None,
     prompt_embeds_mask=None,
     prompt_poolers=None,
+    prompt_entity_inds=[],
+    entity_masks=None,
     negative_prompt_embeds=None,
     negative_prompt_embeds_mask=None,
     negative_prompt_poolers=None,
@@ -98,6 +100,7 @@ def sample_hunyuan(
     negative_prompt_embeds_mask = repeat_to_batch_size(negative_prompt_embeds_mask, batch_size)
     negative_prompt_poolers = repeat_to_batch_size(negative_prompt_poolers, batch_size)
     concat_latent = repeat_to_batch_size(concat_latent, batch_size)
+    entity_masks = repeat_to_batch_size(entity_masks, batch_size)
 
     sampler_kwargs = dict(
         dtype=dtype,
@@ -109,6 +112,8 @@ def sample_hunyuan(
             encoder_hidden_states=prompt_embeds,
             encoder_attention_mask=prompt_embeds_mask,
             guidance=distilled_guidance,
+            entity_inds=prompt_entity_inds,
+            entity_masks=entity_masks,
             **kwargs,
         ),
         negative=dict(
