@@ -1931,35 +1931,54 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
             latent_indices = repeat_to_batch_size(latent_indices, B)
 
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
+        hidden_WH = hidden_states.shape[1]
 
         rope_freqs = self.rope(frame_indices=latent_indices, height=H, width=W, device=hidden_states.device)
         rope_freqs = rope_freqs.flatten(2).transpose(1, 2)
 
         if clean_latents is not None and clean_latent_indices is not None:
-            clean_latents = clean_latents.to(hidden_states)
-            clean_latents = self.gradient_checkpointing_method(self.clean_x_embedder.proj, clean_latents)
-            
-            if clean_latents.shape[0] != B:
-                clean_latents = repeat_to_batch_size(clean_latents, B)
-            if clean_latent_indices.shape[0] != B:
-                clean_latent_indices = repeat_to_batch_size(clean_latent_indices, B)
-            clean_B, clean_C, clean_T, clean_H, clean_W = clean_latents.shape
 
-            clean_latent_rope_freqs = self.rope(frame_indices=clean_latent_indices, height=clean_H, width=clean_W, device=clean_latents.device)
-            
-            if clean_latent_bbox is not None:
-                logging.info(f"Cropping latents to {clean_latent_bbox}")
-                clean_latents = clean_latents[:,:,:,
-                                              int(clean_latent_bbox[1]//8):int(clean_latent_bbox[3]//8), 
-                                              int(clean_latent_bbox[0]//8):int(clean_latent_bbox[2]//8)]
-                clean_latent_rope_freqs = clean_latent_rope_freqs[:,:,:,
-                                              int(clean_latent_bbox[1]//8):int(clean_latent_bbox[3]//8), 
-                                              int(clean_latent_bbox[0]//8):int(clean_latent_bbox[2]//8)]
+            processed_clean_latents, clean_latent_rope_freqs = [], []
+            if type(clean_latents) != list:
+                clean_latents = [clean_latents[:,:,[i]] for i in range(clean_latents.shape[2])]
+                clean_latent_indices = [clean_latent_indices[:,[i]] for i in range(clean_latent_indices.shape[1])]
 
-            clean_latents = clean_latents.flatten(2).transpose(1, 2)
-            clean_latent_rope_freqs = clean_latent_rope_freqs.flatten(2).transpose(1, 2)
+            latent_counter = 0
+            for i, clean_latent in enumerate(clean_latents):
+                clean_latent = clean_latent.to(hidden_states)
+                clean_latent = self.gradient_checkpointing_method(self.clean_x_embedder.proj, clean_latent)
+                clean_latent_index = clean_latent_indices[i]
 
-            hidden_states = torch.cat([clean_latents, hidden_states], dim=1)
+                if clean_latent.shape[0] != B:
+                    clean_latent = repeat_to_batch_size(clean_latent, B)
+                if clean_latent_index.shape[0] != B:
+                    clean_latent_index = repeat_to_batch_size(clean_latent_index, B)
+                _, _, _, clean_H, clean_W = clean_latent.shape
+
+                clean_latent_rope_freq = self.rope(frame_indices=clean_latent_index, height=clean_H, width=clean_W, device=clean_latent.device)
+                
+                if clean_latent_bbox is not None:
+                    logging.info(f"Cropping latents to {clean_latent_bbox}")
+                    clean_latent = clean_latent[:,:,:,
+                                                int(clean_latent_bbox[1]//8):int(clean_latent_bbox[3]//8), 
+                                                int(clean_latent_bbox[0]//8):int(clean_latent_bbox[2]//8)]
+                    clean_latent_rope_freq = clean_latent_rope_freq[:,:,:,
+                                                int(clean_latent_bbox[1]//8):int(clean_latent_bbox[3]//8), 
+                                                int(clean_latent_bbox[0]//8):int(clean_latent_bbox[2]//8)]
+
+                clean_latent = clean_latent.flatten(2).transpose(1, 2)
+                clean_latent_rope_freq = clean_latent_rope_freq.flatten(2).transpose(1, 2)
+
+                processed_clean_latents.append(clean_latent)
+                clean_latent_rope_freqs.append(clean_latent_rope_freq)
+                clean_WH = clean_latent.shape[1]
+                hidden_order_dict['clean_latents'].append((latent_counter, latent_counter+clean_WH))
+                latent_counter += clean_WH
+
+            processed_clean_latents = torch.cat(processed_clean_latents, dim=1)
+            clean_latent_rope_freqs = torch.cat(clean_latent_rope_freqs, dim=1)
+                                                
+            hidden_states = torch.cat([processed_clean_latents, hidden_states], dim=1)
             rope_freqs = torch.cat([clean_latent_rope_freqs, rope_freqs], dim=1)
             
         if clean_latents_2x is not None and clean_latent_2x_indices is not None:
@@ -2005,9 +2024,7 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
             clean_latents_start_ind += clean_latents_2x.shape[1] 
 
         if clean_latents is not None and clean_latent_indices is not None:
-            N = clean_latent_indices.shape[-1]
-            WH = clean_latents.shape[1] // N
-            hidden_order_dict['clean_latents'] = [(clean_latents_start_ind+i*WH, clean_latents_start_ind+(i+1)*WH) for i in range(N)]
+            hidden_order_dict['clean_latents'] = [(clean_latents_start_ind+x[0], clean_latents_start_ind+x[1]) for x in hidden_order_dict['clean_latents']]
         if clean_latents_2x is not None and clean_latent_2x_indices is not None:
             N = clean_latent_2x_indices.shape[-1]
             WH = clean_latents_2x.shape[1] // N
@@ -2017,8 +2034,8 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
             WH = clean_latents_4x.shape[1] // N
             hidden_order_dict['clean_latents_4x'] = [(clean_latents_4x_start_ind+i*WH, clean_latents_4x_start_ind+(i+1)*WH) for i in range(N)]
 
-        noise_start_ind = clean_latents_start_ind + clean_latents.shape[1]
-        hidden_order_dict['noise'] = [(noise_start_ind, hidden_states.shape[1])]
+        # noise_start_ind = clean_latents_start_ind + clean_latents.shape[1]
+        hidden_order_dict['noise'] = [(hidden_states.shape[1]-hidden_WH, hidden_states.shape[1])]
 
         return hidden_states, rope_freqs, hidden_order_dict
 
