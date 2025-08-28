@@ -1,7 +1,7 @@
 from pathlib import Path
 import math
 import numpy as np
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageDraw
 import torch
 
 from musubi_tuner.dataset.image_video_dataset import resize_image_to_bucket
@@ -75,10 +75,16 @@ def preproc_image(image_path, width=None, height=None):
     return image_tensor, image_np
 
 def preproc_mask(mask_path, width=None, height=None, invert=False):
-    if mask_path == '':
-        image_pil = Image.new("L", (width // 8, height // 8), 255)
+    if type(mask_path) in [str, Path]:
+        if mask_path == '':
+            image_pil = Image.new("L", (width // 8, height // 8), 255)
+        else:
+            image_pil = Image.open(mask_path).convert("L")
+    elif type(mask_path) == np.ndarray:
+        image_pil = Image.fromarray(mask_path)
     else:
-        image_pil = Image.open(mask_path).convert("L")
+        image_pil = mask_path
+    
     if invert:
         image_pil = ImageOps.invert(image_pil)
         
@@ -87,6 +93,22 @@ def preproc_mask(mask_path, width=None, height=None, invert=False):
         image_np = resize_image_to_bucket(image_np,  (width // 8, height // 8))
     image_tensor = (torch.from_numpy(image_np).float() / 255.0)[None, None, None, :, :]
     return image_tensor, image_np
+
+def draw_bboxes(img, bboxes, width=2, color=(255, 0, 0)):
+    img_copy = img.copy()
+    draw = ImageDraw.Draw(img_copy)
+    for bbox in bboxes:
+        x0, y0, x1, y1 = [int(coord * size) for coord, size in zip(bbox, (img_copy.width, img_copy.height, img_copy.width, img_copy.height))]
+        draw.rectangle([x0, y0, x1, y1], outline=color, width=width)
+    return img_copy
+
+def get_mask_from_bboxes(bboxes, width, height):
+    newimg = Image.new('L', (width, height), 0)
+    draw = ImageDraw.Draw(newimg)
+    for bbox in bboxes:
+        x0, y0, x1, y1 = [int(coord * size) for coord, size in zip(bbox, (width, height, width, height))]
+        draw.rectangle([x0, y0, x1, y1], outline=255, fill=255)
+    return np.array(newimg)
 
 def prepare_image_inputs(image_paths, feature_extractor, image_encoder, width=None, height=None, 
                          target_index=1, device=torch.device('cuda'), dtype=torch.bfloat16):
@@ -133,3 +155,15 @@ def prepare_control_inputs(control_image_paths, control_image_mask_paths, vae,
         "clean_latents_4x" : None, 
         "clean_latent_4x_indices" : None,
     } , control_nps
+
+def postproc_imgs(pixels):
+    result_imgs = []
+    for i in range(pixels.shape[0]):
+        for j in range(pixels.shape[2]):
+            pixel = (pixels[i,:,j,:,:]+1.0)/2.0
+            pixel = torch.clamp(pixel.permute(1,2,0).cpu(), 0.0, 1.0)
+            result_img = (pixel * 255.).numpy().astype(np.uint8)
+            result_alpha =  np.ones(result_img.shape[:2] + (1, ))*255
+            result_img = np.concatenate([result_img, result_alpha], axis=-1).astype(np.uint8)
+            result_imgs.append(result_img)
+    return result_imgs  
