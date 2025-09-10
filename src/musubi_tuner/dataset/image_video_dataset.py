@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from curses import meta
 import glob
 import json
 import math
@@ -8,6 +9,7 @@ import time
 from typing import Any, Optional, Sequence, Tuple, Union
 
 import numpy as np
+from omegaconf import OmegaConf
 import torch
 from safetensors.torch import save_file, load_file
 from safetensors import safe_open
@@ -168,9 +170,11 @@ class ItemInfo:
         self.text_encoder_output_cache_path: Optional[str] = None
 
         # np.ndarray for video, list[np.ndarray] for image with multiple controls
-        self.control_content: Optional[Union[np.ndarray, list[np.ndarray]]] = None
+        self.control_content = None
         # np.ndarray for image embedding if the first control content is not same as the image embedding input
         self.embed_content: Optional[np.ndarray] = content
+        # list[np.ndarray] for numeric bbox information for RoPE embedding
+        self.clean_latent_bboxes: Optional[list] = None
 
         # FramePack architecture specific
         self.fp_latent_window_size: Optional[int] = None
@@ -246,6 +250,8 @@ def save_latent_cache_framepack(
     clean_latents_4x: torch.Tensor,
     clean_latent_4x_indices: torch.Tensor,
     image_embeddings: torch.Tensor,
+    target_latent_masks: torch.Tensor,
+    clean_latent_bboxes: torch.Tensor
 ):
     """FramePack architecture only"""
     assert latent.dim() == 4, "latent should be 4D tensor (frame, channel, height, width)"
@@ -268,7 +274,10 @@ def save_latent_cache_framepack(
         sd[f"clean_latent_4x_indices_{indices_dtype_str}"] = clean_latent_4x_indices.detach().cpu()
     if clean_latents_4x is not None:
         sd[f"latents_clean_4x_{F}x{H}x{W}_{dtype_str}"] = clean_latents_4x.detach().cpu().contiguous()
-
+    if target_latent_masks is not None:
+        sd[f"target_latent_masks_{F}x{H}x{W}_{dtype_str}"] = target_latent_masks.detach().cpu().contiguous()
+    if clean_latent_bboxes is not None:
+        sd[f"clean_latent_bboxes_float32"] = clean_latent_bboxes.detach().cpu().float().contiguous()
     # for key, value in sd.items():
     #     print(f"{key}: {value.shape}")
     save_latent_cache_common(item_info, sd, ARCHITECTURE_FRAMEPACK_FULL)
@@ -619,7 +628,7 @@ class BucketBatchManager:
                     pass
                 else:
                     content_key = content_key.rsplit("_", 1)[0]  # remove dtype
-                    if content_key.startswith("latents_"):
+                    if any([content_key.startswith(x) for x in ['latents_', 'target_latent_']]):
                         content_key = content_key.rsplit("_", 1)[0]  # remove FxHxW
 
                 if content_key not in batch_tensor_data:
@@ -818,6 +827,8 @@ class ImageJsonlDatasource(ImageDatasource):
         for item in self.data:
             if "control_path" in item:
                 item["control_path_0"] = item.pop("control_path")
+            if "control_mask_path" in item:
+                item['control_mask_path_0'] = item.pop('control_path')
 
             # Ensure control paths are named consistently, from control_path_0000 to control_path_0, control_path_1, etc.
             control_path_keys = [key for key in item.keys() if key.startswith("control_path_")]
@@ -825,6 +836,12 @@ class ImageJsonlDatasource(ImageDatasource):
             for i, key in enumerate(control_path_keys):
                 if key != f"control_path_{i}":
                     item[f"control_path_{i}"] = item.pop(key)
+
+            control_mask_path_keys = [key for key in item.keys() if key.startswith("control_mask_path_")]
+            control_mask_path_keys.sort(key=lambda x: int(x.split("_")[-1]))
+            for i, key in enumerate(control_mask_path_keys):
+                if key != f"control_mask_path_{i}":
+                    item[f"control_mask_path_{i}"] = item.pop(key)
 
         # Check if there are control paths in the JSONL
         self.has_control = any("control_path_0" in item for item in self.data)
@@ -839,6 +856,18 @@ class ImageJsonlDatasource(ImageDatasource):
                 raise ValueError(f"Some images do not have control paths in JSONL data: {missing_control_images}")
             logger.info(f"found {len(self.data)} images with {self.control_count_per_image} control images per image in JSONL data")
 
+        self.has_control_mask = any("control_mask_path_0" in item for item in self.data)
+        if self.has_control_mask:
+            missing_control_mask_images = [
+                item["image_path"]
+                for item in self.data
+                if sum(f"control_mask_path_{i}" not in item for i in range(self.control_count_per_image)) > 0
+            ]
+            if missing_control_mask_images:
+                logger.error(f"Some images do not have control mask paths in JSONL data: {missing_control_mask_images}")
+                raise ValueError(f"Some images do not have control mask paths in JSONL data: {missing_control_mask_images}")
+            logger.info(f"found {len(self.data)} masks with {self.control_count_per_image} control masks per image in JSONL data")
+        
         self.has_embed = any("embed_path" in item for item in self.data)
         if self.has_embed:
             missing_embed_images = [
@@ -848,7 +877,19 @@ class ImageJsonlDatasource(ImageDatasource):
             ]
             if missing_embed_images:
                 logger.error(f"Some images do not have embed paths in JSONL data: {missing_embed_images}")
-                raise ValueError(f"Some images do not have embed paths in JSONL data: {missing_embed_images}")    
+                raise ValueError(f"Some images do not have embed paths in JSONL data: {missing_embed_images}")  
+
+        self.has_clean_bbox = any("meta" in item for item in self.data)
+        if self.has_clean_bbox:
+            missing_bbox_images = [
+                item["image_path"]
+                for item in self.data
+                if "meta" not in item
+            ]
+            if missing_bbox_images:
+                logger.error(f"Some images do not have clean bbox paths in JSONL data: {missing_bbox_images}")
+                raise ValueError(f"Some images do not have clean bbox paths in JSONL data: {missing_bbox_images}")
+            logger.info(f"found {len(self.data)} metadata with {self.control_count_per_image} bbox paths per image in JSONL data")
 
     def is_indexable(self):
         return True
@@ -871,6 +912,14 @@ class ImageJsonlDatasource(ImageDatasource):
                 control = Image.open(control_path)
                 if control.mode != "RGB" and control.mode != "RGBA":
                     control = control.convert("RGB")
+
+                if self.has_control_mask:
+                    control_mask_path = data[f"control_mask_path_{i}"]
+                    control_mask = Image.open(control_mask_path)
+                    if control_mask.mode != "L":
+                        control_mask = control_mask.convert("L")
+                    control = (control, control_mask)
+
                 controls.append(control)
 
         embed = None
@@ -880,7 +929,13 @@ class ImageJsonlDatasource(ImageDatasource):
             if embed.mode != "RGB" and embed.mode != "RGBA":
                 embed = embed.convert("RGB")
 
-        return image_path, image, caption, controls, embed
+        clean_latent_bbox = None
+        if self.has_clean_bbox:
+            meta = OmegaConf.load(data['meta'])
+            keys = list(range(self.control_count_per_image))
+            clean_latent_bbox = [meta['target_body'].get(str(x), [0.0,0.0,meta['width'],meta['height']]) for x in keys]
+            clean_latent_bbox = [[x[0]/meta['width'], x[1]/meta['height'], x[2]/meta['width'], x[3]/meta['height']] for x in clean_latent_bbox]
+        return image_path, image, caption, controls, embed, clean_latent_bbox
 
     def get_caption(self, idx: int) -> tuple[str, str]:
         data = self.data[idx]
@@ -1233,12 +1288,14 @@ class BaseDataset(torch.utils.data.Dataset):
         cache_path is based on the item_key and the resolution.
         """
         w, h = item_info.original_size
-        basename = os.path.splitext(os.path.basename(item_info.item_key))[0]
+        # basename = os.path.splitext(os.path.basename(item_info.item_key))[0]
+        basename = os.path.basename(os.path.dirname(item_info.item_key))
         assert self.cache_directory is not None, "cache_directory is required / cache_directoryは必須です"
         return os.path.join(self.cache_directory, f"{basename}_{w:04d}x{h:04d}_{self.architecture}.safetensors")
 
     def get_text_encoder_output_cache_path(self, item_info: ItemInfo) -> str:
-        basename = os.path.splitext(os.path.basename(item_info.item_key))[0]
+        # basename = os.path.splitext(os.path.basename(item_info.item_key))[0]
+        basename = os.path.basename(os.path.dirname(item_info.item_key))
         assert self.cache_directory is not None, "cache_directory is required / cache_directoryは必須です"
         return os.path.join(self.cache_directory, f"{basename}_{self.architecture}_te.safetensors")
 
@@ -1357,6 +1414,8 @@ class ImageDataset(BaseDataset):
         fp_1f_no_post: Optional[bool] = False,
         debug_dataset: bool = False,
         architecture: str = "no_default",
+        control_resolution: Tuple[int, int] = None,
+        control_count_per_image: int = 1,
     ):
         super(ImageDataset, self).__init__(
             resolution,
@@ -1376,8 +1435,8 @@ class ImageDataset(BaseDataset):
         self.fp_1f_clean_indices = fp_1f_clean_indices
         self.fp_1f_target_index = fp_1f_target_index
         self.fp_1f_no_post = fp_1f_no_post
+        self.control_count_per_image = control_count_per_image
 
-        control_count_per_image = 1
         if fp_1f_clean_indices is not None:
             control_count_per_image = len(fp_1f_clean_indices)
 
@@ -1396,6 +1455,7 @@ class ImageDataset(BaseDataset):
         self.batch_manager = None
         self.num_train_items = 0
         self.has_control = self.datasource.has_control
+        self.control_resolution = control_resolution
 
     def get_metadata(self):
         metadata = super().get_metadata()
@@ -1430,7 +1490,7 @@ class ImageDataset(BaseDataset):
                         break  # submit batch if possible
 
                 for future in completed_futures:
-                    original_size, item_key, image, caption, controls, embed = future.result()
+                    original_size, item_key, image, caption, controls, embed, clean_latent_bbox = future.result()
                     bucket_height, bucket_width = image.shape[:2]
                     bucket_reso = (bucket_width, bucket_height)
 
@@ -1453,6 +1513,8 @@ class ImageDataset(BaseDataset):
                         item_info.control_content = controls
                     if embed is not None:
                         item_info.embed_content = embed
+                    if clean_latent_bbox is not None:
+                        item_info.clean_latent_bboxes = clean_latent_bbox
 
                     if bucket_reso not in batches:
                         batches[bucket_reso] = []
@@ -1476,24 +1538,44 @@ class ImageDataset(BaseDataset):
 
             # fetch and resize image in a separate thread
             def fetch_and_resize(op: callable) -> tuple[tuple[int, int], str, Image.Image, str, Optional[Image.Image]]:
-                image_key, image, caption, controls, embed = op()
+                image_key, image, caption, controls, embed, clean_latent_bbox = op()
                 image: Image.Image
                 image_size = image.size
 
                 bucket_reso = buckset_selector.get_bucket_resolution(image_size)
                 image = resize_image_to_bucket(image, bucket_reso)  # returns np.ndarray
+
                 resized_controls = None
                 if controls is not None:
+                    control_bucket_reso = self.control_resolution
+                    if control_bucket_reso is None:
+                        control_bucket_reso = bucket_reso
                     resized_controls = []
                     for control in controls:
-                        resized_control = resize_image_to_bucket(control, bucket_reso)  # returns np.ndarray
+                        if type(control) == tuple:
+                            control, control_mask = control
+                            resized_control = resize_image_to_bucket(control, control_bucket_reso) 
+                            resized_control_mask = resize_image_to_bucket(control_mask, bucket_reso) 
+                            resized_control = (resized_control, resized_control_mask)
+                        else:
+                            resized_control = resize_image_to_bucket(control, control_bucket_reso)  # returns np.ndarray
                         resized_controls.append(resized_control)
+
                 resized_embed = None
                 if embed is not None:
                     bucket_reso = buckset_selector.get_bucket_resolution(embed.size)
                     resized_embed = resize_image_to_bucket(embed, bucket_reso)
 
-                return image_size, image_key, image, caption, resized_controls, resized_embed
+                resized_clean_latent_bbox = []
+                if clean_latent_bbox is not None:
+                    for bbox in clean_latent_bbox:
+                        control_bucket_reso = self.control_resolution
+                        bbox2 = np.array([bbox[0], bbox[1], 
+                                  bbox[0]+(control_bucket_reso[1] / bucket_reso[1]), 
+                                  bbox[1]+(control_bucket_reso[0] / bucket_reso[0])])
+                        resized_clean_latent_bbox.append(bbox2)
+                resized_clean_latent_bbox = torch.tensor(resized_clean_latent_bbox).float()
+                return image_size, image_key, image, caption, resized_controls, resized_embed, resized_clean_latent_bbox
 
             future = executor.submit(fetch_and_resize, fetch_op)
             futures.append(future)

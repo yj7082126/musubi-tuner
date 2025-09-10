@@ -35,7 +35,7 @@ class BaseDatasetParams:
     cache_directory: Optional[str] = None
     debug_dataset: bool = False
     architecture: str = "no_default"  # short style like "hv" or "wan"
-
+    
 
 @dataclass
 class ImageDatasetParams(BaseDatasetParams):
@@ -48,7 +48,8 @@ class ImageDatasetParams(BaseDatasetParams):
     fp_1f_clean_indices: Optional[Sequence[int]] = None
     fp_1f_target_index: Optional[int] = None
     fp_1f_no_post: Optional[bool] = False
-
+    control_resolution: Optional[Tuple[int, int]] = None
+    control_count_per_image: Optional[int] = 1
 
 @dataclass
 class VideoDatasetParams(BaseDatasetParams):
@@ -117,6 +118,8 @@ class ConfigSanitizer:
         "fp_1f_clean_indices": [int],
         "fp_1f_target_index": int,
         "fp_1f_no_post": bool,
+        "control_resolution": functools.partial(__validate_and_convert_scalar_or_twodim.__func__, int),
+        "control_count_per_image": int
     }
     VIDEO_DATASET_DISTINCT_SCHEMA = {
         "video_directory": str,
@@ -238,7 +241,6 @@ class BlueprintGenerator:
         param_names = default_params.keys()
 
         params = {name: search_value(name_map.get(name, name), fallbacks, default_params.get(name)) for name in param_names}
-
         return param_klass(**params)
 
     @staticmethod
@@ -301,7 +303,9 @@ def generate_dataset_group_by_blueprint(dataset_group_blueprint: DatasetGroupBlu
         fp_latent_window_size: {dataset.fp_latent_window_size}
         fp_1f_clean_indices: {dataset.fp_1f_clean_indices}
         fp_1f_target_index: {dataset.fp_1f_target_index}
-        fp_1f_no_post: {dataset.fp_1f_no_post}
+        fp_1f_no_post: {dataset.fp_1f_no_post}, 
+        control_count_per_image: {dataset.control_count_per_image},
+        control_resolution: {dataset.control_resolution}
     \n"""
                 ),
                 "    ",

@@ -283,7 +283,7 @@ Start training using the following command (input as a single line):
 
 ```bash
 accelerate launch --num_cpu_threads_per_process 1 --mixed_precision bf16 src/musubi_tuner/hv_train_network.py 
-    --dit path/to/ckpts/hunyuan-video-t2v-720p/transformers/mp_rank_00_model_states.pt 
+    --dit path/to/ckpts/hunyuan-video-t2v-720p/network_args/mp_rank_00_model_states.pt 
     --dataset_config path/to/toml --sdpa --mixed_precision bf16 --fp8_base 
     --optimizer_type adamw8bit --learning_rate 2e-4 --gradient_checkpointing 
     --max_data_loader_n_workers 2 --persistent_data_loader_workers 

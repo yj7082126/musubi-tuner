@@ -262,6 +262,14 @@ def line_to_prompt_dict(line: str) -> dict:
                 prompt_dict["one_frame"] = m.group(1)
                 continue
 
+            m = re.match(r'em (.+)', parg, re.IGNORECASE)
+            if m:
+                entity_mask_path = m.group(1)
+                if "entity_mask_path" not in prompt_dict:
+                    prompt_dict["entity_mask_path"] = []
+                prompt_dict["entity_mask_path"].append(entity_mask_path)
+                continue
+
         except ValueError as ex:
             logger.error(f"Exception in parsing / 解析エラー: {parg}")
             logger.error(ex)

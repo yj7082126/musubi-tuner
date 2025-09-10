@@ -5,6 +5,7 @@ from PIL import Image
 import torch
 
 def get_pltplot_as_pil(data, vmin=None, vmax=None, cmap=plt.cm.viridis):
+    data = data.clone().to(dtype=torch.float32).cpu().numpy()
     vmin = data.min() if vmin is None else vmin
     vmax = data.max() if vmax is None else vmax
     norm = plt.Normalize(vmin=vmin, vmax=vmax) # Normalize data to [0,1] range

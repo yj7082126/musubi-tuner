@@ -45,10 +45,14 @@ def encode_and_save_batch(
     latent_window_size = batch[0].fp_latent_window_size  # all items should have the same window size
 
     # Stack batch into tensor (B,C,F,H,W) in RGB order
-    contents = torch.stack([torch.from_numpy(item.content) for item in batch])
+    if type(batch[0].content) == tuple:
+        contents = torch.stack([torch.from_numpy(item.content[0]) for item in batch])
+        contents_masks = torch.stack([torch.from_numpy(item.content[1]) for item in batch])
+    else:
+        contents = torch.stack([torch.from_numpy(item.content) for item in batch])
+
     if len(contents.shape) == 4:
         contents = contents.unsqueeze(1)  # B, H, W, C -> B, F, H, W, C
-
     contents = contents.permute(0, 4, 1, 2, 3).contiguous()  # B, C, F, H, W
     contents = contents.to(vae.device, dtype=vae.dtype)
     contents = contents / 127.5 - 1.0  # normalize to [-1, 1]
@@ -254,12 +258,15 @@ def encode_and_save_batch_one_frame(
 ):
     # item.content: target image (H, W, C)
     # item.control_content: list of images (H, W, C)
-    _, _, contents, content_masks = preprocess_contents(batch)
+    _, _, image, contents, content_masks, target_masks, clean_latent_bboxes = preprocess_contents(batch)
+    image = image.to(vae.device, dtype=vae.dtype)  # B, C, H, W
     contents = contents.to(vae.device, dtype=vae.dtype)  # B, C, F, H, W
+    target_masks = target_masks.to(vae.device, dtype=vae.dtype)
 
     # VAE encode: we need to encode one frame at a time because VAE encoder has stride=4 for the time dimension except for the first frame.
-    latents = [hunyuan.vae_encode(contents[:, :, idx : idx + 1], vae).to("cpu") for idx in range(contents.shape[2])]
-    latents = torch.cat(latents, dim=2)  # B, C, F, H/8, W/8
+    target_latent = hunyuan.vae_encode(image, vae).to("cpu")  # B, C, 1, H/8, W/8
+    clean_latents = [hunyuan.vae_encode(contents[:, :, idx : idx + 1], vae).to("cpu") for idx in range(contents.shape[2])]
+    clean_latents = torch.cat(clean_latents, dim=2)  # B, C, F, H/8, W/8
 
     # apply alphas to latents
     for b, item in enumerate(batch):
@@ -267,7 +274,7 @@ def encode_and_save_batch_one_frame(
             if content_mask is not None:
                 # apply mask to the latents
                 # print(f"Applying content mask for item {item.item_key}, frame {i}")
-                latents[b : b + 1, :, i : i + 1] *= content_mask
+                clean_latents[b : b + 1, :, i : i + 1] *= content_mask
 
     # Vision encoding per‑item (once): use control content because it is the start image
     # images = [item.control_content[0] for item in batch]  # list of [H, W, C]
@@ -293,6 +300,8 @@ def encode_and_save_batch_one_frame(
                 f"Item {item.item_key} has no clean_latent_indices defined, using default indices for one frame training."
             )
             clean_latent_indices = [0]
+        if len(clean_latent_indices) != len(clean_latents):
+            clean_latent_indices = list(range(len(clean_latents)))  # F
 
         if not item.fp_1f_no_post:
             clean_latent_indices = clean_latent_indices + [1 + item.fp_latent_window_size]
@@ -317,36 +326,41 @@ def encode_and_save_batch_one_frame(
             clean_latent_4x_indices = torch.arange(index, index + 16)  #  16
 
         # clean latents preparation (emulating inference)
-        clean_latents = latents[b, :, :-1]  # C, F, H, W
+        clean_latents_b = clean_latents[b, :]  # C, F, H, W
         if not item.fp_1f_no_post:
             # If zero post is enabled, we need to add a zero frame at the end
-            clean_latents = F.pad(clean_latents, (0, 0, 0, 0, 0, 1), value=0.0)  # C, F+1, H, W
+            clean_latents_b = F.pad(clean_latents_b, (0, 0, 0, 0, 0, 1), value=0.0)  # C, F+1, H, W
 
         # Target latents for this section (ground truth)
-        target_latents = latents[b, :, -1:]  # C, 1, H, W
+        target_latents_b = target_latent[b, :]  # C, 1, H, W
+        target_latent_masks = target_masks[b]
 
         print(f"Saving cache for item {item.item_key} at {item.latent_cache_path}. no_post: {item.fp_1f_no_post}")
         print(f"  Clean latent indices: {clean_latent_indices}, latent index: {latent_index}")
-        print(f"  Clean latents: {clean_latents.shape}, target latents: {target_latents.shape}")
+        print(f"  Clean latents: {clean_latents_b.shape}, target latents: {target_latents_b.shape}")
         print(f"  Clean latents 2x indices: {clean_latent_2x_indices}, clean latents 4x indices: {clean_latent_4x_indices}")
         print(
             f"  Clean latents 2x: {clean_latents_2x.shape if clean_latents_2x is not None else 'None'}, "
             f"Clean latents 4x: {clean_latents_4x.shape if clean_latents_4x is not None else 'None'}"
         )
         print(f"  Image embeddings: {image_embeddings[b].shape}")
+        print(f"  Target latent mask: {target_latent_masks.shape}")
+        print(f"  Clean Latent BBoxes: {clean_latent_bboxes[b]}")
 
         # save cache (file path is inside item.latent_cache_path pattern), remove batch dim
         save_latent_cache_framepack(
             item_info=item,
-            latent=target_latents,  # Ground truth for this section
+            latent=target_latents_b,  # Ground truth for this section
             latent_indices=latent_index,  # Indices for the ground truth section
-            clean_latents=clean_latents,  # Start frame + history placeholder
+            clean_latents=clean_latents_b,  # Start frame + history placeholder
             clean_latent_indices=clean_latent_indices,  # Indices for start frame + history placeholder
             clean_latents_2x=clean_latents_2x,  # History placeholder
             clean_latent_2x_indices=clean_latent_2x_indices,  # Indices for history placeholder
             clean_latents_4x=clean_latents_4x,  # History placeholder
             clean_latent_4x_indices=clean_latent_4x_indices,  # Indices for history placeholder
             image_embeddings=image_embeddings[b],
+            target_latent_masks=target_latent_masks, 
+            clean_latent_bboxes=clean_latent_bboxes[b],
         )
 
 
@@ -460,8 +474,8 @@ def encode_datasets_framepack(datasets: list[BaseDataset], encode: callable, arg
                         all_latent_cache_paths.append(p)
                         all_existing = all_existing and os.path.exists(p)
 
-                if not all_existing:  # if any section cache is missing
-                    filtered_batch.append(item)
+                # if not all_existing:  # if any section cache is missing
+                filtered_batch.append(item)
 
             if args.skip_existing:
                 if len(filtered_batch) == 0:  # all sections exist

@@ -12,8 +12,7 @@ import torchvision.transforms.functional as TF
 from tqdm import tqdm
 from accelerate import Accelerator, init_empty_weights
 
-from musubi_tuner.dataset import image_video_dataset
-from musubi_tuner.dataset.image_video_dataset import ARCHITECTURE_FRAMEPACK, ARCHITECTURE_FRAMEPACK_FULL, load_video
+from musubi_tuner.dataset.image_video_dataset import ARCHITECTURE_FRAMEPACK, ARCHITECTURE_FRAMEPACK_FULL, load_video, resize_image_to_bucket
 from musubi_tuner.fpack_generate_video import decode_latent
 from musubi_tuner.frame_pack import hunyuan
 from musubi_tuner.frame_pack.clip_vision import hf_clip_vision_encode
@@ -22,8 +21,8 @@ from musubi_tuner.frame_pack.framepack_utils import load_vae as load_framepack_v
 from musubi_tuner.frame_pack.hunyuan_video_packed import HunyuanVideoTransformer3DModelPacked, load_packed_model
 from musubi_tuner.frame_pack.k_diffusion_hunyuan import sample_hunyuan
 from musubi_tuner.frame_pack.utils import crop_or_pad_yield_mask
-from musubi_tuner.dataset.image_video_dataset import resize_image_to_bucket
 from musubi_tuner.hv_train_network import NetworkTrainer, load_prompts, clean_memory_on_device, setup_parser_common, read_config_from_file
+from musubi_tuner.utils.bbox_utils import get_bbox_from_mask, get_mask_from_bboxes, draw_bboxes, get_facebbox_from_bbox
 
 import logging
 
@@ -87,6 +86,7 @@ class FramePackNetworkTrainer(NetworkTrainer):
         clean_memory_on_device(device)
 
         # image embedding for I2V training
+        # if not args.remove_embedding:
         feature_extractor, image_encoder = load_image_encoders(args)
         image_encoder.to(device)
 
@@ -106,14 +106,13 @@ class FramePackNetworkTrainer(NetworkTrainer):
 
             img = Image.open(image_path).convert("RGB")
             img_np = np.array(img)  # PIL to numpy, HWC
-            img_np = image_video_dataset.resize_image_to_bucket(img_np, (width, height))  # returns a numpy array
-
-            with torch.no_grad():
-                image_encoder_output = hf_clip_vision_encode(img_np, feature_extractor, image_encoder)
-            image_encoder_last_hidden_state = image_encoder_output.last_hidden_state
-
-            image_encoder_last_hidden_state = image_encoder_last_hidden_state.to("cpu")
-            sample_prompts_image_embs[image_path] = image_encoder_last_hidden_state
+            img_np = resize_image_to_bucket(img_np, (width, height))  # returns a numpy array
+            if not args.remove_embedding:
+                with torch.no_grad():
+                    image_encoder_output = hf_clip_vision_encode(img_np, feature_extractor, image_encoder)
+                image_encoder_last_hidden_state = image_encoder_output.last_hidden_state
+                image_encoder_last_hidden_state = image_encoder_last_hidden_state.to("cpu")
+                sample_prompts_image_embs[image_path] = image_encoder_last_hidden_state
 
         del image_encoder
         clean_memory_on_device(device)
@@ -137,7 +136,8 @@ class FramePackNetworkTrainer(NetworkTrainer):
 
             # p = prompt_dict.get("image_path", None)
             p = prompt_dict.get("control_image_path", [None])[0]
-            prompt_dict_copy["image_encoder_last_hidden_state"] = sample_prompts_image_embs[p]
+            if not args.remove_embedding:
+                prompt_dict_copy["image_encoder_last_hidden_state"] = sample_prompts_image_embs[p]
 
             sample_parameters.append(prompt_dict_copy)
 
@@ -195,17 +195,29 @@ class FramePackNetworkTrainer(NetworkTrainer):
         num_frames = latent_window_size * 4 - 3
 
         # prepare start and control latent
-        def encode_image(path):
+        def encode_image(path, respect_own_size=True):
             image = Image.open(path)
             if image.mode == "RGBA":
                 alpha = image.split()[-1]
                 image = image.convert("RGB")
             else:
                 alpha = None
-            image = resize_image_to_bucket(image, (width, height))  # returns a numpy array
+            
+            if respect_own_size:
+                image_w, image_h = (image.size[0] // 8) * 8, (image.size[1]) // 8 * 8
+            else:
+                image_w, image_h = width, height
+            image = resize_image_to_bucket(image, (image_w, image_h))  # returns a numpy array
             image = torch.from_numpy(image).permute(2, 0, 1).unsqueeze(1).unsqueeze(0).float()  # 1, C, 1, H, W
             image = image / 127.5 - 1  # -1 to 1
             return hunyuan.vae_encode(image, vae).to("cpu"), alpha
+
+        def encode_mask(path):
+            mask = Image.open(path).convert("L")
+            mask = resize_image_to_bucket(mask, (width // 8, height // 8))
+            mask = torch.from_numpy(mask).unsqueeze(0).unsqueeze(0).unsqueeze(0).float()
+            mask = mask / 255.
+            return mask.to("cpu")
 
         # VAE encoding
         logger.info(f"Encoding image to latent space")
@@ -218,14 +230,23 @@ class FramePackNetworkTrainer(NetworkTrainer):
         if one_frame_mode:
             control_latents = []
             control_alphas = []
+            entity_masks = []
             if "control_image_path" in sample_parameter:
                 for control_image_path in sample_parameter["control_image_path"]:
+                    logger.info(f"Encoding control image: {control_image_path}")
                     control_latent, control_alpha = encode_image(control_image_path)
                     control_latents.append(control_latent)
                     control_alphas.append(control_alpha)
+            if "entity_mask_path" in sample_parameter:
+                for entity_mask_path in sample_parameter["entity_mask_path"]:
+                    logger.info(f"Encoding entity mask: {entity_mask_path}")
+                    entity_mask_latent = encode_mask(entity_mask_path)
+                    entity_masks.append(entity_mask_latent)
+            entity_masks = torch.cat(entity_masks, dim=0)
         else:
             control_latents = None
             control_alphas = None
+            entity_masks = None
 
         vae.to("cpu")  # move VAE to CPU to save memory
         clean_memory_on_device(device)
@@ -303,10 +324,15 @@ class FramePackNetworkTrainer(NetworkTrainer):
                     llama_vec_n = sample_parameter["negative_llama_vec"].to(device, dtype=torch.bfloat16)
                     llama_attention_mask_n = sample_parameter["negative_llama_attention_mask"].to(device)
                     clip_l_pooler_n = sample_parameter["negative_clip_l_pooler"].to(device, dtype=torch.bfloat16)
-                image_encoder_last_hidden_state = sample_parameter["image_encoder_last_hidden_state"].to(
-                    device, dtype=torch.bfloat16
-                )
 
+                if not args.remove_embedding:
+                    image_encoder_last_hidden_state = sample_parameter["image_encoder_last_hidden_state"].to(
+                        device, dtype=torch.bfloat16
+                    )
+                else:
+                    image_encoder_last_hidden_state = None
+
+                use_attention_mask = ["mask_control"] if entity_masks is not None else []
                 generated_latents = sample_hunyuan(
                     transformer=model,
                     sampler=args.sample_solver,
@@ -327,6 +353,7 @@ class FramePackNetworkTrainer(NetworkTrainer):
                     negative_prompt_poolers=clip_l_pooler_n,
                     device=device,
                     dtype=torch.bfloat16,
+                    cache_results = True, 
                     image_embeddings=image_encoder_last_hidden_state,
                     latent_indices=latent_indices,
                     clean_latents=clean_latents,
@@ -335,6 +362,9 @@ class FramePackNetworkTrainer(NetworkTrainer):
                     clean_latent_2x_indices=clean_latent_2x_indices,
                     clean_latents_4x=clean_latents_4x,
                     clean_latent_4x_indices=clean_latent_4x_indices,
+                    entity_masks=entity_masks,
+                    use_attention_mask=use_attention_mask,
+                    # return_dict=False,
                 )
 
                 total_generated_latent_frames += int(generated_latents.shape[2])
@@ -355,15 +385,6 @@ class FramePackNetworkTrainer(NetworkTrainer):
             latent_indices = torch.zeros((1, 1), dtype=torch.int64)  # 1x1 latent index for target image
             latent_indices[:, 0] = latent_window_size  # last of latent_window
 
-            def get_latent_mask(mask_image: Image.Image):
-                mask_image = mask_image.resize((width // 8, height // 8), Image.LANCZOS)
-                mask_image = np.array(mask_image)  # PIL to numpy, HWC
-                mask_image = torch.from_numpy(mask_image).float() / 255.0  # 0 to 1.0, HWC
-                mask_image = mask_image.squeeze(-1)  # HWC -> HW
-                mask_image = mask_image.unsqueeze(0).unsqueeze(0).unsqueeze(0)  # HW -> 111HW (B, C, F, H, W)
-                mask_image = mask_image.to(torch.float32)
-                return mask_image
-
             if control_latents is None or len(control_latents) == 0:
                 logger.info(f"No control images provided for one frame inference. Use zero latents for control images.")
                 control_latents = [torch.zeros(1, 16, 1, height // 8, width // 8, dtype=torch.float32)]
@@ -379,6 +400,27 @@ class FramePackNetworkTrainer(NetworkTrainer):
             if "no_post" not in one_frame_inference:
                 clean_latent_indices[:, -1] = 1 + latent_window_size  # default index for clean latents post
 
+            if args.sample_with_latentbbox_rope:
+                clean_w, clean_h = clean_latents.shape[4] * 8, clean_latents.shape[3] * 8
+                print(entity_masks.shape)
+                bbox = get_bbox_from_mask(entity_masks[0,:,0].permute(1,2,0).cpu().numpy().astype(bool)[...,0])
+                face_bbox = get_facebbox_from_bbox(bbox, clean_w, clean_h, width, height, mode="provided_size_mid_x")
+                clean_latent_bboxes = torch.tensor([face_bbox]).unsqueeze(0).float()
+                logging.info(f"Entity BBox: {bbox}, Face BBox: {face_bbox}")
+                logging.info(f"Use latent bbox for RoPE: {clean_latent_bboxes}")
+            else:
+                clean_latent_bboxes = None
+
+            def get_latent_mask(mask_image: Image.Image) -> torch.Tensor:
+                if mask_image.mode != "L":
+                    mask_image = mask_image.convert("L")
+                mask_image = mask_image.resize((width // 8, height // 8), Image.LANCZOS)
+                mask_image = np.array(mask_image)  # PIL to numpy, HWC
+                mask_image = torch.from_numpy(mask_image).float() / 255.0  # 0 to 1.0, HWC
+                mask_image = mask_image.squeeze(-1)  # HWC -> HW
+                mask_image = mask_image.unsqueeze(0).unsqueeze(0).unsqueeze(0)  # HW -> 111HW (BCFHW)
+                mask_image = mask_image.to(torch.float32)
+                return mask_image
             # apply mask for control latents (clean latents)
             for i in range(len(control_alphas)):
                 control_alpha = control_alphas[i]
@@ -434,7 +476,15 @@ class FramePackNetworkTrainer(NetworkTrainer):
                 llama_vec_n = sample_parameter["negative_llama_vec"].to(device, dtype=torch.bfloat16)
                 llama_attention_mask_n = sample_parameter["negative_llama_attention_mask"].to(device)
                 clip_l_pooler_n = sample_parameter["negative_clip_l_pooler"].to(device, dtype=torch.bfloat16)
-            image_encoder_last_hidden_state = sample_parameter["image_encoder_last_hidden_state"].to(device, dtype=torch.bfloat16)
+
+            if not args.remove_embedding:
+                image_encoder_last_hidden_state = sample_parameter["image_encoder_last_hidden_state"].to(
+                    device, dtype=torch.bfloat16
+                )
+            else:
+                image_encoder_last_hidden_state = None
+
+            use_attention_mask = ["mask_control"] if entity_masks is not None else []
 
             generated_latents = sample_hunyuan(
                 transformer=model,
@@ -460,10 +510,14 @@ class FramePackNetworkTrainer(NetworkTrainer):
                 latent_indices=latent_indices,
                 clean_latents=clean_latents,
                 clean_latent_indices=clean_latent_indices,
+                clean_latent_bboxes=clean_latent_bboxes,
                 clean_latents_2x=clean_latents_2x,
                 clean_latent_2x_indices=clean_latent_2x_indices,
                 clean_latents_4x=clean_latents_4x,
                 clean_latent_4x_indices=clean_latent_4x_indices,
+                entity_masks=entity_masks,
+                use_attention_mask=use_attention_mask,
+                # return_dict=False,
             )
 
             real_history_latents = generated_latents.to(clean_latents)
@@ -502,7 +556,8 @@ class FramePackNetworkTrainer(NetworkTrainer):
     ):
         logger.info(f"Loading DiT model from {dit_path}")
         device = accelerator.device
-        model = load_packed_model(device, dit_path, attn_mode, loading_device, args.fp8_scaled, split_attn)
+        model = load_packed_model(device, dit_path, attn_mode, loading_device, args.fp8_scaled, split_attn, 
+                                  has_image_proj=not args.remove_embedding)
         return model
 
     def scale_shift_latents(self, latents):
@@ -553,6 +608,10 @@ class FramePackNetworkTrainer(NetworkTrainer):
             else:
                 clean_latent_4x = None
 
+            image_embeddings = batch["image_embeddings"] if "image_embeddings" in batch else None
+            entity_masks = batch['target_latent_masks'] if 'target_latent_masks' in batch and args.use_attention_controlimage_masking else None
+            use_attention_mask = ["mask_control"] if entity_masks is not None else []
+            clean_latent_bboxes = batch['clean_latent_bboxes'] if 'clean_latent_bboxes' in batch else clean_latent_bboxes
             model_pred = model(
                 hidden_states=noisy_model_input,
                 timestep=timesteps,
@@ -560,14 +619,20 @@ class FramePackNetworkTrainer(NetworkTrainer):
                 encoder_attention_mask=batch["llama_attention_mask"],
                 pooled_projections=batch["clip_l_pooler"],
                 guidance=distilled_guidance,
+                ## image_kwargs
+                image_embeddings=image_embeddings,
                 latent_indices=batch["latent_indices"],
+                ## control_kwargs
                 clean_latents=batch["latents_clean"],
                 clean_latent_indices=batch["clean_latent_indices"],
+                clean_latent_bboxes=clean_latent_bboxes,
                 clean_latents_2x=clean_latent_2x,
                 clean_latent_2x_indices=clean_latent_2x_indices,
                 clean_latents_4x=clean_latent_4x,
                 clean_latent_4x_indices=clean_latent_4x_indices,
-                image_embeddings=batch["image_embeddings"],
+                ## custom_control_kwargs
+                entity_masks=entity_masks,
+                use_attention_mask=use_attention_mask,
                 return_dict=False,
             )
             model_pred = model_pred[0]  # returns tuple (model_pred, )
@@ -595,6 +660,12 @@ def framepack_setup_parser(parser: argparse.ArgumentParser) -> argparse.Argument
     parser.add_argument("--bulk_decode", action="store_true", help="decode all frames at once in sample generation")
     parser.add_argument("--f1", action="store_true", help="Use F1 sampling method for sample generation")
     parser.add_argument("--one_frame", action="store_true", help="Use one frame sampling method for sample generation")
+    
+    parser.add_argument("--remove_embedding", action="store_true", help="Remove the Image embedding module from FramePack-I2V model")
+    parser.add_argument("--use_attention_controlimage_masking", action="store_true", 
+                        help="Use attention masking for control image. The dataset batches must have target_latent_masks")
+    parser.add_argument("--sample_with_latentbbox_rope", action="store_true", 
+                        help="Use clean latent bbox rope embedding when sampling. For training, if batch has latent boxes, it will be used.")
     return parser
 
 

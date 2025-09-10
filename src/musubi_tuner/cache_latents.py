@@ -182,47 +182,74 @@ def preprocess_contents(batch: list[ItemInfo]) -> tuple[int, int, torch.Tensor]:
     # item.content: target image (H, W, C)
     # item.control_content: list of images (H, W, C)
 
+    # Note : content_masks : masks to be applied at the control images to mask control image
+    # Note : target_masks : masks to be applied at the target end for spatial control
     # Stack batch into tensor (B,F,H,W,C) in RGB order. The numbers of control content for each item are the same.
-    contents = []
-    content_masks: list[list[Optional[torch.Tensor]]] = []
+
+    images = []
+    control_contents = []
+    control_contents_masks: list[list[Optional[torch.Tensor]]] = []
+    target_masks: list[list[Optional[torch.Tensor]]] = []
+    clean_latent_bboxes = []
     for item in batch:
-        item_contents = item.control_content + [item.content]
-
+        image = item.content
+        if type(item.control_content[0]) == tuple:
+            item_control_content = [c[0] for c in item.control_content]
+            target_mask_contents = [c[1] for c in item.control_content]
+        else:
+            item_control_content = item.control_content
+            target_mask_contents = []
+        
         item_masks = []
-        for i, c in enumerate(item_contents):
+        for i, c in enumerate(item_control_content):
             if c.shape[-1] == 4:  # RGBA
-                item_contents[i] = c[..., :3]  # remove alpha channel from content
+                item_control_content[i] = c[..., :3]  # remove alpha channel from content
 
-                alpha = c[..., 3]  # extract alpha channel
-                mask_image = Image.fromarray(alpha, mode="L")
+                mask_image = Image.fromarray(c[..., 3], mode="L")
                 width, height = mask_image.size
                 mask_image = mask_image.resize((width // 8, height // 8), Image.LANCZOS)
-                mask_image = np.array(mask_image)  # PIL to numpy, HWC
-                mask_image = torch.from_numpy(mask_image).float() / 255.0  # 0 to 1.0, HWC
+                mask_image = torch.from_numpy(np.array(mask_image)).float() / 255.0  # 0 to 1.0, HWC
                 mask_image = mask_image.squeeze(-1)  # HWC -> HW
                 mask_image = mask_image.unsqueeze(0).unsqueeze(0).unsqueeze(0)  # HW -> 111HW (BCFHW)
                 mask_image = mask_image.to(torch.float32)
                 content_mask = mask_image
             else:
                 content_mask = None
-
             item_masks.append(content_mask)
 
-        item_contents = [torch.from_numpy(c) for c in item_contents]
-        contents.append(torch.stack(item_contents, dim=0))  # list of [F, H, W, C]
-        content_masks.append(item_masks)
+        item_target_masks = []
+        if len(target_mask_contents) > 0:
+            assert len(target_mask_contents) == len(item_control_content)
+            for i, c in enumerate(target_mask_contents):
+                mask_image = Image.fromarray(c, mode="L")
+                width, height = mask_image.size
+                mask_image = mask_image.resize((width // 8, height // 8), Image.LANCZOS)
+                mask_image = torch.from_numpy(np.array(mask_image)).float() / 255.0  # 0 to 1.0, HWC
+                mask_image = mask_image.unsqueeze(0).to(torch.float32)  # HW -> 1HW (FHW)
+                item_target_masks.append(mask_image)
 
-    contents = torch.stack(contents, dim=0)  # B, F, H, W, C. F is control frames + target frame
+        images.append(torch.from_numpy(image))
+        control_contents.append(torch.stack([torch.from_numpy(c) for c in item_control_content], dim=0))  # list of [F, H, W, C]
+        control_contents_masks.append(item_masks)
+        target_masks.append(torch.stack(item_target_masks, dim=0)) # list of [F, H, W]
+        clean_latent_bboxes.append(item.clean_latent_bboxes.unsqueeze(0))
 
-    contents = contents.permute(0, 4, 1, 2, 3).contiguous()  # B, C, F, H, W
-    contents = contents / 127.5 - 1.0  # normalize to [-1, 1]
+    images = torch.stack(images, dim=0).unsqueeze(1) # B, F, H, W, C
+    images = images.permute(0, 4, 1, 2, 3).contiguous()  # B, C, F, H, W
+    images = images / 127.5 - 1.0
 
-    height, width = contents.shape[-2], contents.shape[-1]
+    control_contents = torch.stack(control_contents, dim=0)  # B, F, H, W, C. F is control frames + target frame
+    control_contents = control_contents.permute(0, 4, 1, 2, 3).contiguous()  # B, C, F, H, W
+    control_contents = control_contents / 127.5 - 1.0  # normalize to [-1, 1]
+
+    height, width = images.shape[-2], images.shape[-1]
     if height < 8 or width < 8:
         item = batch[0]  # other items should have the same size
         raise ValueError(f"Image or video size too small: {item.item_key} and {len(batch) - 1} more, size: {item.original_size}")
 
-    return height, width, contents, content_masks
+    target_masks = torch.stack(target_masks, dim=0).contiguous()
+    clean_latent_bboxes = torch.stack(clean_latent_bboxes, dim=0).contiguous()
+    return height, width, images, control_contents, control_contents_masks, target_masks, clean_latent_bboxes
 
 
 def encode_and_save_batch(vae: AutoencoderKLCausal3D, batch: list[ItemInfo]):

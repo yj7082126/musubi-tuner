@@ -1234,11 +1234,12 @@ class HunyuanVideoRotaryPosEmbed(nn.Module):
         return freqs.cos(), freqs.sin()
 
     @torch.no_grad()
-    def forward_inner(self, frame_indices, height, width, device):
+    def forward_inner(self, frame_indices, height, width, device, 
+                      start_height=0, start_width=0, step_H=1., step_W=1.):
         GT, GY, GX = torch.meshgrid(
             frame_indices.to(device=device, dtype=torch.float32),
-            torch.arange(0, height, device=device, dtype=torch.float32) * self.h_w_scaling_factor,
-            torch.arange(0, width, device=device, dtype=torch.float32) * self.h_w_scaling_factor,
+            torch.arange(start_height, height, step_H, device=device, dtype=torch.float32) * self.h_w_scaling_factor,
+            torch.arange(start_width, width, step_W, device=device, dtype=torch.float32) * self.h_w_scaling_factor,
             indexing="ij",
         )
 
@@ -1256,9 +1257,10 @@ class HunyuanVideoRotaryPosEmbed(nn.Module):
         return result  # Shape (2 * total_dim / 2, T, H, W) -> (total_dim, T, H, W)
 
     @torch.no_grad()
-    def forward(self, frame_indices, height, width, device):
+    def forward(self, frame_indices, height, width, device, 
+                start_height=0, start_width=0, step_H=1., step_W=1.):
         frame_indices = frame_indices.unbind(0)
-        results = [self.forward_inner(f, height, width, device) for f in frame_indices]
+        results = [self.forward_inner(f, height, width, device, start_height, start_width, step_H, step_W) for f in frame_indices]
         results = torch.stack(results, dim=0)
         return results
 
@@ -1582,7 +1584,7 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
         pooled_projection_dim: int = 768,
         rope_theta: float = 256.0,
         rope_axes_dim: Tuple[int] = (16, 56, 56),
-        has_image_proj=False,
+        has_image_proj=True,
         image_proj_dim=1152,
         has_clean_x_embedder=False,
         attn_mode: Optional[str] = None,
@@ -1646,11 +1648,11 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
         self.use_gradient_checkpointing = False
         self.enable_teacache = False
 
-        # if has_image_proj:
-        #     self.install_image_projection(image_proj_dim)
-        self.image_projection = ClipVisionProjection(in_channels=image_proj_dim, out_channels=self.inner_dim)
-        # self.config["has_image_proj"] = True
-        # self.config["image_proj_dim"] = in_channels
+        if has_image_proj:
+            # self.install_image_projection(image_proj_dim)
+            self.image_projection = ClipVisionProjection(in_channels=image_proj_dim, out_channels=self.inner_dim)
+            # self.config["has_image_proj"] = True
+            # self.config["image_proj_dim"] = in_channels
 
         # if has_clean_x_embedder:
         #     self.install_clean_x_embedder()
@@ -1816,7 +1818,10 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
     def process_text_embeddings(self, encoder_hidden_states, encoder_attention_mask, hidden_order_dict, 
                                 entity_inds=[]):
         ctrl_seq_len = hidden_order_dict['noise'][0][-1]
-        ctrl_and_img_seq_len = hidden_order_dict['image_embeddings'][-1][-1]
+        if 'image_embeddings' in hidden_order_dict:
+            ctrl_and_img_seq_len = hidden_order_dict['image_embeddings'][-1][-1]
+        else:
+            ctrl_and_img_seq_len = ctrl_seq_len
 
         if encoder_hidden_states.shape[0] == 1:
             # When batch size is 1, we do not need any masks or var-len funcs since cropping is mathematically same to what we want
@@ -1881,7 +1886,7 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
             ## Mask Entity Prompts by Mask
             if "mask_entities" in use_attention_masking:
                 noise_start, noise_end = hidden_order_dict['noise'][0]
-                if entity_masks is not None and len(hidden_order_dict['text_embeddings']) > 1:
+                if entity_masks is not None and len(hidden_order_dict['text_embeddings']) >= 1:
                     for i, (prompt_start, prompt_end) in enumerate(hidden_order_dict['text_embeddings'][1:]):
                         prompt_seq_len = prompt_end - prompt_start
                         entity_masks_patched = (torch.sum(patchify(entity_masks[:,i]), dim=-1) > 0) 
@@ -1893,7 +1898,7 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
             ## Mask Control Regions by Mask
             if "mask_control" in use_attention_masking:
                 noise_start, noise_end = hidden_order_dict['noise'][0]
-                if entity_masks is not None and len(hidden_order_dict['clean_latents']) > 1:
+                if entity_masks is not None and len(hidden_order_dict['clean_latents']) >= 1:
                     for i, (control_start, control_end) in enumerate(hidden_order_dict['clean_latents'][:]):
                         prompt_seq_len = control_end - control_start
                         entity_masks_patched = (torch.sum(patchify(entity_masks[:,i]), dim=-1) > 0) 
@@ -1916,7 +1921,7 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
         latent_indices=None,
         clean_latents=None,
         clean_latent_indices=None,
-        clean_latent_bbox=None,
+        clean_latent_bboxes=None, # [B, N, 4]
         clean_latents_2x=None,
         clean_latent_2x_indices=None,
         clean_latents_4x=None,
@@ -1935,7 +1940,7 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
 
         rope_freqs = self.rope(frame_indices=latent_indices, height=H, width=W, device=hidden_states.device)
         rope_freqs = rope_freqs.flatten(2).transpose(1, 2)
-
+        hidden_order_dict['rope_freqs'].append(rope_freqs)
         if clean_latents is not None and clean_latent_indices is not None:
 
             processed_clean_latents, clean_latent_rope_freqs = [], []
@@ -1955,20 +1960,46 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
                     clean_latent_index = repeat_to_batch_size(clean_latent_index, B)
                 _, _, _, clean_H, clean_W = clean_latent.shape
 
-                clean_latent_rope_freq = self.rope(frame_indices=clean_latent_index, height=clean_H, width=clean_W, device=clean_latent.device)
-                
-                if clean_latent_bbox is not None:
-                    logging.info(f"Cropping latents to {clean_latent_bbox}")
-                    clean_latent = clean_latent[:,:,:,
-                                                int(clean_latent_bbox[1]//8):int(clean_latent_bbox[3]//8), 
-                                                int(clean_latent_bbox[0]//8):int(clean_latent_bbox[2]//8)]
-                    clean_latent_rope_freq = clean_latent_rope_freq[:,:,:,
-                                                int(clean_latent_bbox[1]//8):int(clean_latent_bbox[3]//8), 
-                                                int(clean_latent_bbox[0]//8):int(clean_latent_bbox[2]//8)]
+                if clean_latent_bboxes is not None:
+                    clean_latent_bbox = clean_latent_bboxes[:,i]
+                    if clean_latent_bbox.shape[0] != B:
+                        clean_latent_bbox = repeat_to_batch_size(clean_latent_bbox, B)
+
+                    clean_latent_rope_freq = []
+                    for b in range(B):
+                        cb = [
+                            int(clean_latent_bbox[b,0]*W), int(clean_latent_bbox[b,1]*H), 
+                            int(clean_latent_bbox[b,2]*W), int(clean_latent_bbox[b,3]*H)
+                        ]
+                        cb_rope_freq = self.rope(
+                            frame_indices=clean_latent_index[[b]], 
+                            height=cb[3], width=cb[2],
+                            start_height=cb[1], start_width=cb[0],
+                            step_H=(cb[3] - cb[1]) / clean_H,
+                            step_W=(cb[2] - cb[0]) / clean_W,
+                            device=clean_latent.device)
+                        # logger.info(f"Clean Latent Rope Freq Shape: {cb_rope_freq.shape}")
+                        clean_latent_rope_freq.append(cb_rope_freq)
+                    clean_latent_rope_freq = torch.cat(clean_latent_rope_freq, dim=0)
+                else:
+                    clean_latent_rope_freq = self.rope(
+                        frame_indices=clean_latent_index, 
+                        height=clean_H, width=clean_W, 
+                        device=clean_latent.device)
+                # logger.info(f"Total Clean Latent Rope Freq Shape: {clean_latent_rope_freq.shape}")
+                # if clean_latent_bbox is not None:
+                #     logging.info(f"Cropping latents to {clean_latent_bbox}")
+                #     clean_latent = clean_latent[:,:,:,
+                #                                 int(clean_latent_bbox[1]//8):int(clean_latent_bbox[3]//8), 
+                #                                 int(clean_latent_bbox[0]//8):int(clean_latent_bbox[2]//8)]
+                #     clean_latent_rope_freq = clean_latent_rope_freq[:,:,:,
+                #                                 int(clean_latent_bbox[1]//8):int(clean_latent_bbox[3]//8), 
+                #                                 int(clean_latent_bbox[0]//8):int(clean_latent_bbox[2]//8)]
 
                 clean_latent = clean_latent.flatten(2).transpose(1, 2)
                 clean_latent_rope_freq = clean_latent_rope_freq.flatten(2).transpose(1, 2)
-
+                hidden_order_dict['rope_freqs'].append(clean_latent_rope_freq)
+                
                 processed_clean_latents.append(clean_latent)
                 clean_latent_rope_freqs.append(clean_latent_rope_freq)
                 clean_WH = clean_latent.shape[1]
@@ -1977,7 +2008,9 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
 
             processed_clean_latents = torch.cat(processed_clean_latents, dim=1)
             clean_latent_rope_freqs = torch.cat(clean_latent_rope_freqs, dim=1)
-                                                
+
+            # logger.info(f"Clean Latent Rope Freq Shape: {clean_latent_rope_freq.shape}")
+            # logger.info(f"Rope Freq Shape: {rope_freqs.shape}")
             hidden_states = torch.cat([processed_clean_latents, hidden_states], dim=1)
             rope_freqs = torch.cat([clean_latent_rope_freqs, rope_freqs], dim=1)
             
@@ -2050,7 +2083,7 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
         latent_indices=None,
         clean_latents=None,
         clean_latent_indices=None,
-        clean_latent_bbox=None,
+        clean_latent_bboxes=None,
         clean_latents_2x=None,
         clean_latent_2x_indices=None,
         clean_latents_4x=None,
@@ -2091,7 +2124,7 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
             latent_indices,
             clean_latents,
             clean_latent_indices,
-            clean_latent_bbox,
+            clean_latent_bboxes,
             clean_latents_2x,
             clean_latent_2x_indices,
             clean_latents_4x,
@@ -2278,6 +2311,7 @@ def load_packed_model(
     fp8_scaled: bool = False,
     split_attn: bool = False,
     for_inference: bool = False,
+    has_image_proj: bool = True
 ) -> HunyuanVideoTransformer3DModelPacked:
     # TODO support split_attn
     device = torch.device(device)
@@ -2294,7 +2328,7 @@ def load_packed_model(
 
     with init_empty_weights():
         logger.info(f"Creating HunyuanVideoTransformer3DModelPacked")
-
+        logger.info(f"Image Projection: {has_image_proj}")
         # import here to avoid circular import issues
         from musubi_tuner.frame_pack.hunyuan_video_packed_inference import HunyuanVideoTransformer3DModelPackedInference
 
@@ -2303,7 +2337,7 @@ def load_packed_model(
             attention_head_dim=128,
             guidance_embeds=True,
             has_clean_x_embedder=True,
-            has_image_proj=True,
+            has_image_proj=has_image_proj,
             image_proj_dim=1152,
             in_channels=16,
             mlp_ratio=4.0,
@@ -2341,7 +2375,7 @@ def load_packed_model(
             for key in sd.keys():
                 sd[key] = sd[key].to(loading_device)
 
-    info = model.load_state_dict(sd, strict=True, assign=True)
+    info = model.load_state_dict(sd, strict=False, assign=True)
     logger.info(f"Loaded DiT model from {dit_path}, info={info}")
 
     return model
