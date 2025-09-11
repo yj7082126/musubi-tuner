@@ -12,13 +12,13 @@ import numpy as np
 from omegaconf import OmegaConf
 import torch
 from safetensors.torch import save_file, load_file
-from safetensors import safe_open
 from PIL import Image
 import cv2
 import av
 
 from musubi_tuner.utils import safetensors_utils
 from musubi_tuner.utils.model_utils import dtype_to_str
+from musubi_tuner.utils.bbox_utils import get_bbox_from_meta, get_facebbox_from_bbox
 
 import logging
 
@@ -849,7 +849,8 @@ class ImageJsonlDatasource(ImageDatasource):
             missing_control_images = [
                 item["image_path"]
                 for item in self.data
-                if sum(f"control_path_{i}" not in item for i in range(self.control_count_per_image)) > 0
+                # if sum(f"control_path_{i}" not in item for i in range(self.control_count_per_image)) > 0
+                if not any(f"control_path_{i}" in item for i in range(self.control_count_per_image))
             ]
             if missing_control_images:
                 logger.error(f"Some images do not have control paths in JSONL data: {missing_control_images}")
@@ -861,7 +862,8 @@ class ImageJsonlDatasource(ImageDatasource):
             missing_control_mask_images = [
                 item["image_path"]
                 for item in self.data
-                if sum(f"control_mask_path_{i}" not in item for i in range(self.control_count_per_image)) > 0
+                # if sum(f"control_mask_path_{i}" not in item for i in range(self.control_count_per_image)) > 0
+                if not any(f"control_mask_path_{i}" in item for i in range(self.control_count_per_image))
             ]
             if missing_control_mask_images:
                 logger.error(f"Some images do not have control mask paths in JSONL data: {missing_control_mask_images}")
@@ -901,41 +903,29 @@ class ImageJsonlDatasource(ImageDatasource):
         data = self.data[idx]
         image_path = data["image_path"]
         image = Image.open(image_path).convert("RGB")
-
         caption = data["caption"]
 
         controls = None
         if self.has_control:
             controls = []
             for i in range(self.control_count_per_image):
-                control_path = data[f"control_path_{i}"]
-                control = Image.open(control_path)
-                if control.mode != "RGB" and control.mode != "RGBA":
-                    control = control.convert("RGB")
-
-                if self.has_control_mask:
-                    control_mask_path = data[f"control_mask_path_{i}"]
-                    control_mask = Image.open(control_mask_path)
-                    if control_mask.mode != "L":
-                        control_mask = control_mask.convert("L")
-                    control = (control, control_mask)
-
-                controls.append(control)
+                if f"control_path_{i}" in data:
+                    control = Image.open(data[f"control_path_{i}"]).convert("RGB")
+                    if self.has_control_mask and f"control_mask_path_{i}" in data:
+                        control_mask = Image.open(data[f"control_mask_path_{i}"]).convert("L")
+                        control = (control, control_mask)
+                    controls.append(control)
 
         embed = None
         if self.has_embed:
-            embed_path = data['embed_path']
-            embed = Image.open(embed_path)
-            if embed.mode != "RGB" and embed.mode != "RGBA":
-                embed = embed.convert("RGB")
+            embed = Image.open(data['embed_path']).convert("RGB")
 
-        clean_latent_bbox = None
+        bboxes = None
         if self.has_clean_bbox:
-            meta = OmegaConf.load(data['meta'])
-            keys = list(range(self.control_count_per_image))
-            clean_latent_bbox = [meta['target_body'].get(str(x), [0.0,0.0,meta['width'],meta['height']]) for x in keys]
-            clean_latent_bbox = [[x[0]/meta['width'], x[1]/meta['height'], x[2]/meta['width'], x[3]/meta['height']] for x in clean_latent_bbox]
-        return image_path, image, caption, controls, embed, clean_latent_bbox
+            bboxes = get_bbox_from_meta(data['meta'], self.control_count_per_image)
+            # clean_latent_bbox = [meta['target_body'].get(str(x), [0.0,0.0,meta['width'],meta['height']]) for x in keys]
+            # clean_latent_bbox = [[x[0]/meta['width'], x[1]/meta['height'], x[2]/meta['width'], x[3]/meta['height']] for x in clean_latent_bbox]
+        return image_path, image, caption, controls, embed, bboxes
 
     def get_caption(self, idx: int) -> tuple[str, str]:
         data = self.data[idx]
@@ -952,17 +942,12 @@ class ImageJsonlDatasource(ImageDatasource):
             raise StopIteration
 
         if self.caption_only:
-
             def create_caption_fetcher(index):
                 return lambda: self.get_caption(index)
-
             fetcher = create_caption_fetcher(self.current_idx)
-
         else:
-
             def create_fetcher(index):
                 return lambda: self.get_image_data(index)
-
             fetcher = create_fetcher(self.current_idx)
 
         self.current_idx += 1
@@ -1437,15 +1422,15 @@ class ImageDataset(BaseDataset):
         self.fp_1f_no_post = fp_1f_no_post
         self.control_count_per_image = control_count_per_image
 
-        if fp_1f_clean_indices is not None:
-            control_count_per_image = len(fp_1f_clean_indices)
+        # if fp_1f_clean_indices is not None:
+        #     self.control_count_per_image = len(fp_1f_clean_indices)
 
         if image_directory is not None:
             self.datasource = ImageDirectoryDatasource(
-                image_directory, caption_extension, control_directory, control_count_per_image
+                image_directory, caption_extension, control_directory, self.control_count_per_image
             )
         elif image_jsonl_file is not None:
-            self.datasource = ImageJsonlDatasource(image_jsonl_file, control_count_per_image)
+            self.datasource = ImageJsonlDatasource(image_jsonl_file, self.control_count_per_image)
         else:
             raise ValueError("image_directory or image_jsonl_file must be specified")
 
@@ -1538,7 +1523,7 @@ class ImageDataset(BaseDataset):
 
             # fetch and resize image in a separate thread
             def fetch_and_resize(op: callable) -> tuple[tuple[int, int], str, Image.Image, str, Optional[Image.Image]]:
-                image_key, image, caption, controls, embed, clean_latent_bbox = op()
+                image_key, image, caption, controls, embed, bboxes = op()
                 image: Image.Image
                 image_size = image.size
 
@@ -1566,16 +1551,23 @@ class ImageDataset(BaseDataset):
                     bucket_reso = buckset_selector.get_bucket_resolution(embed.size)
                     resized_embed = resize_image_to_bucket(embed, bucket_reso)
 
-                resized_clean_latent_bbox = []
-                if clean_latent_bbox is not None:
-                    for bbox in clean_latent_bbox:
-                        control_bucket_reso = self.control_resolution
-                        bbox2 = np.array([bbox[0], bbox[1], 
-                                  bbox[0]+(control_bucket_reso[1] / bucket_reso[1]), 
-                                  bbox[1]+(control_bucket_reso[0] / bucket_reso[0])])
-                        resized_clean_latent_bbox.append(bbox2)
-                resized_clean_latent_bbox = torch.tensor(resized_clean_latent_bbox).float()
-                return image_size, image_key, image, caption, resized_controls, resized_embed, resized_clean_latent_bbox
+                face_bboxes = []
+                if bboxes is not None:
+                    for bbox in bboxes:
+                        face_bbox = get_facebbox_from_bbox(bbox, 
+                            self.control_resolution[0],
+                            self.control_resolution[1],
+                            bucket_reso[0], bucket_reso[1],
+                            face_bbox = None,
+                            mode = "provided_size_mid_x"
+                        )
+                        # control_bucket_reso = self.control_resolution
+                        # face_bbox = np.array([bbox[0], bbox[1], 
+                        #     bbox[0]+(control_bucket_reso[1] / bucket_reso[1]), 
+                        #     bbox[1]+(control_bucket_reso[0] / bucket_reso[0])])
+                        face_bboxes.append(face_bbox)
+                face_bboxes = torch.tensor(face_bboxes).float()
+                return image_size, image_key, image, caption, resized_controls, resized_embed, face_bboxes
 
             future = executor.submit(fetch_and_resize, fetch_op)
             futures.append(future)

@@ -1,5 +1,6 @@
 import numpy as np
 from PIL import Image, ImageOps, ImageDraw
+from omegaconf import OmegaConf
 
 def draw_bboxes(img, bboxes, width=2, color=(255, 0, 0)):
     img_copy = img.copy()
@@ -78,3 +79,17 @@ def get_facebbox_from_bbox(bbox, c_W, c_H, w, h, face_bbox=None, mode="full_widt
 
     face_bbox = [face_bbox[0]/w, face_bbox[1]/h, face_bbox[2]/w, face_bbox[3]/h]
     return face_bbox
+
+def get_bbox_from_meta(meta_path, len_control):
+    meta = OmegaConf.load(meta_path)
+    bboxes = []
+    for key, int_bbox in meta['target_body'].items():
+        rel_bbox = [int_bbox[0]/meta['width'], int_bbox[1]/meta['height'], int_bbox[2]/meta['width'], int_bbox[3]/meta['height']]
+        bboxes.append(rel_bbox)
+
+    if len(bboxes) < len_control:
+        for _ in range(len_control - len(bboxes)):
+            bboxes.append([-1.0, -1.0, -1.0, -1.0]) # pad with invalid bbox
+    elif len(bboxes) > len_control:
+        bboxes = bboxes[:len_control] # truncate if more than control count
+    return bboxes

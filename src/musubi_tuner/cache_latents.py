@@ -178,7 +178,7 @@ def show_datasets(
             batch_index += 1
 
 
-def preprocess_contents(batch: list[ItemInfo]) -> tuple[int, int, torch.Tensor]:
+def preprocess_contents(batch: list[ItemInfo], max_control_els=2) -> tuple[int, int, torch.Tensor]:
     # item.content: target image (H, W, C)
     # item.control_content: list of images (H, W, C)
 
@@ -206,13 +206,11 @@ def preprocess_contents(batch: list[ItemInfo]) -> tuple[int, int, torch.Tensor]:
                 item_control_content[i] = c[..., :3]  # remove alpha channel from content
 
                 mask_image = Image.fromarray(c[..., 3], mode="L")
-                width, height = mask_image.size
-                mask_image = mask_image.resize((width // 8, height // 8), Image.LANCZOS)
-                mask_image = torch.from_numpy(np.array(mask_image)).float() / 255.0  # 0 to 1.0, HWC
-                mask_image = mask_image.squeeze(-1)  # HWC -> HW
-                mask_image = mask_image.unsqueeze(0).unsqueeze(0).unsqueeze(0)  # HW -> 111HW (BCFHW)
-                mask_image = mask_image.to(torch.float32)
-                content_mask = mask_image
+                mask_latent = mask_image.resize((mask_image.size[0] // 8, mask_image.size[1] // 8))
+                mask_latent = torch.from_numpy(np.array(mask_latent)).float() / 255.0  # 0 to 1.0, HWC
+                mask_latent = torch.from_numpy(np.array(mask_latent)).float() / 255.0  # 0 to 1.0, HWC
+                mask_latent = mask_latent.unsqueeze(0).to(torch.float32)  # HW -> 1HW (FHW)
+                content_mask = mask_latent
             else:
                 content_mask = None
             item_masks.append(content_mask)
@@ -222,11 +220,20 @@ def preprocess_contents(batch: list[ItemInfo]) -> tuple[int, int, torch.Tensor]:
             assert len(target_mask_contents) == len(item_control_content)
             for i, c in enumerate(target_mask_contents):
                 mask_image = Image.fromarray(c, mode="L")
-                width, height = mask_image.size
-                mask_image = mask_image.resize((width // 8, height // 8), Image.LANCZOS)
-                mask_image = torch.from_numpy(np.array(mask_image)).float() / 255.0  # 0 to 1.0, HWC
-                mask_image = mask_image.unsqueeze(0).to(torch.float32)  # HW -> 1HW (FHW)
-                item_target_masks.append(mask_image)
+                mask_latent = mask_image.resize((mask_image.size[0] // 8, mask_image.size[1] // 8))
+                mask_latent = torch.from_numpy(np.array(mask_latent)).float() / 255.0  # 0 to 1.0, HWC
+                mask_latent = mask_latent.unsqueeze(-1).to(torch.float32)  # HW -> 1HW (FHW)
+                item_target_masks.append(mask_latent)
+
+        if len(item_control_content) < max_control_els:
+            for _ in range(max_control_els - len(item_control_content)):
+                item_control_content.append(np.zeros_like(item_control_content[0]))
+                item_masks.append(None)
+                item_target_masks.append(torch.zeros_like(item_target_masks[0]))
+        elif len(item_control_content) > max_control_els:
+            item_control_content = item_control_content[:max_control_els]
+            item_masks = item_masks[:max_control_els]
+            item_target_masks = item_target_masks[:max_control_els]
 
         images.append(torch.from_numpy(image))
         control_contents.append(torch.stack([torch.from_numpy(c) for c in item_control_content], dim=0))  # list of [F, H, W, C]
@@ -248,6 +255,8 @@ def preprocess_contents(batch: list[ItemInfo]) -> tuple[int, int, torch.Tensor]:
         raise ValueError(f"Image or video size too small: {item.item_key} and {len(batch) - 1} more, size: {item.original_size}")
 
     target_masks = torch.stack(target_masks, dim=0).contiguous()
+    target_masks = target_masks.permute(0, 4, 1, 2, 3)
+
     clean_latent_bboxes = torch.stack(clean_latent_bboxes, dim=0).contiguous()
     return height, width, images, control_contents, control_contents_masks, target_masks, clean_latent_bboxes
 
