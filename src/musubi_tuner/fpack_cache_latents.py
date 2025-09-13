@@ -300,8 +300,8 @@ def encode_and_save_batch_one_frame(
                 f"Item {item.item_key} has no clean_latent_indices defined, using default indices for one frame training."
             )
             clean_latent_indices = [0]
-        if len(clean_latent_indices) != len(clean_latents):
-            clean_latent_indices = list(range(len(clean_latents)))  # F
+        # if len(clean_latent_indices) != len(clean_latents):
+        #     clean_latent_indices = list(range(len(clean_latents)))  # F
 
         if not item.fp_1f_no_post:
             clean_latent_indices = clean_latent_indices + [1 + item.fp_latent_window_size]

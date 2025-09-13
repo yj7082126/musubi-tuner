@@ -239,7 +239,7 @@ def preprocess_contents(batch: list[ItemInfo], max_control_els=2) -> tuple[int, 
         control_contents.append(torch.stack([torch.from_numpy(c) for c in item_control_content], dim=0))  # list of [F, H, W, C]
         control_contents_masks.append(item_masks)
         target_masks.append(torch.stack(item_target_masks, dim=0)) # list of [F, H, W]
-        clean_latent_bboxes.append(item.clean_latent_bboxes.unsqueeze(0))
+        clean_latent_bboxes.append(item.clean_latent_bboxes)
 
     images = torch.stack(images, dim=0).unsqueeze(1) # B, F, H, W, C
     images = images.permute(0, 4, 1, 2, 3).contiguous()  # B, C, F, H, W

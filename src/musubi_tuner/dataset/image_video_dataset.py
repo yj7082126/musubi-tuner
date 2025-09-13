@@ -9,7 +9,6 @@ import time
 from typing import Any, Optional, Sequence, Tuple, Union
 
 import numpy as np
-from omegaconf import OmegaConf
 import torch
 from safetensors.torch import save_file, load_file
 from PIL import Image
@@ -568,11 +567,12 @@ def load_video(
 
 class BucketBatchManager:
 
-    def __init__(self, bucketed_item_info: dict[tuple[Any], list[ItemInfo]], batch_size: int):
+    def __init__(self, bucketed_item_info: dict[tuple[Any], list[ItemInfo]], batch_size: int, control_count_per_image: int = 1):
         self.batch_size = batch_size
         self.buckets = bucketed_item_info
         self.bucket_resos = list(self.buckets.keys())
         self.bucket_resos.sort()
+        self.control_count_per_image = control_count_per_image
 
         # indices for enumerating batches. each batch is reso + batch_idx. reso is (width, height) or (width, height, frames)
         self.bucket_batch_indices: list[tuple[tuple[Any], int]] = []
@@ -641,7 +641,13 @@ class BucketBatchManager:
         for key in batch_tensor_data.keys():
             if key not in varlen_keys:
                 batch_tensor_data[key] = torch.stack(batch_tensor_data[key])
-
+            if key.startswith("latents_clean"):
+                batch_tensor_data[key] = batch_tensor_data[key][:,:,:self.control_count_per_image,:,:]
+            if key.startswith("target_latent_masks"):
+                batch_tensor_data[key] = batch_tensor_data[key][:,:,:self.control_count_per_image,:,:]
+            if key.startswith("clean_latent_bboxes"):
+                batch_tensor_data[key] = batch_tensor_data[key][:,:self.control_count_per_image,:]
+                
         return batch_tensor_data
 
 
@@ -1273,14 +1279,14 @@ class BaseDataset(torch.utils.data.Dataset):
         cache_path is based on the item_key and the resolution.
         """
         w, h = item_info.original_size
-        # basename = os.path.splitext(os.path.basename(item_info.item_key))[0]
-        basename = os.path.basename(os.path.dirname(item_info.item_key))
+        basename = os.path.splitext(os.path.basename(item_info.item_key))[0]
+        # basename = os.path.basename(os.path.dirname(item_info.item_key))
         assert self.cache_directory is not None, "cache_directory is required / cache_directoryは必須です"
         return os.path.join(self.cache_directory, f"{basename}_{w:04d}x{h:04d}_{self.architecture}.safetensors")
 
     def get_text_encoder_output_cache_path(self, item_info: ItemInfo) -> str:
-        # basename = os.path.splitext(os.path.basename(item_info.item_key))[0]
-        basename = os.path.basename(os.path.dirname(item_info.item_key))
+        basename = os.path.splitext(os.path.basename(item_info.item_key))[0]
+        # basename = os.path.basename(os.path.dirname(item_info.item_key))
         assert self.cache_directory is not None, "cache_directory is required / cache_directoryは必須です"
         return os.path.join(self.cache_directory, f"{basename}_{self.architecture}_te.safetensors")
 
@@ -1630,7 +1636,7 @@ class ImageDataset(BaseDataset):
             bucketed_item_info[bucket_reso] = bucket
 
         # prepare batch manager
-        self.batch_manager = BucketBatchManager(bucketed_item_info, self.batch_size)
+        self.batch_manager = BucketBatchManager(bucketed_item_info, self.batch_size, self.control_count_per_image)
         self.batch_manager.show_bucket_info()
 
         self.num_train_items = sum([len(bucket) for bucket in bucketed_item_info.values()])
