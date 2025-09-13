@@ -35,6 +35,7 @@ class BaseDatasetParams:
     cache_directory: Optional[str] = None
     debug_dataset: bool = False
     architecture: str = "no_default"  # short style like "hv" or "wan"
+    item_name_type: str = "basename"  # "basename" or "dirname"
     
 
 @dataclass
@@ -108,6 +109,7 @@ class ConfigSanitizer:
         "resolution": functools.partial(__validate_and_convert_scalar_or_twodim.__func__, int),
         "enable_bucket": bool,
         "bucket_no_upscale": bool,
+        "item_name_type": Any("basename", "dirname"),
     }
     IMAGE_DATASET_DISTINCT_SCHEMA = {
         "image_directory": str,
@@ -291,6 +293,7 @@ def generate_dataset_group_by_blueprint(dataset_group_blueprint: DatasetGroupBlu
         bucket_no_upscale: {dataset.bucket_no_upscale}
         cache_directory: "{dataset.cache_directory}"
         debug_dataset: {dataset.debug_dataset}
+        item_name_type: "{dataset.item_name_type}"  
     """
         )
 

@@ -1234,6 +1234,7 @@ class BaseDataset(torch.utils.data.Dataset):
         cache_directory: Optional[str] = None,
         debug_dataset: bool = False,
         architecture: str = "no_default",
+        item_name_type: str = "basename"
     ):
         self.resolution = resolution
         self.caption_extension = caption_extension
@@ -1244,6 +1245,7 @@ class BaseDataset(torch.utils.data.Dataset):
         self.cache_directory = cache_directory
         self.debug_dataset = debug_dataset
         self.architecture = architecture
+        self.item_name_type = item_name_type #[basename, dirname]
         self.seed = None
         self.current_epoch = 0
 
@@ -1279,14 +1281,18 @@ class BaseDataset(torch.utils.data.Dataset):
         cache_path is based on the item_key and the resolution.
         """
         w, h = item_info.original_size
-        basename = os.path.splitext(os.path.basename(item_info.item_key))[0]
-        # basename = os.path.basename(os.path.dirname(item_info.item_key))
+        if self.item_name_type == "basename":
+            basename = os.path.splitext(os.path.basename(item_info.item_key))[0]
+        else:
+            basename = os.path.basename(os.path.dirname(item_info.item_key))
         assert self.cache_directory is not None, "cache_directory is required / cache_directoryは必須です"
         return os.path.join(self.cache_directory, f"{basename}_{w:04d}x{h:04d}_{self.architecture}.safetensors")
 
     def get_text_encoder_output_cache_path(self, item_info: ItemInfo) -> str:
-        basename = os.path.splitext(os.path.basename(item_info.item_key))[0]
-        # basename = os.path.basename(os.path.dirname(item_info.item_key))
+        if self.item_name_type == "basename":
+            basename = os.path.splitext(os.path.basename(item_info.item_key))[0]
+        else:
+            basename = os.path.basename(os.path.dirname(item_info.item_key))
         assert self.cache_directory is not None, "cache_directory is required / cache_directoryは必須です"
         return os.path.join(self.cache_directory, f"{basename}_{self.architecture}_te.safetensors")
 
@@ -1405,6 +1411,7 @@ class ImageDataset(BaseDataset):
         fp_1f_no_post: Optional[bool] = False,
         debug_dataset: bool = False,
         architecture: str = "no_default",
+        item_name_type: str = "basename",
         control_resolution: Tuple[int, int] = None,
         control_count_per_image: int = 1,
     ):
@@ -1418,6 +1425,7 @@ class ImageDataset(BaseDataset):
             cache_directory,
             debug_dataset,
             architecture,
+            item_name_type
         )
         self.image_directory = image_directory
         self.image_jsonl_file = image_jsonl_file
@@ -1681,6 +1689,7 @@ class VideoDataset(BaseDataset):
         fp_latent_window_size: Optional[int] = 9,
         debug_dataset: bool = False,
         architecture: str = "no_default",
+        item_name_type: str = "basename",
     ):
         super(VideoDataset, self).__init__(
             resolution,
@@ -1692,6 +1701,7 @@ class VideoDataset(BaseDataset):
             cache_directory,
             debug_dataset,
             architecture,
+            item_name_type
         )
         self.video_directory = video_directory
         self.video_jsonl_file = video_jsonl_file
