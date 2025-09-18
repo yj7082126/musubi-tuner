@@ -3,8 +3,9 @@ import math
 import numpy as np
 from omegaconf import OmegaConf
 from PIL import Image, ImageOps, ImageDraw
-from rembg import remove, new_session
+# from rembg import remove, new_session
 import torch
+from transformers import pipeline
 
 from musubi_tuner.dataset.image_video_dataset import resize_image_to_bucket
 from musubi_tuner.frame_pack.clip_vision import hf_clip_vision_encode
@@ -12,7 +13,8 @@ from musubi_tuner.frame_pack.hunyuan import encode_prompt_conds, vae_encode, vae
 from musubi_tuner.frame_pack.utils import crop_or_pad_yield_mask
 from musubi_tuner.utils.bbox_utils import draw_bboxes, get_mask_from_bboxes, get_bbox_from_mask, get_facebbox_from_bbox
 
-rembg_session = new_session('u2net', providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
+# rembg_session = new_session('u2net', providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
+rmbg14_session = pipeline("image-segmentation", model="briaai/RMBG-1.4", trust_remote_code=True)
 
 def get_text_preproc(prompt, text_encoder1, text_encoder2, tokenizer1, tokenizer2, entity_prompts=[], device=torch.device('cuda'), dtype=torch.bfloat16):
     with torch.autocast(device_type=device.type, dtype=text_encoder1.dtype), torch.no_grad():
@@ -70,7 +72,10 @@ def preproc_image(image_path, width=None, height=None, use_rembg=False):
     else:
         image_pil = image_path
     if use_rembg:
-        image_pil = remove(image_pil, session=rembg_session).convert("RGB")
+        image_pil = rmbg14_session(image_pil)
+        new_image = Image.new("RGBA", image_pil.size, "WHITE")
+        new_image.paste(image_pil, (0, 0), image_pil)
+        image_pil = new_image.convert('RGB')
     image_np = np.array(image_pil)
 
     if width is None and height is None:
@@ -162,7 +167,7 @@ def prepare_control_inputs_for_entity(control_image_paths, entity_bboxes, width,
                                       c_width=None, c_height=None, face_entity_bboxes=None,
                                       control_indices=[0,10], latent_indices=[9], 
                                       adjust_custom_wh=True, mode="provided_size_mid_x", 
-                                      use_rembg=False):
+                                      use_rembg=False, print_res=False):
     
     control_latents, control_nps, clean_latent_bboxes = [], [], []
     for i, control_image_path in enumerate(control_image_paths):
@@ -171,13 +176,17 @@ def prepare_control_inputs_for_entity(control_image_paths, entity_bboxes, width,
             c_width, c_height = int(width * (bbox[2]-bbox[0])), None
         c_img_tensor, c_img_np = preproc_image(control_image_path, c_width, c_height, use_rembg=use_rembg)
         c_width, c_height = c_img_tensor.shape[4], c_img_tensor.shape[3]
-
-        if face_entity_bboxes is not None:
-            face_bbox = face_entity_bboxes[i]
-        else:
-            face_bbox = None
+        if print_res:
+            print(f"Control image {i} ({control_image_path})")
+            print(f"  Original size: {Image.open(control_image_path).size}, Processed size: {c_width, c_height}")
+            if use_rembg:
+                print(f"  (use background removal)")
+        
+        face_bbox = face_entity_bboxes[i] if face_entity_bboxes is not None else None
         # latent_bbox = calc_latent_bbox(bbox, c_img_tensor, width, height)
         face_bbox = get_facebbox_from_bbox(bbox, c_width, c_height, width, height, face_bbox=face_bbox, mode=mode)
+        if print_res:
+            print(f" Entity bbox: {bbox}, Face bbox : {face_bbox}")
         clean_latent_bboxes.append(face_bbox)
         c_img_latent = vae_encode(c_img_tensor, vae).cpu()
         control_latents.append(c_img_latent)

@@ -3,6 +3,7 @@ import os
 import glob
 from typing import Optional, Union
 
+from musubi_tuner.fpack_cache_latents import segment_image
 import numpy as np
 import torch
 from tqdm import tqdm
@@ -178,7 +179,7 @@ def show_datasets(
             batch_index += 1
 
 
-def preprocess_contents(batch: list[ItemInfo], max_control_els=2) -> tuple[int, int, torch.Tensor]:
+def preprocess_contents(batch: list[ItemInfo], max_control_els=2, rmbg_session=None) -> tuple[int, int, torch.Tensor]:
     # item.content: target image (H, W, C)
     # item.control_content: list of images (H, W, C)
 
@@ -199,6 +200,14 @@ def preprocess_contents(batch: list[ItemInfo], max_control_els=2) -> tuple[int, 
         else:
             item_control_content = item.control_content
             target_mask_contents = []
+
+        if rmbg_session is not None:
+            for i, c in enumerate(item_control_content):
+                image_pil = rmbg_session(c)
+                new_image = Image.new("RGBA", image_pil.size, "WHITE")
+                new_image.paste(image_pil, (0, 0), image_pil)
+                image_pil = new_image.convert('RGB')
+                item_control_content[i] = np.asarray(image_pil)
         
         item_masks = []
         for i, c in enumerate(item_control_content):
@@ -416,6 +425,7 @@ def hv_setup_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     parser.add_argument(
         "--vae_spatial_tile_sample_min_size", type=int, default=None, help="spatial tile sample min size for VAE, default 256"
     )
+    parser.add_argument("--use_rmbg14", action="store_true", help="use RMBG-1.4 to segment input images with alpha channel")
     return parser
 
 

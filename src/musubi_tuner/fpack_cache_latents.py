@@ -20,6 +20,7 @@ from musubi_tuner.hunyuan_model.autoencoder_kl_causal_3d import AutoencoderKLCau
 from musubi_tuner.frame_pack.clip_vision import hf_clip_vision_encode
 import musubi_tuner.cache_latents as cache_latents
 from musubi_tuner.cache_latents import preprocess_contents
+from transformers import pipeline
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -30,6 +31,7 @@ def encode_and_save_batch(
     feature_extractor: SiglipImageProcessor,
     image_encoder: SiglipVisionModel,
     batch: List[ItemInfo],
+    rmbg_session = None,
     vanilla_sampling: bool = False,
     one_frame: bool = False,
     one_frame_no_2x: bool = False,
@@ -38,7 +40,7 @@ def encode_and_save_batch(
     """Encode a batch of original RGB videos and save FramePack section caches."""
     if one_frame:
         encode_and_save_batch_one_frame(
-            vae, feature_extractor, image_encoder, batch, vanilla_sampling, one_frame_no_2x, one_frame_no_4x
+            vae, feature_extractor, image_encoder, batch, rmbg_session, vanilla_sampling, one_frame_no_2x, one_frame_no_4x
         )
         return
 
@@ -252,13 +254,14 @@ def encode_and_save_batch_one_frame(
     feature_extractor: SiglipImageProcessor,
     image_encoder: SiglipVisionModel,
     batch: List[ItemInfo],
+    rmbg_session = None,
     vanilla_sampling: bool = False,
     one_frame_no_2x: bool = False,
     one_frame_no_4x: bool = False,
 ):
     # item.content: target image (H, W, C)
     # item.control_content: list of images (H, W, C)
-    _, _, image, contents, content_masks, target_masks, clean_latent_bboxes = preprocess_contents(batch)
+    _, _, image, contents, content_masks, target_masks, clean_latent_bboxes = preprocess_contents(batch, rmbg_session=rmbg_session)
     image = image.to(vae.device, dtype=vae.dtype)  # B, C, H, W
     contents = contents.to(vae.device, dtype=vae.dtype)  # B, C, F, H, W
     target_masks = target_masks.to(vae.device, dtype=vae.dtype)
@@ -389,6 +392,13 @@ def framepack_setup_parser(parser: argparse.ArgumentParser) -> argparse.Argument
     return parser
 
 
+def segment_image(image: Image.Image, rmbg14_session) -> Image.Image:
+    image_pil = rmbg14_session(image)
+    new_image = Image.new("RGBA", image_pil.size, "WHITE")
+    new_image.paste(image_pil, (0, 0), image_pil)
+    image_pil = new_image.convert('RGB')
+    return image_pil
+
 def main():
     parser = cache_latents.setup_parser_common()
     parser = cache_latents.hv_setup_parser(parser)  # VAE
@@ -433,10 +443,15 @@ def main():
 
     logger.info(f"Cache generation mode: {'Vanilla Sampling' if args.f1 else 'Inference Emulation'}")
 
+    if args.use_rmbg14:
+        logger.info("Loading RMBG14 API session")
+        rmbg14_session = pipeline("image-segmentation", model="briaai/RMBG-1.4", trust_remote_code=True)
+        logger.info("RMBG14 API session loaded")
+
     # encoding closure
     def encode(batch: List[ItemInfo]):
         encode_and_save_batch(
-            vae, feature_extractor, image_encoder, batch, args.f1, args.one_frame, args.one_frame_no_2x, args.one_frame_no_4x
+            vae, feature_extractor, image_encoder, batch, rmbg14_session, args.f1, args.one_frame, args.one_frame_no_2x, args.one_frame_no_4x
         )
 
     # reuse core loop from cache_latents with no change
