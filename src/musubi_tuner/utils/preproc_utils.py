@@ -1,6 +1,7 @@
 from pathlib import Path, PosixPath
 import math
 import numpy as np
+import json
 from omegaconf import OmegaConf
 from PIL import Image, ImageOps, ImageDraw
 # from rembg import remove, new_session
@@ -11,7 +12,7 @@ from musubi_tuner.dataset.image_video_dataset import resize_image_to_bucket
 from musubi_tuner.frame_pack.clip_vision import hf_clip_vision_encode
 from musubi_tuner.frame_pack.hunyuan import encode_prompt_conds, vae_encode, vae_decode
 from musubi_tuner.frame_pack.utils import crop_or_pad_yield_mask
-from musubi_tuner.utils.bbox_utils import get_bbox_from_mask, get_facebbox_from_bbox
+from musubi_tuner.utils.bbox_utils import draw_bboxes, get_mask_from_bboxes, get_bbox_from_mask, get_facebbox_from_bbox
 
 # rembg_session = new_session('u2net', providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
 rmbg14_session = pipeline("image-segmentation", model="briaai/RMBG-1.4", trust_remote_code=True)
@@ -83,10 +84,10 @@ def preproc_image(image_path, width=None, height=None, use_rembg=False):
         width, height = getres(image_pil.size[0], image_pil.size[1], target_area=target_area, div_factor=16)
     elif width is not None and height is None:
         width = (width // 16) * 16
-        height = int(round(width * image_pil.size[1] / image_pil.size[0]))
+        height = int(round(width * image_pil.size[1] / image_pil.size[0]) // 2 * 2)
     elif height is not None and width is None:
         height = (height // 16) * 16
-        width = int(round(height * image_pil.size[0] / image_pil.size[1]))
+        width = int(round(height * image_pil.size[0] / image_pil.size[1]) // 2 * 2)
     else:
         width, height = (width // 16) * 16, (height // 16) * 16
 
@@ -170,9 +171,21 @@ def prepare_control_inputs_for_entity(control_image_paths, entity_bboxes, width,
                                       use_rembg=False, print_res=False):
     
     control_latents, control_nps, clean_latent_bboxes = [], [], []
+    if len(control_image_paths) == 0:
+        return {
+            'latent_indices': torch.tensor([latent_indices], dtype=torch.int64),
+            'clean_latent_bboxes': [],
+            'clean_latents_2x': None,
+            'clean_latent_2x_indices': None,
+            'clean_latents_4x': None,
+            'clean_latent_4x_indices': None
+        }, []
+    
     for i, control_image_path in enumerate(control_image_paths):
         bbox = entity_bboxes[i]
         if adjust_custom_wh:
+            if print_res:
+                print(f"Overriding control size input: {c_width}, {c_height}")
             c_width, c_height = int(width * (bbox[2]-bbox[0])), None
         c_img_tensor, c_img_np = preproc_image(control_image_path, c_width, c_height, use_rembg=use_rembg)
         c_width, c_height = c_img_tensor.shape[4], c_img_tensor.shape[3]
@@ -275,6 +288,31 @@ def get_all_kwargs_from_opens2v_metapath(metapath, steps=25, seed=-1,
         'bboxes' : bboxes,
         'gt_np': np.array(Image.open(gt_image_path).convert("RGB").resize((width, height))),
     }
+
+def get_info_from_vistorybench(dataset, story_num, shot_num):
+    story = dataset.load_story(story_num)
+    story_dict = {x['index']:x for x in story['shots']}
+    characters = dataset.load_characters(story_num)
+    story_shot = story_dict[shot_num]
+    story_shot['type'] = story['type']
+    characters_shot = {k: characters[k] for k in story_shot['character_name']}
+    return story_shot, characters_shot
+
+def parse_bodylayout(layout_dir):
+    layout = json.loads(Path(layout_dir).read_text())
+    body_layout_dict = {}
+    for key, panel_layout in layout.items():
+        rel_w, rel_h = panel_layout['bbox'][2] - panel_layout['bbox'][0], panel_layout['bbox'][3] - panel_layout['bbox'][1]
+        body_layout = {
+            i: {
+                'bbox' : list(map(lambda a: a/1000, x[:4])), 
+                'body' : np.reshape(x[4:], (-1,2)) / 1000
+            } for i, x in enumerate(panel_layout['body'])
+        }
+        body_layout_dict[key] = (rel_w, rel_h, body_layout)
+    return body_layout_dict
+
+
 
 def postproc_imgs(results, vae):
     pixels = torch.cat([

@@ -10,6 +10,15 @@ def draw_bboxes(img, bboxes, width=2, color=(255, 0, 0)):
         draw.rectangle([x0, y0, x1, y1], outline=color, width=width)
     return img_copy
 
+def draw_bboxes_images(img, bboxes, cimgs):
+    img_copy = img.copy()
+    draw = ImageDraw.Draw(img_copy)
+    for bbox, cimg in zip(bboxes, cimgs):
+        x0, y0, x1, y1 = [int(coord * size) for coord, size in zip(bbox, (img_copy.width, img_copy.height, img_copy.width, img_copy.height))]
+        cimg_resized = cimg.resize((x1 - x0, y1 - y0), Image.LANCZOS)
+        img_copy.paste(cimg_resized, (x0, y0))
+    return img_copy
+
 def get_mask_from_bboxes(bboxes, width, height):
     newimg = Image.new('L', (width, height), 0)
     draw = ImageDraw.Draw(newimg)
@@ -26,6 +35,16 @@ def get_bbox_from_mask(mask):
     x0, x1 = xs.min().item(), xs.max().item()
     y0, y1 = ys.min().item(), ys.max().item()
     return [x0 / w, y0 / h, x1 / w, y1 / h]
+
+def get_bbox_from_str(bbox_str, width=512, height=512):
+    bbox_vals = [v.strip() for v in bbox_str.replace(';', ',').split(',') if v.strip()]
+    floats = list(map(float, bbox_vals))
+    # If any value >1 treat as pixel coordinates and normalize
+    if any(v > 1 for v in floats):
+        x1, y1, x2, y2 = floats
+        floats = [x1/width, y1/height, x2/width, y2/height]
+    return floats
+
 
 # def calc_latent_bbox(bbox, c_img_tensor, width, height):
 #     c_H, c_W = c_img_tensor.shape[-2:]
