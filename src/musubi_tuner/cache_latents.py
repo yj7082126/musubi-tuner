@@ -3,7 +3,6 @@ import os
 import glob
 from typing import Optional, Union
 
-from musubi_tuner.fpack_cache_latents import segment_image
 import numpy as np
 import torch
 from tqdm import tqdm
@@ -202,12 +201,16 @@ def preprocess_contents(batch: list[ItemInfo], max_control_els=2, rmbg_session=N
             target_mask_contents = []
 
         if rmbg_session is not None:
+            item_control_content_rmbg = []
             for i, c in enumerate(item_control_content):
-                image_pil = rmbg_session(c)
+                image_pil = rmbg_session(Image.fromarray(c))
                 new_image = Image.new("RGBA", image_pil.size, "WHITE")
                 new_image.paste(image_pil, (0, 0), image_pil)
                 image_pil = new_image.convert('RGB')
-                item_control_content[i] = np.asarray(image_pil)
+                item_control_content_rmbg.append(np.array(image_pil))
+            # print([x.shape for x in item_control_content])
+            # print([x.shape for x in item_control_content_rmbg])
+            item_control_content = item_control_content_rmbg
         
         item_masks = []
         for i, c in enumerate(item_control_content):

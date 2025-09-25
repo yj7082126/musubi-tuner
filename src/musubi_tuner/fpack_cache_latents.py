@@ -20,6 +20,7 @@ from musubi_tuner.hunyuan_model.autoencoder_kl_causal_3d import AutoencoderKLCau
 from musubi_tuner.frame_pack.clip_vision import hf_clip_vision_encode
 import musubi_tuner.cache_latents as cache_latents
 from musubi_tuner.cache_latents import preprocess_contents
+
 from transformers import pipeline
 
 logger = logging.getLogger(__name__)
@@ -443,6 +444,7 @@ def main():
 
     logger.info(f"Cache generation mode: {'Vanilla Sampling' if args.f1 else 'Inference Emulation'}")
 
+    rmbg14_session = None
     if args.use_rmbg14:
         logger.info("Loading RMBG14 API session")
         rmbg14_session = pipeline("image-segmentation", model="briaai/RMBG-1.4", trust_remote_code=True)
