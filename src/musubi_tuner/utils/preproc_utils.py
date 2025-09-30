@@ -17,6 +17,26 @@ from musubi_tuner.utils.bbox_utils import draw_bboxes, get_mask_from_bboxes, get
 # rembg_session = new_session('u2net', providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
 rmbg14_session = pipeline("image-segmentation", model="briaai/RMBG-1.4", trust_remote_code=True)
 
+def getres(orig_width, orig_height, target_area=1024*1024, div_factor=16, max_aspect_ratio=None):
+    if target_area is not None:
+        aspect_ratio = orig_width / orig_height
+        
+        # Constrain aspect ratio if max_aspect_ratio is specified
+        if max_aspect_ratio is not None:
+            if aspect_ratio > max_aspect_ratio:
+                aspect_ratio = max_aspect_ratio
+            elif aspect_ratio < 1 / max_aspect_ratio:
+                aspect_ratio = 1 / max_aspect_ratio
+        
+        new_height = math.sqrt(target_area / aspect_ratio)
+        new_width = target_area / new_height
+    else:
+        new_width, new_height = orig_width, orig_height
+    new_width = int(round(new_width / div_factor) * div_factor)
+    new_height = int(round(new_height / div_factor) * div_factor)
+
+    return new_width, new_height
+
 def get_text_preproc(prompt, text_encoder1, text_encoder2, tokenizer1, tokenizer2, entity_prompts=[], device=torch.device('cuda'), dtype=torch.bfloat16):
     with torch.autocast(device_type=device.type, dtype=text_encoder1.dtype), torch.no_grad():
         llama_vecs = []
@@ -53,9 +73,17 @@ def get_text_preproc(prompt, text_encoder1, text_encoder2, tokenizer1, tokenizer
         "negative_prompt_poolers" : clip_l_pooler_n,
     }
 
-def getres(orig_width, orig_height, target_area=480*480, div_factor=16):
+def getres(orig_width, orig_height, target_area=480*480, div_factor=16, max_aspect_ratio=None):
     if target_area is not None:
         aspect_ratio = orig_width / orig_height
+        
+        # Constrain aspect ratio if max_aspect_ratio is specified
+        if max_aspect_ratio is not None:
+            if aspect_ratio > max_aspect_ratio:
+                aspect_ratio = max_aspect_ratio
+            elif aspect_ratio < 1 / max_aspect_ratio:
+                aspect_ratio = 1 / max_aspect_ratio
+        
         new_height = math.sqrt(target_area / aspect_ratio)
         new_width = target_area / new_height
     else:
@@ -165,10 +193,10 @@ def prepare_control_inputs(control_image_paths, control_image_mask_paths, contro
     } , control_nps
 
 def prepare_control_inputs_for_entity(control_image_paths, entity_bboxes, width, height, vae, 
-                                      c_width=None, c_height=None, face_entity_bboxes=None,
-                                      control_indices=[0,10], latent_indices=[9], 
-                                      adjust_custom_wh=True, mode="provided_size_mid_x", 
-                                      use_rembg=False, print_res=False):
+                                      control_image_sizes, face_entity_bboxes=None,
+                                      control_indices=[0], latent_indices=[3], 
+                                      adjust_custom_wh=False, mode="provided_face_bbox", 
+                                      use_rembg=True):
     
     control_latents, control_nps, clean_latent_bboxes = [], [], []
     if len(control_image_paths) == 0:
@@ -183,30 +211,26 @@ def prepare_control_inputs_for_entity(control_image_paths, entity_bboxes, width,
     
     for i, control_image_path in enumerate(control_image_paths):
         bbox = entity_bboxes[i]
+        c_width, c_height = control_image_sizes[i] if control_image_sizes is not None else (None, None)
         if adjust_custom_wh:
-            if print_res:
-                print(f"Overriding control size input: {c_width}, {c_height}")
-            c_width, c_height = int(width * (bbox[2]-bbox[0])), None
+            if c_width is not None:
+                c_width, c_height = min(int((c_width * 1.2) // 16 * 16), int(width * (bbox[2]-bbox[0]))), None
+            else:
+                c_width, c_height = int(width * (bbox[2]-bbox[0])), None
+
         c_img_tensor, c_img_np = preproc_image(control_image_path, c_width, c_height, use_rembg=use_rembg)
         c_width, c_height = c_img_tensor.shape[4], c_img_tensor.shape[3]
-        if print_res:
-            print(f"Control image {i} ({control_image_path})")
-            print(f"  Original size: {Image.open(control_image_path).size}, Processed size: {c_width, c_height}")
-            if use_rembg:
-                print(f"  (use background removal)")
         
         face_bbox = face_entity_bboxes[i] if face_entity_bboxes is not None else None
-        # latent_bbox = calc_latent_bbox(bbox, c_img_tensor, width, height)
-        face_bbox = get_facebbox_from_bbox(bbox, c_width, c_height, width, height, face_bbox=face_bbox, mode=mode)
-        if print_res:
-            print(f" Entity bbox: {bbox}, Face bbox : {face_bbox}")
+        if face_bbox is None:
+            face_bbox = get_facebbox_from_bbox(bbox, c_width, c_height, width, height, face_bbox=face_bbox, mode=mode)
         clean_latent_bboxes.append(face_bbox)
         c_img_latent = vae_encode(c_img_tensor, vae).cpu()
         control_latents.append(c_img_latent)
         control_nps.append(c_img_np)
 
     clean_latents = control_latents
-    clean_latent_indices = [torch.tensor([[ind]], dtype=torch.int64) for ind in control_indices]
+    clean_latent_indices = torch.tensor([control_indices], dtype=torch.int64)
     latent_indices = torch.tensor([latent_indices], dtype=torch.int64)
     clean_latent_bboxes = torch.tensor([clean_latent_bboxes], dtype=torch.float32)
     return {
@@ -222,7 +246,9 @@ def prepare_control_inputs_for_entity(control_image_paths, entity_bboxes, width,
 
 def get_all_kwargs_from_opens2v_metapath(metapath, steps=25, seed=-1,
     width=None, height=None, frames=1, batch_size=1,
-    cache_results=True, cache_layers=[], device='cuda:0'
+    cache_results=True, cache_layers=[], 
+    entities = [0],
+    device='cuda:0'
     ):
     meta = OmegaConf.load(metapath / f"meta.yaml")
 
@@ -230,8 +256,8 @@ def get_all_kwargs_from_opens2v_metapath(metapath, steps=25, seed=-1,
     height = meta['height'] if height is None else height
     width = meta['width'] if width is None else width
 
-    entity_mask_paths = [metapath / "target_bodmask_0.png"]
-    control_image_paths = [metapath / f"source_facecrop_0.png"]
+    entity_mask_paths = [metapath / f"target_bodmask_{i}.png" for i in entities]
+    control_image_paths = [metapath / f"source_facecrop_{i}.png" for i in entities]
     gt_image_path = metapath / f"target_frame.png"
 
     num_inference_steps=steps
@@ -302,17 +328,14 @@ def parse_bodylayout(layout_dir):
     layout = json.loads(Path(layout_dir).read_text())
     body_layout_dict = {}
     for key, panel_layout in layout.items():
-        rel_w, rel_h = panel_layout['bbox'][2] - panel_layout['bbox'][0], panel_layout['bbox'][3] - panel_layout['bbox'][1]
         body_layout = {
             i: {
                 'bbox' : list(map(lambda a: a/1000, x[:4])), 
                 'body' : np.reshape(x[4:], (-1,2)) / 1000
             } for i, x in enumerate(panel_layout['body'])
         }
-        body_layout_dict[key] = (rel_w, rel_h, body_layout)
+        body_layout_dict[key] = (panel_layout['bbox'], body_layout)
     return body_layout_dict
-
-
 
 def postproc_imgs(results, vae):
     pixels = torch.cat([

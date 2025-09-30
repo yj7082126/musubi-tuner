@@ -3,12 +3,13 @@ import textwrap
 import matplotlib.pyplot as plt
 from PIL import Image
 
-def printable_metadata(total_kwargs, text_kwargs, control_kwargs, lora_path, maxlen=80):
+def printable_metadata(total_kwargs, text_kwargs, control_kwargs, lora_path, seed=None, maxlen=80):
     keys = [
         'prompt', 'width', 'height', 'frames', 'batch_size', 
         'num_inference_step', 'generator', 
-        'latent_indices', 'clean_latent_indices',
-        'use_attention_masking', 'entity_masks', 'clean_latents'
+        'use_attention_masking', 'entity_masks', 
+        'prompt_embeds',
+        'clean_latents', 'latent_indices', 'clean_latent_indices', 'clean_latent_bboxes'
     ]
     meta_content = []
     meta_content.append(f"lora_path: {lora_path}")
@@ -23,6 +24,8 @@ def printable_metadata(total_kwargs, text_kwargs, control_kwargs, lora_path, max
             content = str(total_kwargs_2.get(key, 'N/A'))
         print_content = '\n'.join(textwrap.wrap(content,maxlen))
         meta_content.append(f"{key}: {print_content}")
+    if seed is not None:
+        meta_content.append(f"Seed : {seed}")
     return '\n'.join(meta_content)
 
 def fig_to_pil(fig):

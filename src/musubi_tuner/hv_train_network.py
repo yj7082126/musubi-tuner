@@ -254,7 +254,8 @@ def line_to_prompt_dict(line: str) -> dict:
                 control_image_path = m.group(1)
                 if "control_image_path" not in prompt_dict:
                     prompt_dict["control_image_path"] = []
-                prompt_dict["control_image_path"].append(control_image_path)
+                control_image_paths = control_image_path.split(",")
+                prompt_dict["control_image_path"].extend(control_image_paths)
                 continue
 
             m = re.match(r"of (.+)", parg, re.IGNORECASE)
@@ -267,7 +268,8 @@ def line_to_prompt_dict(line: str) -> dict:
                 entity_mask_path = m.group(1)
                 if "entity_mask_path" not in prompt_dict:
                     prompt_dict["entity_mask_path"] = []
-                prompt_dict["entity_mask_path"].append(entity_mask_path)
+                entity_mask_paths = entity_mask_path.split(",")
+                prompt_dict["entity_mask_path"].extend(entity_mask_paths)
                 continue
 
         except ValueError as ex:

@@ -1235,13 +1235,22 @@ class HunyuanVideoRotaryPosEmbed(nn.Module):
 
     @torch.no_grad()
     def forward_inner(self, frame_indices, height, width, device, 
-                      start_height=0, start_width=0, step_H=1., step_W=1.):
-        GT, GY, GX = torch.meshgrid(
-            frame_indices.to(device=device, dtype=torch.float32),
-            torch.arange(start_height, height, step_H, device=device, dtype=torch.float32) * self.h_w_scaling_factor,
-            torch.arange(start_width, width, step_W, device=device, dtype=torch.float32) * self.h_w_scaling_factor,
-            indexing="ij",
-        )
+                      start_height=0, start_width=0, step_H=1., step_W=1., 
+                      num_H=None, num_W=None):
+        if num_H is not None and num_W is not None:
+            GT, GY, GX = torch.meshgrid(
+                frame_indices.to(device=device, dtype=torch.float32),
+                torch.linspace(start_height, height, num_H+1, device=device, dtype=torch.float32)[:-1] * self.h_w_scaling_factor,
+                torch.linspace(start_width, width, num_W+1, device=device, dtype=torch.float32)[:-1] * self.h_w_scaling_factor,
+                indexing="ij",
+            )
+        else:
+            GT, GY, GX = torch.meshgrid(
+                frame_indices.to(device=device, dtype=torch.float32),
+                torch.arange(start_height, height, step_H, device=device, dtype=torch.float32) * self.h_w_scaling_factor,
+                torch.arange(start_width, width, step_W, device=device, dtype=torch.float32) * self.h_w_scaling_factor,
+                indexing="ij",
+            )
 
         FCT, FST = self.get_frequency(self.DT, GT)
         del GT  # free memory
@@ -1258,9 +1267,10 @@ class HunyuanVideoRotaryPosEmbed(nn.Module):
 
     @torch.no_grad()
     def forward(self, frame_indices, height, width, device, 
-                start_height=0, start_width=0, step_H=1., step_W=1.):
+                start_height=0, start_width=0, step_H=1., step_W=1., 
+                num_H=None, num_W=None):
         frame_indices = frame_indices.unbind(0)
-        results = [self.forward_inner(f, height, width, device, start_height, start_width, step_H, step_W) for f in frame_indices]
+        results = [self.forward_inner(f, height, width, device, start_height, start_width, step_H, step_W, num_H, num_W) for f in frame_indices]
         results = torch.stack(results, dim=0)
         return results
 
@@ -1889,7 +1899,7 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
                 if entity_masks is not None and len(hidden_order_dict['text_embeddings']) >= 1:
                     for i, (prompt_start, prompt_end) in enumerate(hidden_order_dict['text_embeddings'][1:]):
                         prompt_seq_len = prompt_end - prompt_start
-                        entity_masks_patched = (torch.sum(patchify(entity_masks[:,i]), dim=-1) > 0) 
+                        entity_masks_patched = (torch.sum(patchify(entity_masks[:,:,i]), dim=-1) > 0) 
                         entity_masks_patched = entity_masks_patched.unsqueeze(1).repeat(1, prompt_seq_len, 1)
                         attention_mask[:, prompt_start:prompt_end, noise_start:noise_end] = entity_masks_patched
                         # image update with prompt
@@ -1901,7 +1911,7 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
                 if entity_masks is not None and len(hidden_order_dict['clean_latents']) >= 1:
                     for i, (control_start, control_end) in enumerate(hidden_order_dict['clean_latents'][:]):
                         prompt_seq_len = control_end - control_start
-                        entity_masks_patched = (torch.sum(patchify(entity_masks[:,i]), dim=-1) > 0) 
+                        entity_masks_patched = (torch.sum(patchify(entity_masks[:,:,i]), dim=-1) > 0) 
                         entity_masks_patched = entity_masks_patched.unsqueeze(1).repeat(1, prompt_seq_len, 1)
                         attention_mask[:, control_start:control_end, noise_start:noise_end] = entity_masks_patched
                         # image update with prompt
@@ -1938,15 +1948,20 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
         hidden_WH = hidden_states.shape[1]
 
+        # logging.info(f"hidden_states shape: {B,C,T,H,W} -> {hidden_states.shape}, latent_indices: {latent_indices}")
+
         rope_freqs = self.rope(frame_indices=latent_indices, height=H, width=W, device=hidden_states.device)
         rope_freqs = rope_freqs.flatten(2).transpose(1, 2)
         hidden_order_dict['rope_freqs'].append(rope_freqs)
         if clean_latents is not None and clean_latent_indices is not None:
-
             processed_clean_latents, clean_latent_rope_freqs = [], []
+            latent_n = len(clean_latents) if type(clean_latents) == list else clean_latents.shape[2]
             if type(clean_latents) != list:
-                clean_latents = [clean_latents[:,:,[i]] for i in range(clean_latents.shape[2])]
-                clean_latent_indices = [clean_latent_indices[:,[i]] for i in range(clean_latent_indices.shape[1])]
+                clean_latents = [clean_latents[:,:,[i]] for i in range(latent_n)]
+
+            if clean_latent_indices.shape[1] != latent_n:
+                clean_latent_indices = clean_latent_indices.repeat(1, latent_n)
+            clean_latent_indices = [clean_latent_indices[:,[i]] for i in range(latent_n)]
 
             latent_counter = 0
             for i, clean_latent in enumerate(clean_latents):
@@ -1958,6 +1973,7 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
                     clean_latent = repeat_to_batch_size(clean_latent, B)
                 if clean_latent_index.shape[0] != B:
                     clean_latent_index = repeat_to_batch_size(clean_latent_index, B)
+                
                 _, _, _, clean_H, clean_W = clean_latent.shape
 
                 if clean_latent_bboxes is not None:
@@ -1975,8 +1991,8 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
                             frame_indices=clean_latent_index[[b]], 
                             height=cb[3], width=cb[2],
                             start_height=cb[1], start_width=cb[0],
-                            step_H=(cb[3] - cb[1]) / clean_H,
-                            step_W=(cb[2] - cb[0]) / clean_W,
+                            num_H=clean_H,
+                            num_W=clean_W,
                             device=clean_latent.device)
                         # logger.info(f"Clean Latent Rope Freq Shape: {cb_rope_freq.shape}")
                         clean_latent_rope_freq.append(cb_rope_freq)

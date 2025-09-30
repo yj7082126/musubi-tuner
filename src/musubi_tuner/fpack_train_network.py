@@ -5,12 +5,13 @@ import time
 from typing import Optional
 from PIL import Image
 
-
 import numpy as np
 import torch
 import torchvision.transforms.functional as TF
 from tqdm import tqdm
 from accelerate import Accelerator, init_empty_weights
+import lovely_tensors as lt
+lt.monkey_patch()
 
 from musubi_tuner.dataset.image_video_dataset import ARCHITECTURE_FRAMEPACK, ARCHITECTURE_FRAMEPACK_FULL, load_video, resize_image_to_bucket
 from musubi_tuner.fpack_generate_video import decode_latent
@@ -195,6 +196,9 @@ class FramePackNetworkTrainer(NetworkTrainer):
         num_frames = latent_window_size * 4 - 3
 
         # prepare start and control latent
+        ## FIX THIS later:
+        control_image_size = (320, 320)
+
         def encode_image(path, respect_own_size=True):
             image = Image.open(path)
             if image.mode == "RGBA":
@@ -204,7 +208,8 @@ class FramePackNetworkTrainer(NetworkTrainer):
                 alpha = None
             
             if respect_own_size:
-                image_w, image_h = (image.size[0] // 8) * 8, (image.size[1]) // 8 * 8
+                # image_w, image_h = (image.size[0] // 8) * 8, (image.size[1]) // 8 * 8
+                image_w, image_h = control_image_size
             else:
                 image_w, image_h = width, height
             image = resize_image_to_bucket(image, (image_w, image_h))  # returns a numpy array
@@ -242,7 +247,7 @@ class FramePackNetworkTrainer(NetworkTrainer):
                     logger.info(f"Encoding entity mask: {entity_mask_path}")
                     entity_mask_latent = encode_mask(entity_mask_path)
                     entity_masks.append(entity_mask_latent)
-            entity_masks = torch.cat(entity_masks, dim=0)
+            
         else:
             control_latents = None
             control_alphas = None
@@ -396,17 +401,21 @@ class FramePackNetworkTrainer(NetworkTrainer):
 
             # kisekaeichi and 1f-mc: both are using control images, but indices are different
             clean_latents = torch.cat(control_latents, dim=2)  # (1, 16, num_control_images, H//8, W//8)
+            entity_masks = torch.cat(entity_masks, dim=2)
+            # clean_latents = control_latents
             clean_latent_indices = torch.zeros((1, len(control_latents)), dtype=torch.int64)
             if "no_post" not in one_frame_inference:
                 clean_latent_indices[:, -1] = 1 + latent_window_size  # default index for clean latents post
 
             if args.sample_with_latentbbox_rope:
-                clean_w, clean_h = clean_latents.shape[4] * 8, clean_latents.shape[3] * 8
-                print(entity_masks.shape)
-                bbox = get_bbox_from_mask(entity_masks[0,:,0].permute(1,2,0).cpu().numpy().astype(bool)[...,0])
-                face_bbox = get_facebbox_from_bbox(bbox, clean_w, clean_h, width, height, mode="provided_size_mid_x")
-                clean_latent_bboxes = torch.tensor([face_bbox]).unsqueeze(0).float()
-                logging.info(f"Entity BBox: {bbox}, Face BBox: {face_bbox}")
+                face_bboxes = []
+                for i in range(entity_masks.shape[2]):
+                    clean_w, clean_h = clean_latents.shape[4] * 8, clean_latents.shape[3] * 8
+                    bbox = get_bbox_from_mask(entity_masks[0,:,i].permute(1,2,0).cpu().numpy().astype(bool)[...,0])
+                    face_bbox = get_facebbox_from_bbox(bbox, clean_w, clean_h, width, height, mode="provided_size_mid_x")
+                    face_bboxes.append(face_bbox)
+                    logging.info(f"Entity BBox: {bbox}, Face BBox: {face_bbox}")
+                clean_latent_bboxes = torch.tensor(face_bboxes).unsqueeze(0).float()
                 logging.info(f"Use latent bbox for RoPE: {clean_latent_bboxes}")
             else:
                 clean_latent_bboxes = None
@@ -462,7 +471,7 @@ class FramePackNetworkTrainer(NetworkTrainer):
                 clean_latent_4x_indices = torch.arange(index, index + 16).unsqueeze(0)  #  16
 
             logger.info(
-                f"One frame inference. clean_latent: {clean_latents.shape} latent_indices: {latent_indices}, clean_latent_indices: {clean_latent_indices}, num_frames: {sample_num_frames}"
+                f"One frame inference. clean_latent: {clean_latents}, entity_masks: {entity_masks}, latent_indices: {latent_indices}, clean_latent_indices: {clean_latent_indices}, num_frames: {sample_num_frames}"
             )
 
             # prepare conditioning inputs

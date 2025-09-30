@@ -6,7 +6,7 @@ echo -e "Current Directory: `pwd`"
 
 # Start the job, including launching JN, then collect info about the job
 echo -e "\nSpinning up your Training! (Give me about 5s...)"
-JOBID="$(sbatch --parsable submit.slurm)"
+JOBID="$(sbatch --parsable submit_vistory.slurm)"
 sleep 15
 JOB_NODELIST="$(squeue -j $JOBID -o %N | grep ^e)"
 BATCH_NODE=`scontrol show job $JOBID | grep BatchHost | cut -d"=" -f2`
