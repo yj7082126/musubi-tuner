@@ -8,8 +8,8 @@ from .dwpose import DwposeDetector
 from .bbox_utils import get_facebbox_from_bbox
 
 dwpose_model = DwposeDetector.from_pretrained(
-    '/home/yo564250/workspace/ComfyUI/custom_nodes/comfyui_controlnet_aux/ckpts/hr16/DWPose-TorchScript-BatchSize5',
-    '/home/yo564250/workspace/ComfyUI/custom_nodes/comfyui_controlnet_aux/ckpts/hr16/yolox-onnx',
+    'hr16/DWPose-TorchScript-BatchSize5',
+    'hr16/yolox-onnx',
     det_filename='yolox_l.torchscript.pt', 
     pose_filename='dw-ll_ucoco_384_bs5.torchscript.pt',
     torchscript_device='cuda'
@@ -62,11 +62,13 @@ def safety_scale(scale, sw, sh, tw, th, min_boundary=0.02, max_boundary=0.2):
     s_ratio = scaled_sw * scaled_sh / (tw * th)
     if s_ratio < min_boundary:
         new_scale = 1.0
-        while s_ratio < min_boundary:
+        i = 0
+        while s_ratio < min_boundary and i < 10:
             new_scale += 0.5
             scaled_sw = sw * (scale * new_scale)
             scaled_sh = sh * (scale * new_scale)
             s_ratio = scaled_sw * scaled_sh / (tw * th)
+            i += 1
         return new_scale
     elif s_ratio > max_boundary:
         new_scale = 1.0
@@ -186,7 +188,6 @@ def align_source_to_target(
         scale (float): final scale applied
         translation (np.ndarray of shape (2,)): final translation applied
     """
-
     base_scale, base_translation = solve_scale_translation(source_kps, target_kps)
     scale_2 = safety_scale(base_scale, source_size[0], source_size[1], target_size[0], target_size[1], min_boundary=min_boundary, max_boundary=max_boundary)
     final_scale, final_translation = rescale_trans(scale_2, bbox, base_scale, base_translation, source_kps, source_size[0], source_size[1], target_size[0], target_size[1])
@@ -206,14 +207,17 @@ def detect_and_align_source_to_target(source_img, target_kps, target_size,
         src_kps = src_kps[valid_keyps,:2] 
         tgt_kps = np.array(target_kps)[valid_keyps,:] * np.array(target_size)  # only use the valid keypoints in source
 
-        aligned_img, face_bbox, scale, translation = align_source_to_target(
-            source_img, src_kps, source_size,
-            tgt_kps, target_size,
-            min_boundary=min_bbox_size,
-            max_boundary=max_bbox_size,
-            bbox=None
-        )
-        return face_bbox
+        if (len(src_kps) == 0) or (len(tgt_kps) == 0):
+            return None
+        else:
+            aligned_img, face_bbox, scale, translation = align_source_to_target(
+                source_img, src_kps, source_size,
+                tgt_kps, target_size,
+                min_boundary=min_bbox_size,
+                max_boundary=max_bbox_size,
+                bbox=None
+            )
+            return face_bbox
     else:
         return None
     
@@ -263,62 +267,63 @@ def search_facebbox_for_layout(
 
     """
     debug_dict = {}
-    for k, v in panel_layout.items():
-        debug_els = {}
-        debug_els['entity_bbox'] = v['bbox']
+    if len(list(characters_shot.keys())) > 0:
+        for k, v in panel_layout.items():
+            debug_els = {}
+            debug_els['entity_bbox'] = v['bbox']
 
-        character_name = list(characters_shot.keys())[k] if len(list(characters_shot.keys())) > k else list(characters_shot.keys())[0]
-        control_image_path = characters_shot[character_name]['images'][0]        
-        control_image = Image.open(control_image_path)
-        if crop_face_detect:
-            control_image = align_face(control_image)
-        if c_width_given is not None:
+            character_name = list(characters_shot.keys())[k] if len(list(characters_shot.keys())) > k else list(characters_shot.keys())[0]
+            control_image_path = characters_shot[character_name]['images'][0]        
+            control_image = Image.open(control_image_path)
+            if crop_face_detect:
+                control_image = align_face(control_image)
+            if c_width_given is not None:
+                control_ratio = control_image.size[1] / control_image.size[0]
+                c_width = int((c_width_given) // 16 * 16)
+                c_height = int(round(c_width * control_ratio) // 2 * 2)
+                control_image = control_image.resize((c_width, c_height), Image.LANCZOS)
+
             control_ratio = control_image.size[1] / control_image.size[0]
-            c_width = int((c_width_given) // 16 * 16)
-            c_height = int(round(c_width * control_ratio) // 2 * 2)
-            control_image = control_image.resize((c_width, c_height), Image.LANCZOS)
+            debug_els['control_image_path'] = control_image_path
+            debug_els['control_image'] = control_image
 
-        control_ratio = control_image.size[1] / control_image.size[0]
-        debug_els['control_image_path'] = control_image_path
-        debug_els['control_image'] = control_image
+            # if scale_c_by_bbox:
+            #     c_width = int(target_size[0] * (v['bbox'][2]-v['bbox'][0]) // 16 * 16)
+            # else:
+            #     c_width = int(np.sqrt(target_size[0] * target_size[1] * scale_c) // 16 * 16)
+            # c_width, c_height = int(c_width * scale), int(c_height * scale) 
 
-        # if scale_c_by_bbox:
-        #     c_width = int(target_size[0] * (v['bbox'][2]-v['bbox'][0]) // 16 * 16)
-        # else:
-        #     c_width = int(np.sqrt(target_size[0] * target_size[1] * scale_c) // 16 * 16)
-        # c_width, c_height = int(c_width * scale), int(c_height * scale) 
+            face_bbox = None
+            if 'body' in v and len(v['body']) == 4 and use_face_detect:
+                tgt_kps = v['body']
+                face_bbox = detect_and_align_source_to_target(
+                    control_image, tgt_kps, target_size, 
+                    min_bbox_size=min_bbox_size, max_bbox_size=max_bbox_size,
+                    bbox=v['bbox'])
+            if face_bbox is None:
+                face_bbox = v['body'][:4] if len(v['body']) >= 4 else None
+                face_bbox = get_facebbox_from_bbox(
+                    v['bbox'], control_image.size[0], control_image.size[1], 
+                    target_size[0], target_size[1],
+                    face_bbox=face_bbox, mode=bbox_mode)
+            
+            if c_width_given is None:
+                c_width = int((target_size[0] * (face_bbox[2]-face_bbox[0])) * scale_c // 16 * 16)
+                c_height = int(round(c_width * control_ratio) // 2 * 2)  
+            if use_safety:
+                if (c_width * c_height) < (target_size[0] * target_size[1] * min_safety_ratio):
+                    c_width = (target_size[0] * target_size[1] * min_safety_ratio / control_ratio) ** 0.5
+                    c_width = int(c_width // 16 * 16)
+                    c_height = int(round(c_width * control_ratio) // 2 * 2)
+                elif (c_width * c_height) > (target_size[0] * target_size[1] * max_safety_ratio):
+                    c_width = (target_size[0] * target_size[1] * max_safety_ratio / control_ratio) ** 0.5
+                    c_width = int(c_width // 16 * 16)
+                    c_height = int(round(c_width * control_ratio) // 2 * 2)
 
-        face_bbox = None
-        if 'body' in v and len(v['body']) == 4 and use_face_detect:
-            tgt_kps = v['body']
-            face_bbox = detect_and_align_source_to_target(
-                control_image, tgt_kps, target_size, 
-                min_bbox_size=min_bbox_size, max_bbox_size=max_bbox_size,
-                bbox=v['bbox'])
-        if face_bbox is None:
-            face_bbox = v['body'][:4] if len(v['body']) >= 4 else None
-            face_bbox = get_facebbox_from_bbox(
-                v['bbox'], control_image.size[0], control_image.size[1], 
-                target_size[0], target_size[1],
-                face_bbox=face_bbox, mode=bbox_mode)
-        
-        if c_width_given is None:
-            c_width = int((target_size[0] * (face_bbox[2]-face_bbox[0])) * scale_c // 16 * 16)
-            c_height = int(round(c_width * control_ratio) // 2 * 2)  
-        if use_safety:
-            if (c_width * c_height) < (target_size[0] * target_size[1] * min_safety_ratio):
-                c_width = (target_size[0] * target_size[1] * min_safety_ratio / control_ratio) ** 0.5
-                c_width = int(c_width // 16 * 16)
-                c_height = int(round(c_width * control_ratio) // 2 * 2)
-            elif (c_width * c_height) > (target_size[0] * target_size[1] * max_safety_ratio):
-                c_width = (target_size[0] * target_size[1] * max_safety_ratio / control_ratio) ** 0.5
-                c_width = int(c_width // 16 * 16)
-                c_height = int(round(c_width * control_ratio) // 2 * 2)
+            debug_els['control_image_size'] = (c_width, c_height)
+            debug_els['face_bbox'] = face_bbox
 
-        debug_els['control_image_size'] = (c_width, c_height)
-        debug_els['face_bbox'] = face_bbox
-
-        debug_dict[k] = debug_els
+            debug_dict[k] = debug_els
     return debug_dict
 
     # if len(debug_dict) == 0:

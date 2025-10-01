@@ -1,5 +1,5 @@
 import os, sys
-sys.path.append("../src")
+sys.path.append("src")
 os.environ["CUDA_VISIBLE_DEVICES"] = "0,"
 from pathlib import Path
 from types import SimpleNamespace
@@ -28,18 +28,20 @@ from musubi_tuner.utils.viz_utils import printable_metadata, return_total_visual
 from musubi_tuner.utils.bbox_utils import get_mask_from_bboxes, draw_bboxes, draw_bboxes_images, auto_scale_layout_data, get_bbox_from_mask
 from musubi_tuner.utils.keypalign_utils import search_facebbox_for_layout
 
-sys.path.append("/lustre/fs1/home/yo564250/workspace/whisperer/datasets/storyviz/vistorybench")
+# sys.path.append("/lustre/fs1/home/yo564250/workspace/whisperer/datasets/storyviz/vistorybench")
+sys.path.append("/projects/bffz/ykwon4/vistorybench/")
 from vistorybench.data_process.dataset_process.dataset_load import StoryDataset
 
 device = torch.device('cuda')
 #%%
-# main_path = Path("/projects/bffz/ykwon4/ComfyUI/models")
-main_path = Path("/lustre/fs1/home/yo564250/workspace/ComfyUI/models")
+main_path = Path("/projects/bffz/ykwon4/ComfyUI/models")
+# main_path = Path("/lustre/fs1/home/yo564250/workspace/ComfyUI/models")
 dit_path = "diffusion_models/FramePackI2V_HY_bf16.safetensors"
 vae_path = "vae/hunyuan-video-t2v-720p-vae.pt"
 text_encoder1_path = "text_encoders/llava_llama3_fp16.safetensors"
 text_encoder2_path = "text_encoders/clip_l.safetensors"
-lora_path = '/home/yo564250/workspace/whisperer/related/framepackbase/musubi-tuner/outputs/training/idmask_control_lora_wrope_v2/idmask_control_lora_wrope_v2_4-step00006000.safetensors'
+# lora_path = '../../outputs/training/idmask_control_lora_wrope_v2/idmask_control_lora_wrope_v2_4-step00006000.safetensors'
+lora_path = main_path / "loras/idmask_control_lora_wrope_v2_4-step00006000.safetensors"
 
 model = load_packed_model(device, main_path / dit_path, 'sageattn', device, has_image_proj=False)
 model.to(device)
@@ -118,78 +120,93 @@ def get_control_kwargs_full(panel_layout, characters_shot, width, height,
     return control_kwargs, entity_masks, debug_mask, control_nps, print_res
 
 #%%
-vistory_dataset_path = Path('/groups/chenchen/patrick/ViStoryBench/dataset/ViStory')
+vistory_dataset_path = Path('/projects/bffz/ykwon4/vistorybench/data/dataset/ViStory')
 vistory_dataset = StoryDataset(vistory_dataset_path)
-main_layout_path = Path(f"/groups/chenchen/patrick/ViStoryBench/gen_layouts_bulk/20250927_101053/")
-currtime = datetime.strftime(datetime.now(), "%Y%m%d_%H%M%S")
-main_output_path = Path(f"/home/yo564250/workspace/whisperer/related/framepackbase/musubi-tuner/outputs/vistory_test/base/en/{currtime}")
+# main_layout_path = Path(f"/groups/chenchen/patrick/ViStoryBench/gen_layouts_bulk/20250927_101053/")
+main_layout_path = Path("/projects/bffz/ykwon4/vistorybench/data/gen_layouts_bulk/20250927_101053/")
+# currtime = datetime.strftime(datetime.now(), "%Y%m%d_%H%M%S")
+currtime = '20250930_110059'
+# main_output_path = Path(f"/home/yo564250/workspace/whisperer/related/framepackbase/musubi-tuner/outputs/vistory_test/base/en/{currtime}")
+main_output_path = Path(f"/projects/bffz/ykwon4/vistorybench/data/outputs/whisperer/base/en/{currtime}")
 main_output_path.mkdir(parents=True, exist_ok=True)
+debug_output_path = Path(f"/projects/bffz/ykwon4/vistorybench/data/outputs/whisperer_debug/base/en/{currtime}")
+debug_output_path.mkdir(parents=True, exist_ok=True)
 
 #%%
 max_scene_sentences = 3
 max_characters = 2
 scale_c = 1.2
 
-for story_num in [f"{x:02d}" for x in range(1,3)]:
+for story_num in [f"{x:02d}" for x in range(40,81)]:
     shot_nums = [x['index'] for x in vistory_dataset.load_shots(story_num)]
     output_path = main_output_path / f"{story_num}"
     output_path.mkdir(parents=True, exist_ok=True)
+    d_output_path = debug_output_path / f"{story_num}"
+    d_output_path.mkdir(parents=True, exist_ok=True)
     for shot_num in shot_nums:
+        # try:
+        if (output_path / f"{shot_num-1}_0.png").is_file():
+            continue
+        print(f"Processing for story {story_num} shot {shot_num}")
+
+        story_shot, characters_shot = get_info_from_vistorybench(vistory_dataset, story_num, shot_num)
+        prompt = story_shot['type'] + ". " + ", ".join(story_shot['scene'].split(", ")[:max_scene_sentences]) + ". " + story_shot['script']
+        text_kwargs = get_text_preproc(prompt, 
+            text_encoder1, text_encoder2, tokenizer1, tokenizer2, 
+            entity_prompts=[], device=device)
+
+        layouts = [
+            (x.stem, list(map(int, x.stem.split("-pages_")[-1].split("_")))) 
+            for x in  list(main_layout_path.glob(f"story_{story_num}*"))]
+        layout_name = [(x[0], x[1][0]) for x in layouts if shot_num in range(x[1][0], x[1][1]+1)][0]
+        author_output_dir = main_layout_path / layout_name[0]
+        layout = parse_bodylayout(author_output_dir / "pose_layout.json")
+
+        panel_bbox, panel_layout = layout[f'[PANEL-{shot_num-layout_name[1]+1}]']
+        width, height = getres(panel_bbox[2]-panel_bbox[0], panel_bbox[3]-panel_bbox[1], 
+            target_area=1280*720, max_aspect_ratio=2.0)
+        
+        control_kwargs, entity_masks, debug_mask, control_nps, print_res = get_control_kwargs_full(
+            panel_layout, characters_shot, width, height, 
+            crop_face_detect=True, use_face_detect=True, c_width_given=None, scale_c=scale_c,
+            max_characters=max_characters, control_indices=[0], latent_indices=[3], 
+            use_rembg=True
+        )
+        print(print_res)
+
+        seed = np.random.randint(2**31)
+        generator = torch.Generator(device="cpu")
+        generator.manual_seed(seed)
+
+        total_kwargs = {
+            'prompt': prompt, 'sampler': 'unipc', 'width': width, 'height': height, 'frames': 1, 'batch_size': 1,
+            'num_inference_step': 25, 'generator': generator,
+            'device': device, 'dtype': torch.bfloat16,
+            'cache_results': False, 'cache_layers': [], 
+            'use_attention_masking': ['no_cross_control_latents', 'mask_control'],
+            'entity_masks': entity_masks,
+        }
+        attn_cache.clear()
+        results = sample_hunyuan(transformer=model, **total_kwargs, **text_kwargs, **control_kwargs,)
+        result_img = Image.fromarray(postproc_imgs(results,vae)[0])
+
+        meta_str = printable_metadata(total_kwargs, text_kwargs, control_kwargs, lora_path, maxlen=80, seed=seed)
+        meta_str_2 = meta_str + "\n\n" + print_res
+        attn_mask = get_pltplot_as_pil(attn_cache['attn_mask'][0], vmin=-9999., vmax=0., cmap=plt.cm.viridis)
+        debug_img = return_total_visualization(
+            f'story{story_num}_shot{shot_num}_seed{seed}', 
+            meta_str, np.asarray(result_img), 
+            attn_mask, np.asarray(control_nps), np.asarray(debug_mask), 
+            np.zeros((height, width, 3), dtype=np.uint8))
+
+        result_img.save(output_path / f"{shot_num-1}_0.png")
+        debug_img.save(d_output_path / f"{shot_num-1}_debug.png")
+        debug_mask.save(d_output_path / f"{shot_num-1}_mask.png")
         try:
-            story_shot, characters_shot = get_info_from_vistorybench(vistory_dataset, story_num, shot_num)
-            prompt = story_shot['type'] + ". " + ", ".join(story_shot['scene'].split(", ")[:max_scene_sentences]) + ". " + story_shot['script']
-            text_kwargs = get_text_preproc(prompt, 
-                text_encoder1, text_encoder2, tokenizer1, tokenizer2, 
-                entity_prompts=[], device=device)
-
-            layouts = [
-                (x.stem, list(map(int, x.stem.split("-pages_")[-1].split("_")))) 
-                for x in  list(main_layout_path.glob(f"story_{story_num}*"))]
-            layout_name = [(x[0], x[1][0]) for x in layouts if shot_num in range(x[1][0], x[1][1]+1)][0]
-            author_output_dir = main_layout_path / layout_name[0]
-            layout = parse_bodylayout(author_output_dir / "pose_layout.json")
-
-            panel_bbox, panel_layout = layout[f'[PANEL-{shot_num-layout_name[1]+1}]']
-            width, height = getres(panel_bbox[2]-panel_bbox[0], panel_bbox[3]-panel_bbox[1], 
-                target_area=1280*720, max_aspect_ratio=2.0)
-            
-            control_kwargs, entity_masks, debug_mask, control_nps, print_res = get_control_kwargs_full(
-                panel_layout, characters_shot, width, height, 
-                crop_face_detect=True, use_face_detect=True, c_width_given=None, scale_c=scale_c,
-                max_characters=max_characters, control_indices=[0], latent_indices=[3], 
-                use_rembg=True
-            )
-
-            seed = np.random.randint(2**31)
-            generator = torch.Generator(device="cpu")
-            generator.manual_seed(seed)
-
-            total_kwargs = {
-                'prompt': prompt, 'sampler': 'unipc', 'width': width, 'height': height, 'frames': 1, 'batch_size': 1,
-                'num_inference_step': 25, 'generator': generator,
-                'device': device, 'dtype': torch.bfloat16,
-                'cache_results': False, 'cache_layers': [], 
-                'use_attention_masking': ['no_cross_control_latents', 'mask_control'],
-                'entity_masks': entity_masks,
-            }
-            attn_cache.clear()
-            results = sample_hunyuan(transformer=model, **total_kwargs, **text_kwargs, **control_kwargs,)
-            result_img = Image.fromarray(postproc_imgs(results,vae)[0])
-
-            meta_str = printable_metadata(total_kwargs, text_kwargs, control_kwargs, lora_path, maxlen=80, seed=seed)
-            meta_str_2 = meta_str + "\n\n" + print_res
-            attn_mask = get_pltplot_as_pil(attn_cache['attn_mask'][0], vmin=-9999., vmax=0., cmap=plt.cm.viridis)
-            debug_img = return_total_visualization(
-                f'story{story_num}_shot{shot_num}_seed{seed}', 
-                meta_str, np.asarray(result_img), 
-                attn_mask, np.asarray(control_nps), np.asarray(debug_mask), 
-                np.zeros((height, width, 3), dtype=np.uint8))
-
-            result_img.save(output_path / f"{shot_num}_0.png")
-            debug_img.save(output_path / f"{shot_num}_debug.png")
-            debug_mask.save(output_path / f"{shot_num}_mask.png")
-            (output_path / f'{shot_num}_meta.txt').write_text(meta_str_2, encoding='cp949')
-
+            (d_output_path / f'{shot_num-1}_meta.txt').write_text(meta_str_2, encoding='cp949')
         except Exception as e:
             print(f"Error in loading data for story {story_num} shot {shot_num}: {e}")
             continue
+        # except Exception as e:
+        #     print(f"Error in loading data for story {story_num} shot {shot_num}: {e}")
+        #     continue
