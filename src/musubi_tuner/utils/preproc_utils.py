@@ -322,7 +322,22 @@ def get_info_from_vistorybench(dataset, story_num, shot_num):
     story_shot = story_dict[shot_num]
     story_shot['type'] = story['type']
     characters_shot = {k: characters[k] for k in story_shot['character_name']}
-    return story_shot, characters_shot
+
+    char_prompts = []
+    for char_key, char_name in zip(story_shot['character_key'], story_shot['character_name']):
+        char_prompt = characters[char_key]['prompt']
+        char_prompts.append(f'{char_name} is {char_prompt}')
+
+    # prompt = story_shot['type'] + ". " + ", ".join(story_shot['scene'].split(", ")[:max_scene_sentences]) + ". " + story_shot['script']
+    prompt = (
+        f"{story_shot['camera']};"
+        f"{story_shot['plot']};" 
+        f"{story_shot['script']};"
+        f"{';'.join(char_prompts)};" # Separate multiple character descriptions with ;
+        f"{story_shot['scene']};"
+    )
+
+    return story_shot, characters_shot, prompt
 
 def parse_bodylayout(layout_dir):
     layout = json.loads(Path(layout_dir).read_text())

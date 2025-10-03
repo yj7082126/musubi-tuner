@@ -124,8 +124,8 @@ vistory_dataset_path = Path('/projects/bffz/ykwon4/vistorybench/data/dataset/ViS
 vistory_dataset = StoryDataset(vistory_dataset_path)
 # main_layout_path = Path(f"/groups/chenchen/patrick/ViStoryBench/gen_layouts_bulk/20250927_101053/")
 main_layout_path = Path("/projects/bffz/ykwon4/vistorybench/data/gen_layouts_bulk/20250927_101053/")
-# currtime = datetime.strftime(datetime.now(), "%Y%m%d_%H%M%S")
-currtime = '20250930_110059'
+currtime = datetime.strftime(datetime.now(), "%Y%m%d_%H%M%S")
+currtime = '20251002_194539'
 # main_output_path = Path(f"/home/yo564250/workspace/whisperer/related/framepackbase/musubi-tuner/outputs/vistory_test/base/en/{currtime}")
 main_output_path = Path(f"/projects/bffz/ykwon4/vistorybench/data/outputs/whisperer/base/en/{currtime}")
 main_output_path.mkdir(parents=True, exist_ok=True)
@@ -133,11 +133,12 @@ debug_output_path = Path(f"/projects/bffz/ykwon4/vistorybench/data/outputs/whisp
 debug_output_path.mkdir(parents=True, exist_ok=True)
 
 #%%
+seed = 42
 max_scene_sentences = 3
 max_characters = 2
 scale_c = 1.2
 
-for story_num in [f"{x:02d}" for x in range(40,81)]:
+for story_num in [f"{x:02d}" for x in range(3,4)]:
     shot_nums = [x['index'] for x in vistory_dataset.load_shots(story_num)]
     output_path = main_output_path / f"{story_num}"
     output_path.mkdir(parents=True, exist_ok=True)
@@ -149,8 +150,9 @@ for story_num in [f"{x:02d}" for x in range(40,81)]:
             continue
         print(f"Processing for story {story_num} shot {shot_num}")
 
-        story_shot, characters_shot = get_info_from_vistorybench(vistory_dataset, story_num, shot_num)
-        prompt = story_shot['type'] + ". " + ", ".join(story_shot['scene'].split(", ")[:max_scene_sentences]) + ". " + story_shot['script']
+        story_shot, characters_shot, prompt = get_info_from_vistorybench(vistory_dataset, story_num, shot_num)
+        # prompt = story_shot['type'] + ". " + ", ".join(story_shot['scene'].split(", ")[:max_scene_sentences]) + ". " + story_shot['script']
+
         text_kwargs = get_text_preproc(prompt, 
             text_encoder1, text_encoder2, tokenizer1, tokenizer2, 
             entity_prompts=[], device=device)
@@ -163,8 +165,9 @@ for story_num in [f"{x:02d}" for x in range(40,81)]:
         layout = parse_bodylayout(author_output_dir / "pose_layout.json")
 
         panel_bbox, panel_layout = layout[f'[PANEL-{shot_num-layout_name[1]+1}]']
-        width, height = getres(panel_bbox[2]-panel_bbox[0], panel_bbox[3]-panel_bbox[1], 
-            target_area=1280*720, max_aspect_ratio=2.0)
+        # width, height = getres(panel_bbox[2]-panel_bbox[0], panel_bbox[3]-panel_bbox[1], 
+        #     target_area=1280*720, max_aspect_ratio=2.0)
+        width, height = 1344, 768
         
         control_kwargs, entity_masks, debug_mask, control_nps, print_res = get_control_kwargs_full(
             panel_layout, characters_shot, width, height, 
@@ -174,7 +177,7 @@ for story_num in [f"{x:02d}" for x in range(40,81)]:
         )
         print(print_res)
 
-        seed = np.random.randint(2**31)
+        # seed = np.random.randint(2**31)
         generator = torch.Generator(device="cpu")
         generator.manual_seed(seed)
 
