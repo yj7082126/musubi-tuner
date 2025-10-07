@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from tqdm import tqdm
 from datetime import datetime
 from omegaconf import OmegaConf
+import json
 import numpy as np
 import matplotlib.pyplot as plt
 import lovely_tensors as lt
@@ -123,9 +124,10 @@ def get_control_kwargs_full(panel_layout, characters_shot, width, height,
 vistory_dataset_path = Path('/projects/bffz/ykwon4/vistorybench/data/dataset/ViStory')
 vistory_dataset = StoryDataset(vistory_dataset_path)
 # main_layout_path = Path(f"/groups/chenchen/patrick/ViStoryBench/gen_layouts_bulk/20250927_101053/")
-main_layout_path = Path("/projects/bffz/ykwon4/vistorybench/data/gen_layouts_bulk/20250927_101053/")
+# main_layout_path = Path("/projects/bffz/ykwon4/vistorybench/data/gen_layouts_bulk/20250927_101053/")
+main_layout_path = Path("/projects/bffz/ykwon4/vistorybench/data/gen_layouts_bulk/20251004_200710")
 currtime = datetime.strftime(datetime.now(), "%Y%m%d_%H%M%S")
-currtime = '20251002_194539'
+# currtime = '20251002_194539'
 # main_output_path = Path(f"/home/yo564250/workspace/whisperer/related/framepackbase/musubi-tuner/outputs/vistory_test/base/en/{currtime}")
 main_output_path = Path(f"/projects/bffz/ykwon4/vistorybench/data/outputs/whisperer/base/en/{currtime}")
 main_output_path.mkdir(parents=True, exist_ok=True)
@@ -138,7 +140,7 @@ max_scene_sentences = 3
 max_characters = 2
 scale_c = 1.2
 
-for story_num in [f"{x:02d}" for x in range(3,4)]:
+for story_num in [f"{x:02d}" for x in range(1,81)]:
     shot_nums = [x['index'] for x in vistory_dataset.load_shots(story_num)]
     output_path = main_output_path / f"{story_num}"
     output_path.mkdir(parents=True, exist_ok=True)
@@ -157,18 +159,27 @@ for story_num in [f"{x:02d}" for x in range(3,4)]:
             text_encoder1, text_encoder2, tokenizer1, tokenizer2, 
             entity_prompts=[], device=device)
 
-        layouts = [
-            (x.stem, list(map(int, x.stem.split("-pages_")[-1].split("_")))) 
-            for x in  list(main_layout_path.glob(f"story_{story_num}*"))]
-        layout_name = [(x[0], x[1][0]) for x in layouts if shot_num in range(x[1][0], x[1][1]+1)][0]
-        author_output_dir = main_layout_path / layout_name[0]
-        layout = parse_bodylayout(author_output_dir / "pose_layout.json")
+        # layouts = [
+        #     (x.stem, list(map(int, x.stem.split("-pages_")[-1].split("_")))) 
+        #     for x in  list(main_layout_path.glob(f"story_{story_num}*"))]
+        # layout_name = [(x[0], x[1][0]) for x in layouts if shot_num in range(x[1][0], x[1][1]+1)][0]
+        # author_output_dir = main_layout_path / layout_name[0]
+        # layout = parse_bodylayout(author_output_dir / "pose_layout.json")
 
-        panel_bbox, panel_layout = layout[f'[PANEL-{shot_num-layout_name[1]+1}]']
-        # width, height = getres(panel_bbox[2]-panel_bbox[0], panel_bbox[3]-panel_bbox[1], 
-        #     target_area=1280*720, max_aspect_ratio=2.0)
+        # panel_bbox, panel_layout = layout[f'[PANEL-{shot_num-layout_name[1]+1}]']
+        # # width, height = getres(panel_bbox[2]-panel_bbox[0], panel_bbox[3]-panel_bbox[1], 
+        # #     target_area=1280*720, max_aspect_ratio=2.0)
+        # width, height = 1344, 768
+        author_output_dir = main_layout_path / f"story_{story_num}"
+        layout = json.loads((author_output_dir / "pose_layout.json").read_text())[str(shot_num)]
+        width, height = layout['canvas_size']['w'], layout['canvas_size']['h']
         width, height = 1344, 768
-        
+
+        panel_layout = {row['id']-1 : {
+            'bbox' : list(map(lambda x: x/1000., [row['bbox']['x'], row['bbox']['y'], row['bbox']['x']+row['bbox']['w'], row['bbox']['y']+row['bbox']['h']])), 
+            'body': []
+        } for row in layout['boxes']}
+
         control_kwargs, entity_masks, debug_mask, control_nps, print_res = get_control_kwargs_full(
             panel_layout, characters_shot, width, height, 
             crop_face_detect=True, use_face_detect=True, c_width_given=None, scale_c=scale_c,
