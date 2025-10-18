@@ -1225,7 +1225,7 @@ class VideoJsonlDatasource(VideoDatasource):
 class BaseDataset(torch.utils.data.Dataset):
     def __init__(
         self,
-        resolution: Tuple[int, int] = (960, 544),
+        resolution: Tuple[int, int] = (1280, 720),
         caption_extension: Optional[str] = None,
         batch_size: int = 1,
         num_repeats: int = 1,

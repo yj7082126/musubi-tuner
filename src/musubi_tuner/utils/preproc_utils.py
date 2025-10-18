@@ -1,4 +1,5 @@
 from pathlib import Path, PosixPath
+from typing import Tuple, List
 import math
 import numpy as np
 import json
@@ -12,7 +13,9 @@ from musubi_tuner.dataset.image_video_dataset import resize_image_to_bucket
 from musubi_tuner.frame_pack.clip_vision import hf_clip_vision_encode
 from musubi_tuner.frame_pack.hunyuan import encode_prompt_conds, vae_encode, vae_decode
 from musubi_tuner.frame_pack.utils import crop_or_pad_yield_mask
-from musubi_tuner.utils.bbox_utils import draw_bboxes, get_mask_from_bboxes, get_bbox_from_mask, get_facebbox_from_bbox
+from musubi_tuner.utils.bbox_utils import get_bbox_from_mask, get_mask_from_bboxes, get_facebbox_from_bbox, auto_scale_layout_data
+from musubi_tuner.utils.bbox_utils import draw_bboxes, draw_bboxes_images
+from musubi_tuner.utils.keypalign_utils import search_facebbox_for_layout
 
 # rembg_session = new_session('u2net', providers=['CUDAExecutionProvider', 'CPUExecutionProvider'])
 rmbg14_session = pipeline("image-segmentation", model="briaai/RMBG-1.4", trust_remote_code=True)
@@ -37,6 +40,77 @@ def getres(orig_width, orig_height, target_area=1024*1024, div_factor=16, max_as
 
     return new_width, new_height
 
+SDXL_RESOLUTIONS: List[Tuple[int, int]] = [
+    # Square
+    (768, 768), (1024, 1024), (1152, 1152),
+
+    # Portrait (4:5, 2:3, 3:4)
+    (832, 1040), (832, 1216), (896, 1152), (960, 1280),
+
+    # Landscape (5:4, 3:2, 4:3, etc.)
+    (1040, 832), (1216, 832), (1152, 896), (1280, 960), (1344, 768),
+
+    # True 16:9 / 9:16
+    (1152, 648), (1280, 720), (1536, 864),
+    (896, 1600), (1024, 1792),
+
+    # Ultra-wide & tall
+    (1536, 640), (1600, 640), (640, 1536),
+]
+
+def _aspect_ratio(w: int, h: int) -> float:
+    return w / h
+
+def _clamp_ratio(r: float, max_ratio: float = 2.5) -> float:
+    """Clamp aspect ratio into [1/max_ratio, max_ratio]."""
+    lo = 1.0 / max_ratio
+    if r < lo:
+        return lo
+    if r > max_ratio:
+        return max_ratio
+    return r
+
+def pick_sdxl_resolution(
+    init_size: Tuple[int, int],
+    candidates: List[Tuple[int, int]] = SDXL_RESOLUTIONS,
+    tie_pref_megapixels: float = 1.0  # prefer ~1MP if aspect ties
+) -> Tuple[int, int]:
+    """
+    Given (width, height), return the closest SDXL-friendly resolution
+    from `candidates`, preserving aspect as much as possible.
+    If the aspect ratio exceeds 2.5 (or is below 1/2.5), it's clamped first.
+    """
+    w, h = init_size
+    if w <= 0 or h <= 0:
+        raise ValueError("Width and height must be positive.")
+
+    target_ar = _clamp_ratio(_aspect_ratio(w, h), max_ratio=2.5)
+
+    # Find candidate with minimal |aspect - target_ar|.
+    # Tie-break by closeness of area (in MP) to `tie_pref_megapixels`.
+    best = None
+    best_key = None
+    for cw, ch in candidates:
+        cand_ar = _aspect_ratio(cw, ch)
+        ar_diff = abs(cand_ar - target_ar)
+        area_mp = (cw * ch) / 1_000_000.0
+        # Sort key: primary by aspect diff, secondary by |area - preferred|
+        key = (ar_diff, abs(area_mp - tie_pref_megapixels))
+        if best_key is None or key < best_key:
+            best_key = key
+            best = (cw, ch)
+    return best
+
+def get_panel_layout(layout, page_w, page_h):
+    width_orig, height_orig = (layout['bbox'][2]-layout['bbox'][0])/1000*page_w, (layout['bbox'][3]-layout['bbox'][1])/1000*page_h
+    width, height = pick_sdxl_resolution((width_orig, height_orig))
+    panel_layout = {i: {
+        'bbox': list(map(lambda x: x/1000, x[:4])), 
+        'body': list(map(lambda x: x/1000, x[4:]))
+    } for i,x in enumerate(layout['body'])}
+    return panel_layout, width, height
+
+#%%
 def get_text_preproc(prompt, text_encoder1, text_encoder2, tokenizer1, tokenizer2, entity_prompts=[], device=torch.device('cuda'), dtype=torch.bfloat16):
     with torch.autocast(device_type=device.type, dtype=text_encoder1.dtype), torch.no_grad():
         llama_vecs = []
@@ -368,3 +442,67 @@ def postproc_imgs(results, vae):
             result_img = np.concatenate([result_img, result_alpha], axis=-1).astype(np.uint8)
             result_imgs.append(result_img)
     return result_imgs  
+
+def get_all_control_kwargs(panel_layout, characters_shot, vae,
+    width=1344, height=768, 
+    crop_face_detect=True, use_face_detect=True, 
+    c_width_given=None, scale_c=1.2, use_safety=True,
+    bbox_mode="relative_width_full_height",
+    control_indices=[0], latent_indices=[3], use_rembg=True,
+    use_auto_scale=False
+    ):
+
+    auto_scaled_layout = panel_layout
+    if use_auto_scale:
+        auto_scaled_layout, metadata = auto_scale_layout_data(panel_layout)
+        
+    debug_dict = search_facebbox_for_layout(
+        auto_scaled_layout, characters_shot, (width, height), 
+        crop_face_detect=crop_face_detect, use_face_detect=use_face_detect,
+        c_width_given=c_width_given, scale_c=scale_c, use_safety=use_safety,
+        bbox_mode=bbox_mode)
+
+    print_res = ""
+    for k,v in debug_dict.items():
+        print_res += f"Entity {k+1} (Use Crop: {True})\n"
+        print_res += f"\tControl Image Path: {v['control_image_path']}\n"
+        print_res += f"\tControl Image Size: {v['control_image_size']}\n"
+        print_res += "\tAttn BBox: [" + ', '.join([f"{b:.3f}" for b in v['entity_bbox']]) + "]\n"
+        print_res += "\tFace BBox: [" + ', '.join([f"{b:.3f}" for b in v['face_bbox']]) + "]\n"
+
+    n_chara = min(len(debug_dict), len(characters_shot), 2)
+    if len(debug_dict) == 0:
+        control_images = []
+        control_image_sizes = []
+        entity_bboxes = []
+        face_bboxes = []
+        entity_masks = None
+        debug_mask = Image.new("RGB", (width, height), (0,0,0))
+    else:
+        control_images = [debug_dict[i]['control_image'] for i in range(n_chara)]
+        control_image_sizes = [debug_dict[i]['control_image_size'] for i in range(n_chara)]
+        entity_bboxes = [debug_dict[i]['entity_bbox'] for i in range(n_chara)]
+        face_bboxes = [debug_dict[i]['face_bbox'] for i in range(n_chara)]
+        entitymask_nps = [get_mask_from_bboxes([entity_bbox], width, height) for entity_bbox in entity_bboxes]
+        entity_masks = torch.cat([preproc_mask(e_mask, width, height, invert=False)[0] for e_mask in entitymask_nps], 2)
+
+        debug_mask = Image.fromarray(np.sum(entitymask_nps, axis=0)>0).convert("RGB")
+        debug_mask = draw_bboxes_images(debug_mask, face_bboxes, control_images, cimg_sizes=control_image_sizes)
+        debug_mask = draw_bboxes(debug_mask, face_bboxes, width=4)
+
+    control_kwargs, control_nps = prepare_control_inputs_for_entity(
+        control_images, entity_bboxes, width, height, vae,
+        control_image_sizes,
+        face_entity_bboxes=face_bboxes,
+        control_indices=control_indices, latent_indices=latent_indices,
+        adjust_custom_wh=False, 
+        mode="provided_face_bbox",  # mode="provided_size_mid_x",
+        use_rembg=use_rembg)
+    if len(control_nps) > 0:
+        control_nps = np.concatenate([
+            np.asarray(Image.fromarray(x).resize((256,256))) for x in control_nps], 
+        axis=1)
+    else:
+        control_nps = np.zeros((256,256,3), dtype=np.uint8)
+
+    return control_kwargs, entity_masks, control_nps, debug_mask, print_res

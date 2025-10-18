@@ -26,7 +26,7 @@ logging.basicConfig(level=logging.INFO)
 
 @dataclass
 class BaseDatasetParams:
-    resolution: Tuple[int, int] = (960, 544)
+    resolution: Tuple[int, int] = (1280, 720)
     enable_bucket: bool = False
     bucket_no_upscale: bool = False
     caption_extension: Optional[str] = None
