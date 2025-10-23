@@ -66,3 +66,20 @@ def get_attn_map(attn_cache, attn_inds, block_id=f'transformer_blocks.2',
     attention_image = get_pltplot_as_pil(attention_data)
     return attention_image
 
+def get_img_attn_map(attn_cache, target_sbj=0, block_id=f'transformer_blocks.2', 
+                     height=960, width=960, t_0=0, t_1=25, normalize=True):
+    timesteps = sorted(list(attn_cache[block_id].keys()), reverse=False)
+    token_H, token_W = height // 16, width // 16
+    clean_latent_inds = attn_cache['attn_dict']['clean_latents']
+    noise_inds = attn_cache['attn_dict']['noise']
+
+    timesteps = sorted(list(attn_cache[block_id].keys()), reverse=False)
+    attention_probs = sum(attn_cache[block_id][timesteps[t]][:,noise_inds[0][0]:noise_inds[0][1],:] for t in range(t_0, t_1))
+    attention_map = rearrange(attention_probs, 'B (H W) D -> B H W D', H=token_H, W=token_W)
+    attention_map = attention_map.permute(0,3,1,2)
+    attention_map = attention_map[0,clean_latent_inds[target_sbj][0]:clean_latent_inds[target_sbj][1],:,:].mean(axis=0)
+
+    if normalize:
+        attention_map -= attention_map.min(1, keepdim=True)[0]
+        attention_map /= attention_map.max(1, keepdim=True)[0]
+    return attention_map

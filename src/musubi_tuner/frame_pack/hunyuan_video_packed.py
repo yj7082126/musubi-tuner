@@ -774,10 +774,17 @@ def apply_rotary_emb_transposed(x, freqs_cis):
 
 def attn_wscore_func(q, k, v, attn_bias=None):
     q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
-    L, S = q.size(-2), k.size(-2)
+    # L, S = q.size(-2), k.size(-2)
+    B, A, L, _ = q.shape
+    S = k.size(2)
     scale_factor = 1 / math.sqrt(q.size(-1))
     if attn_bias is None:
-        attn_bias = torch.zeros(L, S, dtype=q.dtype)
+        attn_bias = torch.zeros(B, A, L, S, dtype=q.dtype, device=q.device)
+    else:
+        if attn_bias.dim() == 3:
+            attn_bias = attn_bias.unsqueeze(1)
+        else:
+            attn_bias = attn_bias
 
     attn_weight = q @ k.transpose(-2, -1) * scale_factor
     attn_weight += attn_bias.to(attn_weight.device)
@@ -919,18 +926,38 @@ class HunyuanAttnProcessorFlashAttnDouble:
         del encoder_query, encoder_key, encoder_value  # free memory
 
         if print_results:
-            logging.info(f"[{block_id}]\n\tQ : {query}\n\tK : {key}\n\tV : {value}")
+            logging.info(f"[{block_id}]\n\tQ : {query}\n\tK : {key}\n\tV : {value}\n\tAttn_mask : {attention_mask}")
             
         if cache_results:
             hidden_states_attn, attn_scores = attn_wscore_func(
                 query, key, value, attn_bias=attention_mask
             )
-            attn_cache[block_id][timestep] = attn_scores.clone().cpu()
+            # keep a local tensor for potential in-forward use
+            attn_for_use = attn_scores.mean(dim=1)
+            # store a detached CPU copy for logging / caching so we don't keep the autograd graph
+            try:
+                attn_cache[block_id][timestep] = attn_for_use.detach().cpu().clone()
+            except Exception:
+                # fallback (shouldn't usually happen)
+                attn_cache[block_id][timestep] = attn_for_use.detach().cpu()
+
+            # If a connected_attn_map was provided by the caller, store the connected tensor
+            connected_attn_map = kwargs.get('connected_attn_map', None)
+            if connected_attn_map is not None:
+                if block_id not in connected_attn_map:
+                    connected_attn_map[block_id] = {}
+                # Keep the connected (autograd) tensor on the original device for training use
+                connected_attn_map[block_id][timestep] = attn_for_use
 
         else:
-            hidden_states_attn = attn_varlen_func(
-                query, key, value, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv, attn_mask=attention_mask, attn_mode=attn_mode, split_attn=split_attn
-            )
+            if split_attn or attn_mode in ["sageattn", "flash"]:
+                hidden_states_attn = attn_varlen_func(
+                    query, key, value, cu_seqlens_q, cu_seqlens_kv, max_seqlen_q, max_seqlen_kv, attn_mask=attention_mask, attn_mode=attn_mode, split_attn=split_attn
+                )
+            else:
+                hidden_states_attn, attn_scores = attn_wscore_func(
+                    query, key, value, attn_bias=attention_mask
+                )
 
         del query, key, value  # free memory
         if print_results:
@@ -995,7 +1022,20 @@ class HunyuanAttnProcessorFlashAttnSingle:
             hidden_states, attn_scores = attn_wscore_func(
                 query, key, value, attn_bias=attention_mask
             )
-            attn_cache[block_id][timestep] = attn_scores.clone().cpu()
+            # attn_cache[block_id][timestep] = attn_scores.clone().cpu()
+            # For logging only: store a detached CPU copy so the global cache doesn't keep
+            # autograd graph references which can cause "backward twice" errors later.
+            attn_for_use = attn_scores.mean(dim=1)
+            try:
+                attn_cache[block_id][timestep] = attn_for_use.detach().cpu().clone()
+            except Exception:
+                # Fallback: at least move to CPU (no clone) if clone() fails for some dtype/device
+                attn_cache[block_id][timestep] = attn_for_use.cpu()
+            connected_attn_map = kwargs.get('connected_attn_map', None)
+            if connected_attn_map is not None:
+                if block_id not in connected_attn_map:
+                    connected_attn_map[block_id] = {}
+                connected_attn_map[block_id][timestep] = attn_for_use
 
         else:
             hidden_states = attn_varlen_func(
@@ -1871,7 +1911,6 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
             device=encoder_attention_mask.device,
         )
         attention_mask = torch.cat([hidden_attention_mask, encoder_attention_mask], dim=1)
-
         if len(use_attention_masking) > 0:
             total_seq_len = attention_mask.shape[1]
             attention_mask = attention_mask.unsqueeze(1)
@@ -2112,9 +2151,12 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
         entity_masks=None,
         cache_results=False,
         cache_layers=[],
+        return_connected_attn: bool = False,
         **kwargs
     ):
         hidden_order_dict = defaultdict(list)
+        # If requested, collect connected (autograd-attached) attention tensors here for training use.
+        connected_attn_map = {} if return_connected_attn else None
         if cache_results and timestep[0].item() >= 1000.0:
             logging.info("Activate Attention Caching for Exp.")
         if attention_kwargs is None:
@@ -2221,12 +2263,14 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
 
                 for block_id, block in enumerate(self.transformer_blocks):
                     hidden_states, encoder_hidden_states = self.gradient_checkpointing_method(
-                        block, hidden_states, encoder_hidden_states, temb, attention_mask, seqlen_attention_mask, rope_freqs
+                        block, hidden_states, encoder_hidden_states, temb, attention_mask, seqlen_attention_mask, rope_freqs,
+                        connected_attn_map=connected_attn_map if return_connected_attn else None
                     )
 
                 for block_id, block in enumerate(self.single_transformer_blocks):
                     hidden_states, encoder_hidden_states = self.gradient_checkpointing_method(
-                        block, hidden_states, encoder_hidden_states, temb, attention_mask, seqlen_attention_mask, rope_freqs
+                        block, hidden_states, encoder_hidden_states, temb, attention_mask, seqlen_attention_mask, rope_freqs,
+                        connected_attn_map=connected_attn_map if return_connected_attn else None
                     )
 
                 self.previous_residual = hidden_states - ori_hidden_states
@@ -2238,9 +2282,11 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
                 block_str = f"transformer_blocks.{block_id}"
                 cache_results_layer = cache_results and block_str in cache_layers
                 hidden_states, encoder_hidden_states = self.gradient_checkpointing_method(
-                    block, hidden_states, encoder_hidden_states, temb, attention_mask, seqlen_attention_mask, rope_freqs, 
-                    cache_results=cache_results_layer, 
-                    block_id=block_str, timestep=int(timestep[0].item())
+                    block, hidden_states, encoder_hidden_states, temb, attention_mask, seqlen_attention_mask, rope_freqs,
+                    cache_results=cache_results_layer,
+                    block_id=block_str,
+                    timestep=int(timestep[0].item()),
+                    connected_attn_map=connected_attn_map if return_connected_attn else None,
                 )
 
                 if self.blocks_to_swap:
@@ -2252,9 +2298,11 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
                 block_str = f"single_transformer_blocks.{block_id}"
                 cache_results_layer = cache_results and block_str in cache_layers
                 hidden_states, encoder_hidden_states = self.gradient_checkpointing_method(
-                    block, hidden_states, encoder_hidden_states, temb, attention_mask, seqlen_attention_mask, rope_freqs, 
-                    cache_results=cache_results_layer, 
-                    block_id=block_str, timestep=int(timestep[0].item())
+                    block, hidden_states, encoder_hidden_states, temb, attention_mask, seqlen_attention_mask, rope_freqs,
+                    cache_results=cache_results_layer,
+                    block_id=block_str,
+                    timestep=int(timestep[0].item()),
+                    connected_attn_map=connected_attn_map if return_connected_attn else None,
                 )
 
                 if self.blocks_to_swap:
@@ -2287,7 +2335,13 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
 
         if return_dict:
             # return Transformer2DModelOutput(sample=hidden_states)
-            return SimpleNamespace(sample=hidden_states)
+            ns = SimpleNamespace(sample=hidden_states)
+            if return_connected_attn:
+                ns.connected_attn_map = connected_attn_map
+            return ns
+
+        if return_connected_attn:
+            return (hidden_states, connected_attn_map)
 
         return (hidden_states,)
 

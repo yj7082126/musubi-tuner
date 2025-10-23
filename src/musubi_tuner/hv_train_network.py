@@ -18,6 +18,8 @@ import accelerate
 import numpy as np
 from packaging.version import Version
 from PIL import Image
+import lovely_tensors as lt
+lt.monkey_patch()
 
 import huggingface_hub
 import toml
@@ -1932,20 +1934,45 @@ class NetworkTrainer:
                         args.weighting_scheme, noise_scheduler, timesteps, accelerator.device, dit_dtype
                     )
 
-                    model_pred, target = self.call_dit(
+                    model_pred, target, attention_map = self.call_dit(
                         args, accelerator, transformer, latents, batch, noise, noisy_model_input, timesteps, network_dtype
                     )
-                    loss = torch.nn.functional.mse_loss(model_pred.to(network_dtype), target, reduction="none")
-
+                    target_latent_mask = batch.get("target_latent_masks", None).max(dim=1).values
+                    # attention_map = attention_map.detach_()
+                    # print(attention_map)
+                    # print(target_latent_mask)
+                    # print(model_pred)
+                    # print(target)
+                    base_loss = torch.nn.functional.mse_loss(model_pred.to(network_dtype), target, reduction="none")
                     if weighting is not None:
-                        loss = loss * weighting
-                    # loss = loss.mean([1, 2, 3])
-                    # # min snr gamma, scale v pred loss like noise pred, v pred like loss, debiased estimation etc.
-                    # loss = self.post_process_loss(loss, args, timesteps, noise_scheduler)
+                        base_loss = base_loss * weighting
+                    base_loss = base_loss.mean()
+                    
+                    if target_latent_mask.shape[0] == attention_map.shape[0]:
+                        add_loss = torch.nn.functional.mse_loss(attention_map.to(network_dtype), target_latent_mask.to(network_dtype), reduction="none")
+                        add_loss = add_loss.mean()
+                        loss = base_loss + add_loss * 0.1
+                    else:
+                        loss = base_loss
+                    # logging.info(f"step {step}, base_loss: {base_loss.item():.6f}, add_loss: {add_loss.item():.6f}")
+                    # Optionally log gradient norms to verify auxiliary losses produce grads
+                    if getattr(args, "log_gradients", False):
+                        # compute gradient norms before backward by zeroing grads and doing a forward/backward hook
+                        # We'll perform backward and then compute norms before/after clipping below.
+                        accelerator.backward(loss)
+                        try:
+                            params_to_check = [p for p in accelerator.unwrap_model(network).parameters() if p.grad is not None]
+                            total_norm = 0.0
+                            for p in params_to_check:
+                                param_norm = p.grad.detach().data.norm(2).item()
+                                total_norm += param_norm ** 2
+                            total_norm = total_norm ** 0.5
+                            logging.info(f"grad-norm before clipping: {total_norm:.6f}")
+                        except Exception:
+                            logging.exception("Failed to compute grad norms before clipping")
+                    else:
+                        accelerator.backward(loss)
 
-                    loss = loss.mean()  # mean loss over all elements in batch
-
-                    accelerator.backward(loss)
                     if accelerator.sync_gradients:
                         # self.all_reduce_network(accelerator, network)  # sync DDP grad manually
                         state = accelerate.PartialState()
@@ -1956,7 +1983,31 @@ class NetworkTrainer:
 
                         if args.max_grad_norm != 0.0:
                             params_to_clip = accelerator.unwrap_model(network).get_trainable_params()
+                            if getattr(args, "log_gradients", False):
+                                try:
+                                    # compute norm before clipping (if not already computed)
+                                    pre_norm = 0.0
+                                    params_with_grad = [p for p in params_to_clip if p.grad is not None]
+                                    for p in params_with_grad:
+                                        pre_norm += p.grad.detach().data.norm(2).item() ** 2
+                                    pre_norm = pre_norm ** 0.5
+                                except Exception:
+                                    pre_norm = None
+
                             accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
+
+                            if getattr(args, "log_gradients", False):
+                                try:
+                                    post_norm = 0.0
+                                    params_with_grad = [p for p in params_to_clip if p.grad is not None]
+                                    for p in params_with_grad:
+                                        post_norm += p.grad.detach().data.norm(2).item() ** 2
+                                    post_norm = post_norm ** 0.5
+                                    logging.info(f"grad-norm after clipping: {post_norm:.6f}")
+                                    if pre_norm is not None:
+                                        logging.info(f"grad-norm before clipping (recomputed/est): {pre_norm:.6f}")
+                                except Exception:
+                                    logging.exception("Failed to compute grad norms after clipping")
 
                     optimizer.step()
                     lr_scheduler.step()
@@ -2205,6 +2256,11 @@ def setup_parser_common() -> argparse.ArgumentParser:
         help="specify WandB API key to log in before starting training (optional). / WandB APIキーを指定して学習開始前にログインする（オプション）",
     )
     parser.add_argument("--log_config", action="store_true", help="log training configuration / 学習設定をログに出力する")
+    parser.add_argument(
+        "--log_gradients",
+        action="store_true",
+        help="log gradient norms before and after clipping (for debugging auxiliary losses) / クリッピング前後の勾配ノルムをログ出力する（補助損失のデバッグ用）",
+    )
 
     parser.add_argument(
         "--ddp_timeout",

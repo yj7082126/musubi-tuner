@@ -6,6 +6,7 @@ from typing import Optional
 from PIL import Image
 
 import numpy as np
+from einops import rearrange
 import torch
 import torchvision.transforms.functional as TF
 from tqdm import tqdm
@@ -19,7 +20,7 @@ from musubi_tuner.frame_pack import hunyuan
 from musubi_tuner.frame_pack.clip_vision import hf_clip_vision_encode
 from musubi_tuner.frame_pack.framepack_utils import load_image_encoders, load_text_encoder1, load_text_encoder2
 from musubi_tuner.frame_pack.framepack_utils import load_vae as load_framepack_vae
-from musubi_tuner.frame_pack.hunyuan_video_packed import HunyuanVideoTransformer3DModelPacked, load_packed_model
+from musubi_tuner.frame_pack.hunyuan_video_packed import HunyuanVideoTransformer3DModelPacked, load_packed_model, attn_cache
 from musubi_tuner.frame_pack.k_diffusion_hunyuan import sample_hunyuan
 from musubi_tuner.frame_pack.utils import crop_or_pad_yield_mask
 from musubi_tuner.hv_train_network import NetworkTrainer, load_prompts, clean_memory_on_device, setup_parser_common, read_config_from_file
@@ -584,7 +585,11 @@ class FramePackNetworkTrainer(NetworkTrainer):
         noisy_model_input: torch.Tensor,
         timesteps: torch.Tensor,
         network_dtype: torch.dtype,
+        block_id: str = 'transformer_blocks.2'
     ):
+        ###
+        
+
         model: HunyuanVideoTransformer3DModelPacked = transformer
         device = accelerator.device
         batch_size = latents.shape[0]
@@ -619,9 +624,10 @@ class FramePackNetworkTrainer(NetworkTrainer):
 
             image_embeddings = batch["image_embeddings"] if "image_embeddings" in batch else None
             entity_masks = batch['target_latent_masks'] if 'target_latent_masks' in batch and args.use_attention_controlimage_masking else None
-            use_attention_mask = ["mask_control"] if entity_masks is not None else []
+            use_attention_masking = ["mask_control"] if entity_masks is not None else []
             clean_latent_bboxes = batch['clean_latent_bboxes'] if 'clean_latent_bboxes' in batch else clean_latent_bboxes
-            model_pred = model(
+
+            model_out = model(
                 hidden_states=noisy_model_input,
                 timestep=timesteps,
                 encoder_hidden_states=batch["llama_vec"],
@@ -641,15 +647,51 @@ class FramePackNetworkTrainer(NetworkTrainer):
                 clean_latent_4x_indices=clean_latent_4x_indices,
                 ## custom_control_kwargs
                 entity_masks=entity_masks,
-                use_attention_mask=use_attention_mask,
+                use_attention_masking=use_attention_masking,
                 return_dict=False,
+                ## cache kwargs
+                cache_results=True,
+                cache_layers=[block_id],
+                # Request a connected attention map for training
+                return_connected_attn=True,
             )
-            model_pred = model_pred[0]  # returns tuple (model_pred, )
+            # model returns SimpleNamespace(sample=..., connected_attn_map=...)
+            model_pred = model_out.sample if hasattr(model_out, 'sample') else model_out[0]
+            connected_attn_map = getattr(model_out, 'connected_attn_map', None)
+            
+            ####
+            # Build connected attention_map from the connected_attn_map if available (preferred),
+            # otherwise fall back to reading the detached cache for visualization-only.
+            token_H, token_W = noisy_model_input.shape[-2] // 2, noisy_model_input.shape[-1] // 2
+            clean_latent_inds = attn_cache['attn_dict']['clean_latents']
+            noise_inds = attn_cache['attn_dict']['noise']
+
+            if connected_attn_map is not None and block_id in connected_attn_map:
+                timesteps = sorted(list(connected_attn_map[block_id].keys()), reverse=False)
+                # connected_attn_map stores tensors of shape [B, (H*W + ...), D]
+                attention_probs = connected_attn_map[block_id][timesteps[0]][:, noise_inds[0][0]:noise_inds[0][1], :]
+            else:
+                timesteps = sorted(list(attn_cache[block_id].keys()), reverse=False)
+                attention_probs = attn_cache[block_id][timesteps[0]][:, noise_inds[0][0]:noise_inds[0][1], :]
+            attention_map = rearrange(attention_probs, 'B (H W) D -> B H W D', H=token_H, W=token_W).permute(0,3,1,2)
+            attention_map = attention_map[:,clean_latent_inds[0][0]:clean_latent_inds[-1][1],:,:].mean(axis=1).unsqueeze(1)
+            attention_map = TF.resize(attention_map, size=(noisy_model_input.shape[-2], noisy_model_input.shape[-1]))
+            mn, mx = attention_map.amin(), attention_map.amax()
+            denom = (mx - mn).clamp(min=1e-8)
+            attention_map = ((attention_map - mn) / denom).clamp(0.0, 1.0)
+            # Move attention_map to the same device as the model input so losses run on the same device
+            try:
+                attention_map = attention_map.to(device=noisy_model_input.device)
+            except Exception:
+                # Fallback: if noisy_model_input not available or move fails, leave as-is
+                pass
+            attn_cache.clear()
+            ####
 
         # flow matching loss
         target = noise - latents
 
-        return model_pred, target
+        return model_pred, target, attention_map
 
     # endregion model specific
 

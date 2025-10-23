@@ -83,7 +83,7 @@ class FramePack_1fmc():
             'use_attention_masking': use_attention_masking,
             'entity_masks': entity_masks,
         }
-        attn_cache.clear()
+        # attn_cache.clear()
         results = sample_hunyuan(transformer=self.model, **total_kwargs, **text_kwargs, **control_kwargs,)
 
         result_imgs, debug_imgs = [], []

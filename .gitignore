@@ -8,3 +8,4 @@ main.lib
 main.obj
 outputs/
 src/musubi_tuner/ckpts
+src/practice/tmp

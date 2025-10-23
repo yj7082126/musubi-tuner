@@ -391,11 +391,17 @@ def get_all_kwargs_from_opens2v_metapath(metapath, steps=25, seed=-1,
 
 def get_info_from_vistorybench(dataset, story_num, shot_num):
     story = dataset.load_story(story_num)
-    story_dict = {x['index']:x for x in story['shots']}
     characters = dataset.load_characters(story_num)
+    
+    story_dict = {x['index']:x for x in story['shots']}
     story_shot = story_dict[shot_num]
     story_shot['type'] = story['type']
     characters_shot = {k: characters[k] for k in story_shot['character_name']}
+    characters_tags = set([v['tag'] for k,v in characters.items()])
+    if 'non_human' in characters_tags or 'unrealistic_human' in characters_tags:
+        story_shot['type'] = 'Illustration, ' + story_shot['type']
+    else:
+        story_shot['type'] = 'Realistic, ' + story_shot['type']
 
     char_prompts = []
     for char_key, char_name in zip(story_shot['character_key'], story_shot['character_name']):
@@ -404,11 +410,12 @@ def get_info_from_vistorybench(dataset, story_num, shot_num):
 
     # prompt = story_shot['type'] + ". " + ", ".join(story_shot['scene'].split(", ")[:max_scene_sentences]) + ". " + story_shot['script']
     prompt = (
+        f"{story_shot['type']};"
         f"{story_shot['camera']};"
-        f"{story_shot['plot']};" 
         f"{story_shot['script']};"
-        f"{';'.join(char_prompts)};" # Separate multiple character descriptions with ;
         f"{story_shot['scene']};"
+        f"{story_shot['plot']};" 
+        f"{';'.join(char_prompts)};" # Separate multiple character descriptions with ;
     )
 
     return story_shot, characters_shot, prompt
