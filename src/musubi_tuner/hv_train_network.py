@@ -1950,7 +1950,7 @@ class NetworkTrainer:
                     
                     if target_latent_mask.shape[0] == attention_map.shape[0]:
                         # add_loss = torch.nn.functional.mse_loss(attention_map.to(network_dtype), target_latent_mask.to(network_dtype), reduction="none")
-                        add_loss = torch.relu(predicted_image - mask)
+                        add_loss = torch.relu(attention_map.to(network_dtype) - target_latent_mask.to(network_dtype))
                         add_loss = add_loss.mean()
                         loss = base_loss + add_loss * 0.1
                     else:
