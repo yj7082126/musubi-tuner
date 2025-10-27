@@ -673,12 +673,18 @@ class FramePackNetworkTrainer(NetworkTrainer):
             else:
                 timesteps = sorted(list(attn_cache[block_id].keys()), reverse=False)
                 attention_probs = attn_cache[block_id][timesteps[0]][:, noise_inds[0][0]:noise_inds[0][1], :]
-            attention_map = rearrange(attention_probs, 'B (H W) D -> B H W D', H=token_H, W=token_W).permute(0,3,1,2)
-            attention_map = attention_map[:,clean_latent_inds[0][0]:clean_latent_inds[-1][1],:,:].mean(axis=1).unsqueeze(1)
-            attention_map = TF.resize(attention_map, size=(noisy_model_input.shape[-2], noisy_model_input.shape[-1]))
-            mn, mx = attention_map.amin(), attention_map.amax()
-            denom = (mx - mn).clamp(min=1e-8)
-            attention_map = ((attention_map - mn) / denom).clamp(0.0, 1.0)
+            try:
+                attention_map = rearrange(attention_probs, 'B (H W) D -> B H W D', H=token_H, W=token_W).permute(0,3,1,2)
+                attention_map = attention_map[:,clean_latent_inds[0][0]:clean_latent_inds[-1][1],:,:].mean(axis=1).unsqueeze(1)
+                attention_map = TF.resize(attention_map, size=(noisy_model_input.shape[-2], noisy_model_input.shape[-1]))
+                mn, mx = attention_map.amin(), attention_map.amax()
+                denom = (mx - mn).clamp(min=1e-8)
+                attention_map = ((attention_map - mn) / denom).clamp(0.0, 1.0)
+            except Exception as e:
+                logging.error("Failed to process attention map from cache.")
+                logging.error(f"Error: {e}")
+                logging.error(clean_latent_inds, noise_inds)
+                attention_map = torch.zeros((batch_size, 1, noisy_model_input.shape[-2], noisy_model_input.shape[-1]))
             # Move attention_map to the same device as the model input so losses run on the same device
             try:
                 attention_map = attention_map.to(device=noisy_model_input.device)
