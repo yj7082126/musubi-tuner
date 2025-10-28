@@ -61,22 +61,22 @@ for story_num in tqdm(vistory_dataset.get_story_name_list()):
         width, height = getres(panel_bbox[2]-panel_bbox[0], panel_bbox[3]-panel_bbox[1], 
             target_area=1344*768, max_aspect_ratio=2.0)
 
-        if len(story_shot['character_key']) != len(panel_layout):
-            if len(story_shot['character_key']) == 0:
-                story_shot = vanila_shot
-                characters_shot = vanila_character_shot
-                panel_layout = {0: {'bbox': [0.1, 0.9, 0.2, 1.0], 'body': []}}
-            elif len(story_shot['character_key']) == 1:
-                panel_layout = random.choice([
-                    {0: {'bbox': [0.35, 0.2, 0.65, 1.0], 'body': []}}, 
-                    {0: {'bbox': [0.2, 0.3, 0.5, 1.0], 'body': []}}, 
-                    {0: {'bbox': [0.7, 0.3, 1.0, 1.0], 'body': []}}, 
-                ])
-            else:
-                panel_layout = random.choice([
-                    {0: {'bbox': [0.2, 0.1, 0.5, 0.9], 'body': []}, 1: {'bbox': [0.5, 0.1, 0.9, 1.0], 'body': []}},
-                    {0: {'bbox': [0.1, 0.3, 0.4, 0.9], 'body': []}, 1: {'bbox': [0.5, 0.2, 0.9, 1.0], 'body': []}},
-                ])
+        # if len(story_shot['character_key']) != len(panel_layout):
+        #     if len(story_shot['character_key']) == 0:
+        #         story_shot = vanila_shot
+        #         characters_shot = vanila_character_shot
+        #         panel_layout = {0: {'bbox': [0.1, 0.9, 0.2, 1.0], 'body': []}}
+        #     elif len(story_shot['character_key']) == 1:
+        #         panel_layout = random.choice([
+        #             {0: {'bbox': [0.35, 0.2, 0.65, 1.0], 'body': []}}, 
+        #             {0: {'bbox': [0.2, 0.3, 0.5, 1.0], 'body': []}}, 
+        #             {0: {'bbox': [0.7, 0.3, 1.0, 1.0], 'body': []}}, 
+        #         ])
+        #     else:
+        #         panel_layout = random.choice([
+        #             {0: {'bbox': [0.2, 0.1, 0.5, 0.9], 'body': []}, 1: {'bbox': [0.5, 0.1, 0.9, 1.0], 'body': []}},
+        #             {0: {'bbox': [0.1, 0.3, 0.4, 0.9], 'body': []}, 1: {'bbox': [0.5, 0.2, 0.9, 1.0], 'body': []}},
+        #         ])
 
         result_imgs, debug_imgs, debug_mask = framepack_model(
             prompt, panel_layout, characters_shot, width, height,

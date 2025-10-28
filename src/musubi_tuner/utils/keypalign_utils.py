@@ -232,60 +232,35 @@ def align_face(control_image):
     return Image.fromarray(align_face[...,::-1])
 
 def search_facebbox_for_layout(
-        panel_layout, characters_shot, target_size, 
-        crop_face_detect=True, use_face_detect=True,
-        c_width_given=None, bbox_mode="full_width_relative_height", 
-        min_bbox_size=0.04, max_bbox_size=0.2, 
-        scale_c=1.2, use_safety=True, min_safety_ratio=0.1, max_safety_ratio=0.4
-        ):
+    panel_layout, characters_shot, target_size, 
+    crop_face_detect=True, use_face_detect=True,
+    c_width_given=None, bbox_mode="full_width_relative_height", 
+    min_bbox_size=0.04, max_bbox_size=0.2, 
+    scale_c=1.2, use_safety=True, min_safety_ratio=0.1, max_safety_ratio=0.4, 
+    max_chara_imgs=1
+    ):
     """
-    Used to calculate the respective face bboxes (for RoPE) and the control image sizes, 
-    given the information in panel_layout and characters_shot.
-
-
-    Args:
-        panel_layout (dict): layout data for each character, including 'bbox' and optionally 'body' keypoints
-        characters_shot (dict): character data including image paths
-        target_size (tuple): (width, height) of the target canvas
-        use_face_detect (bool): whether to use face detection to refine control image size
-        c_width_given (int or None): if provided, use this width for control image size
-
-    Procedure:
-    0. If crop_face_detect is True, preprocess the control image to align face first.
-    * This should help for cases where the character image is a full-body, impairing plausible content generation. (E.g ViStory-5)
-    * If detect / align fails, fall back to using the original image.
-
-    1. If use_face_detect is True and body keypoints are provided, use them to detect face bbox.
-        * Bbox_scale is used to scale the detected face bbox, fixing cases where the bbox is too small.
-        * If there is a face bbox detected, use the detected face bbox to adjust control image size,
-          so that the control image is approximately X% of the face bbox size. 
-          (Control by ratio_1)
-        * If no face bbox is detected, go to step 2
-        * If there exists c_width_given, override and use it to determine the control image size
-    2. If use_face_detect is False or no body keypoints are provided, calculate the face bbox and control image size differently
-        * If c_width_given is provided, use it to determine the control image size
-
     """
     debug_dict = {}
     if len(list(characters_shot.keys())) > 0:
         for k, v in panel_layout.items():
-            debug_els = {}
-            debug_els['entity_bbox'] = v['bbox']
-
             character_name = list(characters_shot.keys())[k] if len(list(characters_shot.keys())) > k else list(characters_shot.keys())[0]
-            control_image_path = characters_shot[character_name]['images'][0]        
-            control_image = Image.open(control_image_path)
-            if crop_face_detect:
-                control_image = align_face(control_image)
-            if c_width_given is not None:
-                control_ratio = control_image.size[1] / control_image.size[0]
-                c_width = int((c_width_given) // 16 * 16)
-                c_height = int(round(c_width * control_ratio) // 2 * 2)
-                control_image = control_image.resize((c_width, c_height), Image.LANCZOS)
+            control_image_paths = characters_shot[character_name]['images'][:max_chara_imgs]
+            for i, control_image_path in enumerate(control_image_paths):    
+                debug_els = {'entity_bbox': v['bbox']}  
+                control_image = Image.open(control_image_path)
 
-            control_ratio = control_image.size[1] / control_image.size[0]
-            debug_els['control_image_path'] = control_image_path
-            debug_els['control_image'] = control_image
+                if crop_face_detect:
+                    control_image = align_face(control_image)
+                if c_width_given is not None:
+                    control_ratio = control_image.size[1] / control_image.size[0]
+                    c_width = int((c_width_given) // 16 * 16)
+                    c_height = int(round(c_width * control_ratio) // 2 * 2)
+                    control_image = control_image.resize((c_width, c_height), Image.LANCZOS)
+
+                control_ratio = control_image.size[1] / control_image.size[0]
+                debug_els['control_image_path'] = control_image_path
+                debug_els['control_image'] = control_image
 
             # if scale_c_by_bbox:
             #     c_width = int(target_size[0] * (v['bbox'][2]-v['bbox'][0]) // 16 * 16)
@@ -293,37 +268,37 @@ def search_facebbox_for_layout(
             #     c_width = int(np.sqrt(target_size[0] * target_size[1] * scale_c) // 16 * 16)
             # c_width, c_height = int(c_width * scale), int(c_height * scale) 
 
-            face_bbox = None
-            if 'body' in v and len(v['body']) == 4 and use_face_detect:
-                tgt_kps = v['body']
-                face_bbox = detect_and_align_source_to_target(
-                    control_image, tgt_kps, target_size, 
-                    min_bbox_size=min_bbox_size, max_bbox_size=max_bbox_size,
-                    bbox=v['bbox'])
-            if face_bbox is None:
-                face_bbox = v['body'][:4] if len(v['body']) >= 4 else None
-                face_bbox = get_facebbox_from_bbox(
-                    v['bbox'], control_image.size[0], control_image.size[1], 
-                    target_size[0], target_size[1],
-                    face_bbox=face_bbox, mode=bbox_mode)
-            
-            if c_width_given is None:
-                c_width = int((target_size[0] * (face_bbox[2]-face_bbox[0])) * scale_c // 16 * 16)
-                c_height = int(round(c_width * control_ratio) // 2 * 2)  
-            if use_safety:
-                if (c_width * c_height) < (target_size[0] * target_size[1] * min_safety_ratio):
-                    c_width = (target_size[0] * target_size[1] * min_safety_ratio / control_ratio) ** 0.5
-                    c_width = int(c_width // 16 * 16)
-                    c_height = int(round(c_width * control_ratio) // 2 * 2)
-                elif (c_width * c_height) > (target_size[0] * target_size[1] * max_safety_ratio):
-                    c_width = (target_size[0] * target_size[1] * max_safety_ratio / control_ratio) ** 0.5
-                    c_width = int(c_width // 16 * 16)
-                    c_height = int(round(c_width * control_ratio) // 2 * 2)
+                face_bbox = None
+                if 'body' in v and len(v['body']) == 4 and use_face_detect:
+                    tgt_kps = v['body']
+                    face_bbox = detect_and_align_source_to_target(
+                        control_image, tgt_kps, target_size, 
+                        min_bbox_size=min_bbox_size, max_bbox_size=max_bbox_size,
+                        bbox=v['bbox'])
+                if face_bbox is None:
+                    face_bbox = v['body'][:4] if len(v['body']) >= 4 else None
+                    face_bbox = get_facebbox_from_bbox(
+                        v['bbox'], control_image.size[0], control_image.size[1], 
+                        target_size[0], target_size[1],
+                        face_bbox=face_bbox, mode=bbox_mode)
+                
+                if c_width_given is None:
+                    c_width = int((target_size[0] * (face_bbox[2]-face_bbox[0])) * scale_c // 16 * 16)
+                    c_height = int(round(c_width * control_ratio) // 2 * 2)  
+                if use_safety:
+                    if (c_width * c_height) < (target_size[0] * target_size[1] * min_safety_ratio):
+                        c_width = (target_size[0] * target_size[1] * min_safety_ratio / control_ratio) ** 0.5
+                        c_width = int(c_width // 16 * 16)
+                        c_height = int(round(c_width * control_ratio) // 2 * 2)
+                    elif (c_width * c_height) > (target_size[0] * target_size[1] * max_safety_ratio):
+                        c_width = (target_size[0] * target_size[1] * max_safety_ratio / control_ratio) ** 0.5
+                        c_width = int(c_width // 16 * 16)
+                        c_height = int(round(c_width * control_ratio) // 2 * 2)
 
-            debug_els['control_image_size'] = (c_width, c_height)
-            debug_els['face_bbox'] = face_bbox
+                debug_els['control_image_size'] = (c_width, c_height)
+                debug_els['face_bbox'] = face_bbox
 
-            debug_dict[k] = debug_els
+                debug_dict[f"{k}_{i}"] = debug_els
     return debug_dict
 
     # if len(debug_dict) == 0:

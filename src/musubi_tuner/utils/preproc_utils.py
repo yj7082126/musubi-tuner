@@ -456,7 +456,7 @@ def get_all_control_kwargs(panel_layout, characters_shot, vae,
     c_width_given=None, scale_c=1.2, use_safety=True,
     bbox_mode="relative_width_full_height",
     control_indices=[0], latent_indices=[3], use_rembg=True,
-    use_auto_scale=False
+    use_auto_scale=False, max_chara_imgs=3, max_chara=4
     ):
 
     auto_scaled_layout = panel_layout
@@ -467,17 +467,17 @@ def get_all_control_kwargs(panel_layout, characters_shot, vae,
         auto_scaled_layout, characters_shot, (width, height), 
         crop_face_detect=crop_face_detect, use_face_detect=use_face_detect,
         c_width_given=c_width_given, scale_c=scale_c, use_safety=use_safety,
-        bbox_mode=bbox_mode)
+        bbox_mode=bbox_mode, max_chara_imgs=max_chara_imgs)
 
     print_res = ""
     for k,v in debug_dict.items():
-        print_res += f"Entity {k+1} (Use Crop: {True})\n"
+        print_res += f"Entity {k} (Use Crop: {True})\n"
         print_res += f"\tControl Image Path: {v['control_image_path']}\n"
         print_res += f"\tControl Image Size: {v['control_image_size']}\n"
         print_res += "\tAttn BBox: [" + ', '.join([f"{b:.3f}" for b in v['entity_bbox']]) + "]\n"
         print_res += "\tFace BBox: [" + ', '.join([f"{b:.3f}" for b in v['face_bbox']]) + "]\n"
 
-    n_chara = min(len(debug_dict), len(characters_shot), 2)
+    n_chara = min(len(debug_dict), max_chara)
     if len(debug_dict) == 0:
         control_images = []
         control_image_sizes = []
@@ -486,10 +486,10 @@ def get_all_control_kwargs(panel_layout, characters_shot, vae,
         entity_masks = None
         debug_mask = Image.new("RGB", (width, height), (0,0,0))
     else:
-        control_images = [debug_dict[i]['control_image'] for i in range(n_chara)]
-        control_image_sizes = [debug_dict[i]['control_image_size'] for i in range(n_chara)]
-        entity_bboxes = [debug_dict[i]['entity_bbox'] for i in range(n_chara)]
-        face_bboxes = [debug_dict[i]['face_bbox'] for i in range(n_chara)]
+        control_images = [debug_dict[k]['control_image'] for k in list(debug_dict.keys())[:n_chara]]
+        control_image_sizes = [debug_dict[k]['control_image_size'] for k in list(debug_dict.keys())[:n_chara]]
+        entity_bboxes = [debug_dict[k]['entity_bbox'] for k in list(debug_dict.keys())[:n_chara]]
+        face_bboxes = [debug_dict[k]['face_bbox'] for k in list(debug_dict.keys())[:n_chara]]
         entitymask_nps = [get_mask_from_bboxes([entity_bbox], width, height) for entity_bbox in entity_bboxes]
         entity_masks = torch.cat([preproc_mask(e_mask, width, height, invert=False)[0] for e_mask in entitymask_nps], 2)
 
