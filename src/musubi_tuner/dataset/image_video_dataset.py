@@ -7,7 +7,7 @@ import os
 import random
 import time
 from typing import Any, Optional, Sequence, Tuple, Union
-
+from tqdm.auto import tqdm
 import numpy as np
 import torch
 from safetensors.torch import save_file, load_file
@@ -638,13 +638,25 @@ class BucketBatchManager:
                 if is_varlen_key:
                     varlen_keys.add(content_key)
 
-        for key in batch_tensor_data.keys():
+        for i, key in enumerate(list(batch_tensor_data.keys())):
             if key not in varlen_keys:
-                batch_tensor_data[key] = torch.stack(batch_tensor_data[key])
+                try:
+                    batch_tensor_data[key] = torch.stack(batch_tensor_data[key])
+                except RuntimeError as e:
+                    print(f"{e}")
+                    logging.info(item_info)
+                    logging.info([x.latent_cache_path for x in bucket[start:end]])
             if key.startswith("latents_clean"):
                 batch_tensor_data[key] = batch_tensor_data[key][:,:,:self.control_count_per_image,:,:]
             if key.startswith("target_latent_masks"):
-                batch_tensor_data[key] = batch_tensor_data[key][:,:,:self.control_count_per_image,:,:]
+                try:
+                    batch_tensor_data[key] = batch_tensor_data[key][:,:,:self.control_count_per_image,:,:]
+                except Exception as e:
+                    print(e)
+                    print(start, end, i)
+                    print(bucket[start+i])
+                    print(batch_tensor_data)
+                    print(batch_tensor_data[key])
             if key.startswith("clean_latent_bboxes"):
                 batch_tensor_data[key] = batch_tensor_data[key][:,:self.control_count_per_image,:]
                 
@@ -1612,7 +1624,7 @@ class ImageDataset(BaseDataset):
 
         # assign cache files to item info
         bucketed_item_info: dict[tuple[int, int], list[ItemInfo]] = {}  # (width, height) -> [ItemInfo]
-        for cache_file in latent_cache_files:
+        for cache_file in tqdm(latent_cache_files, miniters=int(len(latent_cache_files) * 0.1), unit="item"):
             tokens = os.path.basename(cache_file).split("_")
 
             image_size = tokens[-2]  # 0000x0000

@@ -13,6 +13,7 @@ import torch
 import einops
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision.transforms.functional as TF
 import numpy as np
 import logging
 
@@ -947,7 +948,7 @@ class HunyuanAttnProcessorFlashAttnDouble:
                 if block_id not in connected_attn_map:
                     connected_attn_map[block_id] = {}
                 # Keep the connected (autograd) tensor on the original device for training use
-                connected_attn_map[block_id][timestep] = attn_for_use
+                connected_attn_map[block_id] = attn_for_use
 
         else:
             if split_attn or attn_mode in ["sageattn", "flash"]:
@@ -1035,7 +1036,7 @@ class HunyuanAttnProcessorFlashAttnSingle:
             if connected_attn_map is not None:
                 if block_id not in connected_attn_map:
                     connected_attn_map[block_id] = {}
-                connected_attn_map[block_id][timestep] = attn_for_use
+                connected_attn_map[block_id] = attn_for_use
 
         else:
             hidden_states = attn_varlen_func(
@@ -2209,7 +2210,7 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
                 encoder_hidden_states, encoder_attention_mask, hidden_order_dict, image_embeddings
             )
 
-        encoder_hidden_states, encoder_attention_mask, seqlen_attention_mask, hidden_order_dict =  self.process_text_embeddings(
+        encoder_hidden_states, encoder_attention_mask, seqlen_attention_mask, hidden_order_dict = self.process_text_embeddings(
             encoder_hidden_states, encoder_attention_mask, hidden_order_dict, 
             entity_inds=entity_inds
         )
@@ -2286,7 +2287,7 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
                     cache_results=cache_results_layer,
                     block_id=block_str,
                     timestep=int(timestep[0].item()),
-                    connected_attn_map=connected_attn_map if return_connected_attn else None,
+                    connected_attn_map=connected_attn_map if (return_connected_attn and cache_results_layer) else None,
                 )
 
                 if self.blocks_to_swap:
@@ -2302,7 +2303,7 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
                     cache_results=cache_results_layer,
                     block_id=block_str,
                     timestep=int(timestep[0].item()),
-                    connected_attn_map=connected_attn_map if return_connected_attn else None,
+                    connected_attn_map=connected_attn_map if (return_connected_attn and cache_results_layer) else None,
                 )
 
                 if self.blocks_to_swap:
@@ -2333,15 +2334,28 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
             pw=p,
         )
 
+        if return_connected_attn:
+            clean_latent_inds = hidden_order_dict['clean_latents']
+            noise_inds = hidden_order_dict['noise']
+            block_id = cache_layers[0]
+            attention_probs = connected_attn_map[block_id][:, noise_inds[0][0]:noise_inds[-1][1], :]
+
+            attention_map = einops.rearrange(attention_probs, 'B (H W) D -> B H W D', H=post_patch_height, W=post_patch_width).permute(0,3,1,2)
+            attention_map = attention_map[:,clean_latent_inds[0][0]:clean_latent_inds[-1][1],:,:].mean(axis=1).unsqueeze(1)
+            attention_map = TF.resize(attention_map, size=(height, width))
+            mn, mx = attention_map.amin(), attention_map.amax()
+            denom = (mx - mn).clamp(min=1e-8)
+            attention_map = ((attention_map - mn) / denom).clamp(0.0, 1.0)
+
         if return_dict:
             # return Transformer2DModelOutput(sample=hidden_states)
             ns = SimpleNamespace(sample=hidden_states)
             if return_connected_attn:
-                ns.connected_attn_map = connected_attn_map
+                ns.attention_map = attention_map
             return ns
 
         if return_connected_attn:
-            return (hidden_states, connected_attn_map)
+            return (hidden_states, attention_map)
 
         return (hidden_states,)
 

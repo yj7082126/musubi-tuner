@@ -9,3 +9,5 @@ main.obj
 outputs/
 src/musubi_tuner/ckpts
 src/practice/tmp
+mem_watchdog.py
+memory_log.csv

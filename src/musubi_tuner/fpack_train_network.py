@@ -648,7 +648,7 @@ class FramePackNetworkTrainer(NetworkTrainer):
                 ## custom_control_kwargs
                 entity_masks=entity_masks,
                 use_attention_masking=use_attention_masking,
-                return_dict=False,
+                return_dict=True,
                 ## cache kwargs
                 cache_results=True,
                 cache_layers=[block_id],
@@ -657,40 +657,44 @@ class FramePackNetworkTrainer(NetworkTrainer):
             )
             # model returns SimpleNamespace(sample=..., connected_attn_map=...)
             model_pred = model_out.sample if hasattr(model_out, 'sample') else model_out[0]
-            connected_attn_map = getattr(model_out, 'connected_attn_map', None)
+            # connected_attn_map = getattr(model_out, 'connected_attn_map', None)
+            attention_map = getattr(model_out, 'attention_map', None)
             
-            ####
-            # Build connected attention_map from the connected_attn_map if available (preferred),
-            # otherwise fall back to reading the detached cache for visualization-only.
-            token_H, token_W = noisy_model_input.shape[-2] // 2, noisy_model_input.shape[-1] // 2
-            clean_latent_inds = attn_cache['attn_dict']['clean_latents']
-            noise_inds = attn_cache['attn_dict']['noise']
+            # ####
+            # # Build connected attention_map from the connected_attn_map if available (preferred),
+            # # otherwise fall back to reading the detached cache for visualization-only.
+            # token_H, token_W = noisy_model_input.shape[-2] // 2, noisy_model_input.shape[-1] // 2
+            # # clean_latent_inds = attn_cache['attn_dict']['clean_latents']
+            # # noise_inds = attn_cache['attn_dict']['noise']
+            # clean_latent_inds = getattr(model_out, 'clean_latent_inds', [(0,0)])
+            # noise_inds = getattr(model_out, 'noise_inds', [(0,0)])
 
-            if connected_attn_map is not None and block_id in connected_attn_map:
-                timesteps = sorted(list(connected_attn_map[block_id].keys()), reverse=False)
-                # connected_attn_map stores tensors of shape [B, (H*W + ...), D]
-                attention_probs = connected_attn_map[block_id][timesteps[0]][:, noise_inds[0][0]:noise_inds[0][1], :]
-            else:
-                timesteps = sorted(list(attn_cache[block_id].keys()), reverse=False)
-                attention_probs = attn_cache[block_id][timesteps[0]][:, noise_inds[0][0]:noise_inds[0][1], :]
-            try:
-                attention_map = rearrange(attention_probs, 'B (H W) D -> B H W D', H=token_H, W=token_W).permute(0,3,1,2)
-                attention_map = attention_map[:,clean_latent_inds[0][0]:clean_latent_inds[-1][1],:,:].mean(axis=1).unsqueeze(1)
-                attention_map = TF.resize(attention_map, size=(noisy_model_input.shape[-2], noisy_model_input.shape[-1]))
-                mn, mx = attention_map.amin(), attention_map.amax()
-                denom = (mx - mn).clamp(min=1e-8)
-                attention_map = ((attention_map - mn) / denom).clamp(0.0, 1.0)
-            except Exception as e:
-                logging.error("Failed to process attention map from cache.")
-                logging.error(f"Error: {e}")
-                logging.error(clean_latent_inds, noise_inds)
-                attention_map = torch.zeros((batch_size, 1, noisy_model_input.shape[-2], noisy_model_input.shape[-1]))
-            # Move attention_map to the same device as the model input so losses run on the same device
-            try:
-                attention_map = attention_map.to(device=noisy_model_input.device)
-            except Exception:
-                # Fallback: if noisy_model_input not available or move fails, leave as-is
-                pass
+            # print(connected_attn_map)
+            # if connected_attn_map is not None and block_id in connected_attn_map:
+            #     # timesteps = sorted(list(connected_attn_map[block_id].keys()), reverse=False)
+            #     attention_probs = connected_attn_map[block_id][:, noise_inds[0][0]:noise_inds[0][1], :]
+            # else:
+            #     # timesteps = sorted(list(attn_cache[block_id].keys()), reverse=False)
+            #     attention_probs = attn_cache[block_id][:, noise_inds[0][0]:noise_inds[0][1], :]
+
+            # try:
+            #     attention_map = rearrange(attention_probs, 'B (H W) D -> B H W D', H=post_patch_height, W=post_patch_width).permute(0,3,1,2)
+            #     attention_map = attention_map[:,clean_latent_inds[0][0]:clean_latent_inds[-1][1],:,:].mean(axis=1).unsqueeze(1)
+            #     attention_map = TF.resize(attention_map, size=(noisy_model_input.shape[-2], noisy_model_input.shape[-1]))
+            #     mn, mx = attention_map.amin(), attention_map.amax()
+            #     denom = (mx - mn).clamp(min=1e-8)
+            #     attention_map = ((attention_map - mn) / denom).clamp(0.0, 1.0)
+            # except Exception as e:
+            #     logging.error("Failed to process attention map from cache.")
+            #     logging.error(f"Error: {e}")
+            #     logging.error(clean_latent_inds, noise_inds)
+            #     attention_map = torch.zeros((batch_size, 1, noisy_model_input.shape[-2], noisy_model_input.shape[-1]))
+            # # Move attention_map to the same device as the model input so losses run on the same device
+            # try:
+            #     attention_map = attention_map.to(device=noisy_model_input.device)
+            # except Exception:
+            #     # Fallback: if noisy_model_input not available or move fails, leave as-is
+            #     pass
             attn_cache.clear()
             ####
 
