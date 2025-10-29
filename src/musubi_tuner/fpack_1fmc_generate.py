@@ -61,7 +61,7 @@ class FramePack_1fmc():
         crop_face_detect=False, use_face_detect=False, use_rembg=True, 
         cache_results=False, cache_layers=[], 
         use_attention_masking=['no_cross_control_latents', 'mask_control'], 
-        debug_name='test1'):
+        debug_name='test1', max_chara_imgs=2, max_chara=2):
         
         text_kwargs = get_text_preproc(prompt, 
             self.text_encoder1, self.text_encoder2, self.tokenizer1, self.tokenizer2, 
@@ -72,6 +72,7 @@ class FramePack_1fmc():
             crop_face_detect=crop_face_detect, use_face_detect=use_face_detect, use_rembg=use_rembg,
             c_width_given=c_width_given, bbox_mode=bbox_mode,
             control_indices=control_indices, latent_indices=latent_indices,
+            max_chara_imgs=max_chara_imgs, max_chara=max_chara,
         )
 
         generator = torch.Generator(device="cpu")
@@ -93,7 +94,10 @@ class FramePack_1fmc():
 
             meta_str = printable_metadata(total_kwargs, text_kwargs, control_kwargs, self.lora_path, maxlen=80, seed=seed)
             meta_str = meta_str + "\n" + f"batch_num: {i}" + "\n\n" + print_res
-            attn_mask = get_pltplot_as_pil(attn_cache['attn_mask'][0], vmin=-9999., vmax=0., cmap=plt.cm.viridis)
+            try:
+                attn_mask = get_pltplot_as_pil(attn_cache['attn_mask'][0], vmin=-9999., vmax=0., cmap=plt.cm.viridis)
+            except Exception as e:
+                attn_mask = get_pltplot_as_pil(torch.zeros((256,256)), vmin=-9999., vmax=0., cmap=plt.cm.viridis)
             debug_img = return_total_visualization(debug_name, meta_str, np.asarray(result_img), 
                                                     attn_mask, np.asarray(control_nps), np.asarray(debug_mask), 
                                                     np.zeros((height, width, 3), dtype=np.uint8))
