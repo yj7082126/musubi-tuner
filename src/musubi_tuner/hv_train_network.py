@@ -1955,6 +1955,7 @@ class NetworkTrainer:
                         loss = base_loss + add_loss * 0.1
                     else:
                         loss = base_loss
+                    # loss = base_loss
                     # logging.info(f"step {step}, base_loss: {base_loss.item():.6f}, add_loss: {add_loss.item():.6f}")
                     # Optionally log gradient norms to verify auxiliary losses produce grads
                     if getattr(args, "log_gradients", False):

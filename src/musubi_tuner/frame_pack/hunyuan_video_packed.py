@@ -1912,13 +1912,13 @@ class HunyuanVideoTransformer3DModelPacked(nn.Module):  # (PreTrainedModelMixin,
             device=encoder_attention_mask.device,
         )
         attention_mask = torch.cat([hidden_attention_mask, encoder_attention_mask], dim=1)
+        total_seq_len = attention_mask.shape[1]
+        attention_mask = attention_mask.unsqueeze(1)
+        attention_mask = attention_mask.repeat_interleave(
+            total_seq_len, dim=1, 
+            output_size=attention_mask.shape[1] * total_seq_len)
+            
         if len(use_attention_masking) > 0:
-            total_seq_len = attention_mask.shape[1]
-            attention_mask = attention_mask.unsqueeze(1)
-            attention_mask = attention_mask.repeat_interleave(
-                total_seq_len, dim=1, 
-                output_size=attention_mask.shape[1] * total_seq_len)
-
             # Masking Logic
             ## No Cross between clean_latents
             if "no_cross_control_latents" in use_attention_masking:
