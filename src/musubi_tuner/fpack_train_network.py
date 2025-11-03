@@ -625,6 +625,7 @@ class FramePackNetworkTrainer(NetworkTrainer):
             image_embeddings = batch["image_embeddings"] if "image_embeddings" in batch else None
             entity_masks = batch['target_latent_masks'] if 'target_latent_masks' in batch and args.use_attention_controlimage_masking else None
             use_attention_masking = ["mask_control"] if entity_masks is not None else []
+            # use_attention_masking = []
             clean_latent_bboxes = batch['clean_latent_bboxes'] if 'clean_latent_bboxes' in batch else clean_latent_bboxes
 
             model_out = model(
