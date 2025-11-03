@@ -42,9 +42,11 @@ def convert_result_to_df_wpose(answer, page_width, page_height):
     pseudo_body_sub = []
 
     for k, v in answer.items():
-        pseudo_frame_sub.append([k] + ['frame'] + v['bbox'])
+        bbox = list(map(lambda x: int(x * 1000), v['bbox'])) if v['bbox'][0] < 1 else v['bbox']
+        pseudo_frame_sub.append([k] + ['frame'] + bbox)
         for r in v['body']:
-            pseudo_body_sub.append([k] + ['body'] + r[:4])
+            body = list(map(lambda x: int(x * 1000), r[:4])) if r[0] < 1 else r[:4]
+            pseudo_body_sub.append([k] + ['body'] + body)
 
     pseudo_frame_sub = pd.DataFrame(pseudo_frame_sub, columns=['frame_id', 'type', 'rel_xmin', 'rel_ymin', 'rel_xmax', 'rel_ymax'])
     pseudo_frame_sub['order'] = pseudo_frame_sub['frame_id'].apply(lambda x: x.split('-')[1].replace("]", ""))

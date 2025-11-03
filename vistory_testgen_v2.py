@@ -22,17 +22,17 @@ vistory_dataset = StoryDataset(vistory_dataset_path)
 
 #%%
 framepack_model = FramePack_1fmc(
-    lora_path = "/home/yo564250/workspace/whisperer/related/framepackbase/musubi-tuner/outputs/training/idmask_control_lora_wrope_v3/idmask_control_lora_wrope_v3_1-step00003000.safetensors"
+    lora_path = "/home/yo564250/workspace/whisperer/related/framepackbase/musubi-tuner/outputs/training/idmask_control_lora_wrope_v3/idmask_control_lora_wrope_v3-3-t01-step00006000.safetensors"
 )
 #%%
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-# timestamp = '20251016_150910'
-width, height = 1344, 768
+# timestamp = '20251102_085335'
+width, height = 1280, 720
 
 main_layout_path = Path("/groups/chenchen/patrick/ViStoryBench/gen_layouts_bulk/20250927_101053")
-out_dir = Path("/lustre/fs1/groups/chenchen/patrick/ViStoryBench/outputs/whisperer") / f"v3_1_3000_noattnmask_layout/en/{timestamp}"
+out_dir = Path("/lustre/fs1/groups/chenchen/patrick/ViStoryBench/outputs/whisperer") / f"v3_3_step6000_t01/en/{timestamp}"
 out_dir.mkdir(parents=True, exist_ok=True)
-seed = 2048
+seed = 42
 
 for story_num in tqdm(vistory_dataset.get_story_name_list()):
     (out_dir / story_num).mkdir(parents=True, exist_ok=True)
@@ -46,7 +46,7 @@ for story_num in tqdm(vistory_dataset.get_story_name_list()):
     for shot_num, story_shot in story_dict.items():
         shot_num = int(shot_num)
         story_shot, characters_shot, prompt = get_info_from_vistorybench(vistory_dataset, story_num, shot_num)
-        prompt = story_shot['type'] + ";" + prompt
+        prompt = ";".join(prompt.split(";")[:5])
         print(f"\n=== Story {story_num} - Shot {shot_num} ===")
         print(f"Prompt: {prompt}")
 

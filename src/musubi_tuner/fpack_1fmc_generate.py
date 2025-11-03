@@ -61,7 +61,8 @@ class FramePack_1fmc():
         crop_face_detect=False, use_face_detect=False, use_rembg=True, 
         cache_results=False, cache_layers=[], 
         use_attention_masking=['no_cross_control_latents', 'mask_control'], 
-        debug_name='test1', max_chara_imgs=2, max_chara=2):
+        noropenomask=False,
+        debug_name='test1', max_chara_imgs=2, max_chara=5):
         
         text_kwargs = get_text_preproc(prompt, 
             self.text_encoder1, self.text_encoder2, self.tokenizer1, self.tokenizer2, 
@@ -74,7 +75,12 @@ class FramePack_1fmc():
             control_indices=control_indices, latent_indices=latent_indices,
             max_chara_imgs=max_chara_imgs, max_chara=max_chara,
         )
-
+        if noropenomask:
+            if type(control_kwargs['clean_latent_bboxes']) != list:
+                control_kwargs['clean_latent_bboxes'] = torch.tensor([[[0.,0.,1.,1.]]]).repeat(1, control_kwargs['clean_latent_bboxes'].shape[1], 1)
+            entity_masks = None
+            use_attention_masking = []
+            
         generator = torch.Generator(device="cpu")
         generator.manual_seed(seed)
         total_kwargs = {
