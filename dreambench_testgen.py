@@ -21,7 +21,7 @@ dreambench_plus = DreamBenchPlus(dir="/groups/chenchen/patrick/dreambench_plus/d
 
 #%%
 framepack_model = FramePack_1fmc(
-    lora_path = "/home/yo564250/workspace/whisperer/related/framepackbase/musubi-tuner/outputs/training/idmask_control_lora_wrope_v3/idmask_control_lora_wrope_v3-3-step00006000.safetensors"
+    lora_path = "/home/yo564250/workspace/whisperer/related/framepackbase/musubi-tuner/outputs/training/idmask_control_lora_wrope_v3/idmask_control_lora_wrope_v3_multi-1-step00003000.safetensors"
 )
 #%%
 width, height = 1024, 1024
@@ -40,14 +40,17 @@ for sample in tqdm(dreambench_plus):
     (save_dir / f"{method_name}/text/{sample.collection_id}").mkdir(parents=True, exist_ok=True)
 
     for caption_ind, prompt in enumerate(sample.captions):
-        if sample.category == 'human':
-            panel_layout = {0: {'bbox': [0.25, 0.25, 0.6, 0.9], 'body': []}}
-            c_width = 320
-            crop_face_detect = True
-        else:
-            panel_layout = {0: {'bbox': [0.25, 0.25, 0.75, 0.75], 'body': []}}
-            c_width = 512
-            crop_face_detect = False
+        # if sample.category == 'human':
+        #     panel_layout = {0: {'bbox': [0.25, 0.25, 0.6, 0.9], 'body': []}}
+        #     c_width = 320
+        #     crop_face_detect = True
+        # else:
+        #     panel_layout = {0: {'bbox': [0.25, 0.25, 0.75, 0.75], 'body': []}}
+        #     c_width = 512
+        #     crop_face_detect = False
+        panel_layout = {0: {'bbox': [0.2, 0.2, 0.8, 0.8], 'body': []}}
+        c_width = 512
+        crop_face_detect = False
         characters_shot = {0 : {'images' : [sample.image_path]}}
 
         result_imgs, debug_imgs, debug_mask = framepack_model(

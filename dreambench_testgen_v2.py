@@ -27,20 +27,21 @@ clip_score = CLIPScore(device='cuda', use_safetensors=False)
 
 #%%
 framepack_model = FramePack_1fmc(
-    lora_path = "/home/yo564250/workspace/whisperer/related/framepackbase/musubi-tuner/outputs/training/idmask_control_lora_wrope_v3/idmask_control_lora_wrope_v3-3-step00006000.safetensors"
+    lora_path = "/home/yo564250/workspace/whisperer/related/framepackbase/musubi-tuner/outputs/training/idmask_control_lora_wrope_v3/idmask_control_lora_wrope_v3_multi-1-step00003000.safetensors"
 )
 #%%
 width, height = 1024, 1024
-save_dir = Path("/groups/chenchen/patrick/dreambench_plus/samples/whisperer_20251029_233840_seed42_copy")
+save_dir = Path("/groups/chenchen/patrick/dreambench_plus/samples/whisperer_20251104_230855_seed42")
 
-df = pd.read_csv("/groups/chenchen/patrick/dreambench_plus/dreamo_whisperer.csv")
-df2 = df.loc[(df.whisperer_clipt_score < 25) | (df.whisperer_clipi_score < 65)]
+df = pd.read_csv("/groups/chenchen/patrick/dreambench_plus/whisperer_20251104_230855_seed42.csv")
+df.columns = ['Index', 'Name', 'dino_score', 'clipi_score', 'clipt_score']
+df2 = df.loc[(df.clipt_score < 25) | (df.clipi_score < 65)]
 
 for i, row in df2.iterrows():
     idx = row['Index']
     key = row['Name']
-    prev_clip_i = row['whisperer_clipi_score']
-    prev_clip_t = row['whisperer_clipt_score']
+    prev_clip_i = row['clipi_score']
+    prev_clip_t = row['clipt_score']
 
     sample = dreambench_plus[idx // 9]
     caption_ind = idx % 9
@@ -48,13 +49,13 @@ for i, row in df2.iterrows():
     prompt = sample.captions[caption_ind]
 
     print(f"{key} : {prompt}")
-    c_width = 1024
-    panel_layout = {0: {'bbox': [0.1, 0.1, 0.9, 0.9], 'body': []}}
+    c_width = 768
+    panel_layout = {0: {'bbox': [0.2, 0.2, 0.8, 0.8], 'body': []}}
     characters_shot = {0 : {'images' : [sample.image_path]}}
 
     trial = 0
     while trial < 5:
-        seed = 2048 + trial
+        seed = np.random.randint(2**31) 
         result_imgs, debug_imgs, debug_mask = framepack_model(
             prompt, panel_layout, characters_shot, width, height,
             c_width_given=c_width, seed=seed, crop_face_detect=False, use_rembg=False,
@@ -68,7 +69,7 @@ for i, row in df2.iterrows():
         clipi_score_eval = clip_score.clipi_score(Image.open(sample.image_path), result_imgs[0])[0]
         clipt_score_eval = clip_score.clipt_score(prompt, result_imgs[0])[0]
         print(f"Trial {trial}: Seed {seed}, CLIP-I Score: {clipi_score_eval} ({prev_clip_i}), CLIP-T Score: {clipt_score_eval} ({prev_clip_t})")
-        if (clipi_score_eval - prev_clip_i) > 2 and (clipt_score_eval - prev_clip_t) > 2:
+        if (clipi_score_eval - prev_clip_i) > -1 and (clipt_score_eval - prev_clip_t) > -1 and ((clipi_score_eval - prev_clip_i) + (clipt_score_eval - prev_clip_t) ) > 8.0:
             result_imgs[0].convert("RGB").save(save_dir / f"tgt_img/{sample.collection_id}/{caption_ind}_0.jpg")
             break
         trial += 1
