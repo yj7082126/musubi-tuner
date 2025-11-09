@@ -1952,7 +1952,7 @@ class NetworkTrainer:
                         # add_loss = torch.nn.functional.mse_loss(attention_map.to(network_dtype), target_latent_mask.to(network_dtype), reduction="none")
                         add_loss = torch.relu(attention_map.to(network_dtype) - target_latent_mask.to(network_dtype))
                         add_loss = add_loss.mean()
-                        loss = base_loss + add_loss * 0.1
+                        loss = base_loss + add_loss * 0.05
                     else:
                         loss = base_loss
                     # loss = base_loss

@@ -15,22 +15,31 @@ sys.path.append("src/")
 from musubi_tuner.fpack_1fmc_generate import FramePack_1fmc
 from musubi_tuner.utils.preproc_utils import getres, get_info_from_vistorybench, parse_bodylayout
 
-sys.path.append("/lustre/fs1/home/yo564250/workspace/whisperer/datasets/storyviz/vistorybench")
+# sys.path.append("/lustre/fs1/home/yo564250/workspace/whisperer/datasets/storyviz/vistorybench")
+sys.path.append("/projects/bffz/ykwon4/vistorybench")
 from vistorybench.data_process.dataset_process.dataset_load import StoryDataset
-vistory_dataset_path = Path("/lustre/fs1/groups/chenchen/patrick/ViStoryBench/dataset/ViStory")
+# vistory_dataset_path = Path("/lustre/fs1/groups/chenchen/patrick/ViStoryBench/dataset/ViStory")
+vistory_dataset_path = Path("/projects/bffz/ykwon4/vistorybench/data/dataset/ViStory")
 vistory_dataset = StoryDataset(vistory_dataset_path)
 
 #%%
 framepack_model = FramePack_1fmc(
-    lora_path = "/home/yo564250/workspace/whisperer/related/framepackbase/musubi-tuner/outputs/training/idmask_control_lora_wrope_v3/idmask_control_lora_wrope_v3-3-t01-step00006000.safetensors"
+    # lora_path = "/home/yo564250/workspace/whisperer/related/framepackbase/musubi-tuner/outputs/training/idmask_control_lora_wrope_v3/idmask_control_lora_wrope_v3-3-t01-step00006000.safetensors"
+    dit_path = "/projects/bffz/ykwon4/ComfyUI/models/diffusion_models/FramePackI2V_HY_bf16.safetensors",
+    vae_path = "/projects/bffz/ykwon4/ComfyUI/models/vae/hunyuan-video-t2v-720p-vae.pt",
+    text_encoder1_path = "/projects/bffz/ykwon4/ComfyUI/models/text_encoders/llava_llama3_fp16.safetensors",
+    text_encoder2_path = "/projects/bffz/ykwon4/ComfyUI/models/text_encoders/clip_l.safetensors",
+    lora_path = "/work/nvme/bffz/ykwon4/musubi-training/idmask_control_lora_wrope_v3_2/test1-step00003000.safetensors"
 )
 #%%
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 # timestamp = '20251102_085335'
 width, height = 1280, 720
 
-main_layout_path = Path("/groups/chenchen/patrick/ViStoryBench/gen_layouts_bulk/20250927_101053")
-out_dir = Path("/lustre/fs1/groups/chenchen/patrick/ViStoryBench/outputs/whisperer") / f"v3_3_step6000_t01/en/{timestamp}"
+# main_layout_path = Path("/groups/chenchen/patrick/ViStoryBench/gen_layouts_bulk/20250927_101053")
+main_layout_path = Path("/projects/bffz/ykwon4/vistorybench/data/gen_layouts_bulk/20251107_132846_v2")
+# out_dir = Path("/lustre/fs1/groups/chenchen/patrick/ViStoryBench/outputs/whisperer") / f"v3_3_step6000/en/{timestamp}"
+out_dir = Path("/projects/bffz/ykwon4/vistorybench/data/outputs/whisperer") / f"v3_multi_step5000/en/{timestamp}"
 out_dir.mkdir(parents=True, exist_ok=True)
 seed = 42
 
@@ -80,7 +89,7 @@ for story_num in tqdm(vistory_dataset.get_story_name_list()):
 
         result_imgs, debug_imgs, debug_mask = framepack_model(
             prompt, panel_layout, characters_shot, width, height,
-            c_width_given=400, seed=seed, crop_face_detect=True, use_rembg=True,
+            c_width_given=320, seed=seed, crop_face_detect=True, use_rembg=True,
             use_attention_masking=['no_cross_control_latents'], 
             debug_name=f"story{story_num}_shot{shot_num}"
         )

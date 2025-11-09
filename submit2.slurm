@@ -44,7 +44,7 @@ accelerate launch --num_cpu_threads_per_process 1 --mixed_precision bf16 fpack_t
     --sample_prompts /projects/bffz/ykwon4/test_sample_prompts.txt \
     --sample_every_n_steps 250 --sample_at_first \
     --output_dir /work/nvme/bffz/ykwon4/musubi-training/idmask_control_lora_wrope_v3 \
-    --output_name idmask_control_lora_wrope_v3-5 \
+    --output_name idmask_control_lora_wrope_v3-3-t05 \
     --logging_dir /work/nvme/bffz/ykwon4/musubi-training/idmask_control_lora_wrope_v3/logs \
     --log_with tensorboard \
     --remove_embedding --use_attention_controlimage_masking --sample_with_latentbbox_rope
