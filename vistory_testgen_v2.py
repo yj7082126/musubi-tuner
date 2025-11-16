@@ -24,7 +24,7 @@ vistory_dataset = StoryDataset(vistory_dataset_path)
 
 #%%
 framepack_model = FramePack_1fmc(
-    lora_path = "outputs/training/idmask_control_lora_wrope_v3/idmask_control_lora_wrope_v3-4-step00006000.safetensors"
+    lora_path = "outputs/training/idmask_control_lora_wrope_v3/idmask_control_lora_wrope_v3-6-step00006000.safetensors"
     # dit_path = "/projects/bffz/ykwon4/ComfyUI/models/diffusion_models/FramePackI2V_HY_bf16.safetensors",
     # vae_path = "/projects/bffz/ykwon4/ComfyUI/models/vae/hunyuan-video-t2v-720p-vae.pt",
     # text_encoder1_path = "/projects/bffz/ykwon4/ComfyUI/models/text_encoders/llava_llama3_fp16.safetensors",
@@ -38,7 +38,7 @@ width, height = 1280, 720
 
 main_layout_path = Path("/groups/chenchen/patrick/ViStoryBench/gen_layouts_bulk/20250927_101053")
 # main_layout_path = Path("/projects/bffz/ykwon4/vistorybench/data/gen_layouts_bulk/20251107_132846_v2")
-out_dir = Path("/groups/chenchen/patrick/ViStoryBench/outputs/whisperer") / f"v3_4_step6000/en/{timestamp}"
+out_dir = Path("/groups/chenchen/patrick/ViStoryBench/outputs/whisperer") / f"v3_6_step6000/en/{timestamp}"
 # out_dir = Path("/projects/bffz/ykwon4/vistorybench/data/outputs/whisperer") / f"v3_multi_step5000/en/{timestamp}"
 out_dir.mkdir(parents=True, exist_ok=True)
 seed = 42
