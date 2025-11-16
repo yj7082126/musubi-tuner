@@ -1952,7 +1952,7 @@ class NetworkTrainer:
                         # add_loss = torch.nn.functional.mse_loss(attention_map.to(network_dtype), target_latent_mask.to(network_dtype), reduction="none")
                         add_loss = torch.relu(attention_map.to(network_dtype) - target_latent_mask.to(network_dtype))
                         add_loss = add_loss.mean()
-                        loss = base_loss + add_loss * 0.05
+                        loss = base_loss + add_loss * args.lambda_mask
                     else:
                         loss = base_loss
                     # loss = base_loss
@@ -2697,6 +2697,7 @@ def setup_parser_common() -> argparse.ArgumentParser:
     parser.add_argument("--dit", type=str, help="DiT checkpoint path / DiTのチェックポイントのパス")
     parser.add_argument("--vae", type=str, help="VAE checkpoint path / VAEのチェックポイントのパス")
     parser.add_argument("--vae_dtype", type=str, default=None, help="data type for VAE, default is float16")
+    parser.add_argument("--lambda_mask", type=float, default=0.05, help="The lambda_mask value for our custom loss")
 
     return parser
 
@@ -2754,6 +2755,7 @@ def hv_setup_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     parser.add_argument(
         "--vae_spatial_tile_sample_min_size", type=int, default=None, help="spatial tile sample min size for VAE, default 256"
     )
+
     return parser
 
 
